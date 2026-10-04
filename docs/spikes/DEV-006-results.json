@@ -1,0 +1,869 @@
+{
+  "schema": 1,
+  "ticket": "DEV-006",
+  "observed_at": "2026-10-04T16:56:19.860704+00:00",
+  "runtime": {
+    "name": "Hermes",
+    "version": "0.21.5",
+    "commit": "f97608f178d1ffeca59860195ab7da295f7c8e5f",
+    "python": "3.13.16",
+    "transport": "embedded AIAgent subprocess with supervisor relay"
+  },
+  "feature": {
+    "project": "coffee-feature",
+    "run_id": "run-124095a576ec",
+    "base_sha": "e79ba51a0a3941d7fc94b15edad07de2761e72f9",
+    "candidate_sha": "d016e5a4de82144eec0a007e8160ac282f0935a3",
+    "runtime_status": "finished",
+    "runtime_handoff": {
+      "generation": 9,
+      "model": "qwen/qwen3.8-27b:free",
+      "reservation": "b9133407fcd24210ad3f01fe823826c1"
+    },
+    "candidate_provenance": "supervisor-checkpoint-recovery; reconciled and finalized by Hermes generation 9",
+    "generation": 9,
+    "active_s": 322.38716173171997,
+    "model_calls": 37,
+    "tool_calls": 66,
+    "finite_limits": {
+      "model_calls": 48,
+      "tool_calls": 120,
+      "active_s": 900,
+      "output_tokens": 4096
+    },
+    "event_count": 753,
+    "input": [
+      {
+        "id": "ba20a73aac60468080648e71f44188c9",
+        "generation": 3,
+        "question": "What should happen when the \"Remove <id>\" button reduces a cart row's quantity to zero? Options: (a) remove the row from the cart entirely (row no longer rendered), or (b) keep the row displayed at quantity 0.",
+        "answer_id": "operator-zero-1",
+        "answer": "remove-row-at-zero",
+        "resumed_generation": 4
+      }
+    ],
+    "diff_sha256": "6afa8c9c32a3c6395d516730b93f15ec91a26e4f3306bc6e060543b56abf710d",
+    "candidate_record_count": 1
+  },
+  "models": {
+    "qwen/qwen3.8-27b:free": {
+      "requests": 20,
+      "reported_requests": 16,
+      "unknown_requests": 4,
+      "prompt_tokens": 63728,
+      "completion_tokens": 3607,
+      "cached_tokens": 37376,
+      "reported_cost_usd": 0,
+      "http_statuses": {
+        "200": 16,
+        "429": 4
+      }
+    },
+    "cohere/north-mini-code:free": {
+      "requests": 17,
+      "reported_requests": 17,
+      "unknown_requests": 0,
+      "prompt_tokens": 39004,
+      "completion_tokens": 2671,
+      "cached_tokens": 0,
+      "reported_cost_usd": 0,
+      "http_statuses": {
+        "200": 17
+      }
+    }
+  },
+  "verification": {
+    "baseline": {
+      "target_id": "7e40241b9d4794298bfd718b88693604badbcefbee5795b4225697ddac0f6815",
+      "candidate_sha": "e79ba51a0a3941d7fc94b15edad07de2761e72f9",
+      "base_sha": "e79ba51a0a3941d7fc94b15edad07de2761e72f9",
+      "build_id": "build-e08379208ab1",
+      "build_digest": "568e5bc051b6b17a1dcd5cf1b920011017f6f75383bdf559ec97cf4a9f95689b",
+      "effective_config_digest": "d1a7f4951ad54fe6fe89acf73ace8073850aa2a1664dfab47d394a2c4d538185",
+      "fixture": {
+        "id": "coffee-menu-v1"
+      },
+      "migrations": {
+        "id": "none"
+      },
+      "evidence_id": "e2e-71d930789cd24f7292a511ffa239e16d",
+      "suite_digest": "8eaa839ea7e63c8fe94d8ce4d75edbf16b4861211e177e4b2ca67c823e627831",
+      "runner_image": "sha256:2552c1438bea9263fd98df053341071d09d98e6230ab0e7217119260d8b59212",
+      "status": "failed",
+      "counts": {
+        "discovered": 4,
+        "executed": 4,
+        "passed": 0,
+        "failed": 4,
+        "skipped": 0
+      },
+      "tests": [
+        {
+          "id": "menu-cappuccino",
+          "status": "failed",
+          "uac": [
+            "menu"
+          ]
+        },
+        {
+          "id": "cart-add-quantity",
+          "status": "failed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        },
+        {
+          "id": "cart-mixed-total",
+          "status": "failed",
+          "uac": [
+            "total"
+          ]
+        },
+        {
+          "id": "cart-remove",
+          "status": "failed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        }
+      ],
+      "artifact_path": "/root/aiagent-dev006/experiment/workspaces/coffee-feature/runs/run-d642a0229939/builds/build-e08379208ab1/artifact"
+    },
+    "changed_base": {
+      "target_id": "0c8163bd4bee1f98242fcff8218291837425b2ae408e6ec3aea78b115e73b18d",
+      "candidate_sha": "d2d5e9c51fa2c8cc6d5e555cb95cad5abfb501f3",
+      "base_sha": "d8b3ecafc84da79fcf953fed5350bbbfb8903945",
+      "build_id": "build-4fa155e0ec48",
+      "build_digest": "42627bcf78ee0ad3f433e2c05d31dce8b12b497d372bfc8ad8f3f07b345e94e0",
+      "effective_config_digest": "d1a7f4951ad54fe6fe89acf73ace8073850aa2a1664dfab47d394a2c4d538185",
+      "fixture": {
+        "id": "coffee-menu-v1"
+      },
+      "migrations": {
+        "id": "none"
+      },
+      "evidence_id": "e2e-b2682b3f3d7c4ec79ad8e3ad72096f52",
+      "suite_digest": "8eaa839ea7e63c8fe94d8ce4d75edbf16b4861211e177e4b2ca67c823e627831",
+      "runner_image": "sha256:2552c1438bea9263fd98df053341071d09d98e6230ab0e7217119260d8b59212",
+      "status": "passed",
+      "counts": {
+        "discovered": 4,
+        "executed": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "tests": [
+        {
+          "id": "menu-cappuccino",
+          "status": "passed",
+          "uac": [
+            "menu"
+          ]
+        },
+        {
+          "id": "cart-add-quantity",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        },
+        {
+          "id": "cart-mixed-total",
+          "status": "passed",
+          "uac": [
+            "total"
+          ]
+        },
+        {
+          "id": "cart-remove",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        }
+      ],
+      "artifact_path": "/root/aiagent-dev006/experiment/workspaces/identity-d073bb91/runs/run-4c870ef48a78/builds/build-4fa155e0ec48/artifact"
+    },
+    "changed_config": {
+      "target_id": "2fa371f9735b6d6f2462d5b52442fe1c9bf286a63206832d89f86e1df9f48ec5",
+      "candidate_sha": "5ff9c8c6c21db20ebd5f58ea765b5cbd9480c873",
+      "base_sha": "e79ba51a0a3941d7fc94b15edad07de2761e72f9",
+      "build_id": "build-cd0d93fc1a06",
+      "build_digest": "42627bcf78ee0ad3f433e2c05d31dce8b12b497d372bfc8ad8f3f07b345e94e0",
+      "effective_config_digest": "1bc982366d0d2c9abae7490e548d52b69b17328334f1b6d17c61cac2f64d1712",
+      "fixture": {
+        "id": "coffee-menu-v1"
+      },
+      "migrations": {
+        "id": "none"
+      },
+      "evidence_id": "e2e-c6877406f3dd47a0b1389decca45ae6f",
+      "suite_digest": "8eaa839ea7e63c8fe94d8ce4d75edbf16b4861211e177e4b2ca67c823e627831",
+      "runner_image": "sha256:2552c1438bea9263fd98df053341071d09d98e6230ab0e7217119260d8b59212",
+      "status": "passed",
+      "counts": {
+        "discovered": 4,
+        "executed": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "tests": [
+        {
+          "id": "menu-cappuccino",
+          "status": "passed",
+          "uac": [
+            "menu"
+          ]
+        },
+        {
+          "id": "cart-add-quantity",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        },
+        {
+          "id": "cart-mixed-total",
+          "status": "passed",
+          "uac": [
+            "total"
+          ]
+        },
+        {
+          "id": "cart-remove",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        }
+      ],
+      "artifact_path": "/root/aiagent-dev006/experiment/workspaces/coffee-feature/runs/run-e4f1150ba4ca/builds/build-cd0d93fc1a06/artifact"
+    },
+    "feature": {
+      "target_id": "8ae0c116210ef5ad081705b1f37f15f5cfd20621330c02e7c7f56250037e37cb",
+      "candidate_sha": "d016e5a4de82144eec0a007e8160ac282f0935a3",
+      "base_sha": "e79ba51a0a3941d7fc94b15edad07de2761e72f9",
+      "build_id": "build-8592e98d7308",
+      "build_digest": "42627bcf78ee0ad3f433e2c05d31dce8b12b497d372bfc8ad8f3f07b345e94e0",
+      "effective_config_digest": "d1a7f4951ad54fe6fe89acf73ace8073850aa2a1664dfab47d394a2c4d538185",
+      "fixture": {
+        "id": "coffee-menu-v1"
+      },
+      "migrations": {
+        "id": "none"
+      },
+      "evidence_id": "e2e-84521d4b7b3f42a9946d96c18c40d564",
+      "suite_digest": "8eaa839ea7e63c8fe94d8ce4d75edbf16b4861211e177e4b2ca67c823e627831",
+      "runner_image": "sha256:2552c1438bea9263fd98df053341071d09d98e6230ab0e7217119260d8b59212",
+      "status": "passed",
+      "counts": {
+        "discovered": 4,
+        "executed": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "tests": [
+        {
+          "id": "menu-cappuccino",
+          "status": "passed",
+          "uac": [
+            "menu"
+          ]
+        },
+        {
+          "id": "cart-add-quantity",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        },
+        {
+          "id": "cart-mixed-total",
+          "status": "passed",
+          "uac": [
+            "total"
+          ]
+        },
+        {
+          "id": "cart-remove",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        }
+      ],
+      "artifact_path": "/root/aiagent-dev006/experiment/workspaces/coffee-feature/runs/run-124095a576ec/builds/build-8592e98d7308/artifact"
+    },
+    "same_sha_rebuild": {
+      "target_id": "f13bfda5e84cb850f7a9400962bc814aa2e0bf466da742deec2d29c41a21cb59",
+      "candidate_sha": "d016e5a4de82144eec0a007e8160ac282f0935a3",
+      "base_sha": "e79ba51a0a3941d7fc94b15edad07de2761e72f9",
+      "build_id": "build-1b413c13c9c8",
+      "build_digest": "42627bcf78ee0ad3f433e2c05d31dce8b12b497d372bfc8ad8f3f07b345e94e0",
+      "effective_config_digest": "d1a7f4951ad54fe6fe89acf73ace8073850aa2a1664dfab47d394a2c4d538185",
+      "fixture": {
+        "id": "coffee-menu-v1"
+      },
+      "migrations": {
+        "id": "none"
+      },
+      "evidence_id": "e2e-ba5cc63d3d5d40c2b0a4c48649aba3ca",
+      "suite_digest": "8eaa839ea7e63c8fe94d8ce4d75edbf16b4861211e177e4b2ca67c823e627831",
+      "runner_image": "sha256:2552c1438bea9263fd98df053341071d09d98e6230ab0e7217119260d8b59212",
+      "status": "passed",
+      "counts": {
+        "discovered": 4,
+        "executed": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "tests": [
+        {
+          "id": "menu-cappuccino",
+          "status": "passed",
+          "uac": [
+            "menu"
+          ]
+        },
+        {
+          "id": "cart-add-quantity",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        },
+        {
+          "id": "cart-mixed-total",
+          "status": "passed",
+          "uac": [
+            "total"
+          ]
+        },
+        {
+          "id": "cart-remove",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        }
+      ],
+      "artifact_path": "/root/aiagent-dev006/experiment/workspaces/coffee-feature/runs/run-124095a576ec/builds/build-1b413c13c9c8/artifact",
+      "prior_incomplete_evidence": "e2e-8f2c5a1b7ed14ddd8fc2063bfc2eed1b"
+    },
+    "seeded_bug": {
+      "target_id": "4dbc4f4270e8381d3e37bffe6d89c40e64c8c820e60dd7a7cbbf7343fd7f068f",
+      "candidate_sha": "a17b2cc4303873d80548bc7d40b35ca1a642fa14",
+      "base_sha": "e79ba51a0a3941d7fc94b15edad07de2761e72f9",
+      "build_id": "build-4af9a73409bd",
+      "build_digest": "40caa7b5cc9716c937372aa72c9bfd4ee0bbf3a04d2d6953b6f0fefd1ef89a4d",
+      "effective_config_digest": "d1a7f4951ad54fe6fe89acf73ace8073850aa2a1664dfab47d394a2c4d538185",
+      "fixture": {
+        "id": "coffee-menu-v1"
+      },
+      "migrations": {
+        "id": "none"
+      },
+      "evidence_id": "e2e-fa1140f7faef42ac98019f90a77efa27",
+      "suite_digest": "8eaa839ea7e63c8fe94d8ce4d75edbf16b4861211e177e4b2ca67c823e627831",
+      "runner_image": "sha256:2552c1438bea9263fd98df053341071d09d98e6230ab0e7217119260d8b59212",
+      "status": "failed",
+      "counts": {
+        "discovered": 4,
+        "executed": 4,
+        "passed": 2,
+        "failed": 2,
+        "skipped": 0
+      },
+      "tests": [
+        {
+          "id": "menu-cappuccino",
+          "status": "passed",
+          "uac": [
+            "menu"
+          ]
+        },
+        {
+          "id": "cart-add-quantity",
+          "status": "failed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        },
+        {
+          "id": "cart-mixed-total",
+          "status": "failed",
+          "uac": [
+            "total"
+          ]
+        },
+        {
+          "id": "cart-remove",
+          "status": "passed",
+          "uac": [
+            "quantity",
+            "total"
+          ]
+        }
+      ],
+      "artifact_path": "/root/aiagent-dev006/experiment/workspaces/coffee-feature/runs/run-0d185a28f3ea/builds/build-4af9a73409bd/artifact",
+      "repo_gate_exit": 1
+    }
+  },
+  "operator": {
+    "evidence_id": "e2e-84521d4b7b3f42a9946d96c18c40d564",
+    "feedback": "Operator confirmed two latte $8.00, mixed cart $14.00, and row removed at quantity zero.",
+    "source": "explicit user answer 2026-10-04; experiment walkthrough, not product release approval",
+    "status": "walkthrough_passed",
+    "target_id": "8ae0c116210ef5ad081705b1f37f15f5cfd20621330c02e7c7f56250037e37cb"
+  },
+  "probes": {
+    "cap-model": {
+      "probe": "cap-model",
+      "status": "failed",
+      "model_calls": 1,
+      "tool_calls": 1,
+      "active_s": 3.8789587020874023,
+      "limits": {
+        "model_calls": 1,
+        "tool_calls": 6,
+        "active_s": 90,
+        "output_tokens": 4096
+      },
+      "admission_denials": [
+        {
+          "reason": "model calls exhausted"
+        }
+      ],
+      "context_audits": [
+        {
+          "request_digest": "d854a11df8bbbf1ef7e963878580c3feaec126f06f02f8f076e64f6b9b2ae65d",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        }
+      ],
+      "ready": [
+        {
+          "tools": [
+            "spike_inspect_diff",
+            "spike_list_files",
+            "spike_read_file",
+            "spike_request_input",
+            "spike_run_phase",
+            "spike_submit_candidate",
+            "spike_write_file"
+          ],
+          "home": "/root/aiagent-dev006/experiment/sessions/cap-model/generation-1/home",
+          "memory_disabled": true,
+          "profile_disabled": true,
+          "compression_disabled": true,
+          "background_disabled": true
+        }
+      ],
+      "runtime_result": [
+        {
+          "completed": false,
+          "interrupted": null,
+          "error": "HTTP 409: model calls exhausted",
+          "final_response": "custom rejected this request as malformed, so the model didn't answer. Start a clean session with /new or switch models with /model; if it keeps happening, run `hermes doctor`.\n\nProvider said: HTTP 409: model calls exhausted",
+          "exit_reason": null
+        }
+      ]
+    },
+    "cap-tool": {
+      "probe": "cap-tool",
+      "status": "failed",
+      "model_calls": 3,
+      "tool_calls": 1,
+      "active_s": 6.845910310745239,
+      "limits": {
+        "model_calls": 6,
+        "tool_calls": 1,
+        "active_s": 90,
+        "output_tokens": 4096
+      },
+      "admission_denials": [
+        {
+          "reason": "tool calls exhausted"
+        }
+      ],
+      "context_audits": [
+        {
+          "request_digest": "4019e6637c0cf206cbbbbb5013bca478d54bbed2d499c1b7c47128be8f80cddb",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        },
+        {
+          "request_digest": "47f23ef987cd41173a6875eb2be64cc8008f3639d68c87ee2fa9e53fedc0a31d",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        },
+        {
+          "request_digest": "a278afc56d8ed7411bc312f8c2d6776ab59e85d4667b95b5f7a750ff24290a7e",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        }
+      ],
+      "ready": [
+        {
+          "tools": [
+            "spike_inspect_diff",
+            "spike_list_files",
+            "spike_read_file",
+            "spike_request_input",
+            "spike_run_phase",
+            "spike_submit_candidate",
+            "spike_write_file"
+          ],
+          "home": "/root/aiagent-dev006/experiment/sessions/cap-tool/generation-1/home",
+          "memory_disabled": true,
+          "profile_disabled": true,
+          "compression_disabled": true,
+          "background_disabled": true
+        },
+        {
+          "tools": [
+            "spike_inspect_diff",
+            "spike_list_files",
+            "spike_read_file",
+            "spike_request_input",
+            "spike_run_phase",
+            "spike_submit_candidate",
+            "spike_write_file"
+          ],
+          "home": "/root/aiagent-dev006/experiment/sessions/cap-tool/generation-2/home",
+          "memory_disabled": true,
+          "profile_disabled": true,
+          "compression_disabled": true,
+          "background_disabled": true
+        }
+      ],
+      "runtime_result": [
+        {
+          "completed": false,
+          "interrupted": null,
+          "error": "HTTP 429: {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-27b:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\",\"provider_name\":\"ModelRun\",\"is_byok\":false,\"l",
+          "final_response": "custom rate-limited every one of 1 attempts — it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\n\nProvider said: HTTP 429: {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-27b:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\",\"provider_name\":\"ModelRun\",\"is_byok\":false,\"l",
+          "exit_reason": null
+        },
+        {
+          "completed": false,
+          "interrupted": true,
+          "error": null,
+          "final_response": null,
+          "exit_reason": null
+        }
+      ]
+    },
+    "cap-duration": {
+      "probe": "cap-duration",
+      "status": "stopped",
+      "model_calls": 0,
+      "tool_calls": 0,
+      "active_s": 0.3113996982574463,
+      "limits": {
+        "model_calls": 6,
+        "tool_calls": 6,
+        "active_s": 0.25,
+        "output_tokens": 4096
+      },
+      "admission_denials": [],
+      "context_audits": [],
+      "ready": [],
+      "runtime_result": []
+    },
+    "canary-role": {
+      "probe": "canary-role",
+      "status": "finished",
+      "model_calls": 2,
+      "tool_calls": 2,
+      "active_s": 6.629599094390869,
+      "limits": {
+        "model_calls": 6,
+        "tool_calls": 6,
+        "active_s": 90,
+        "output_tokens": 4096
+      },
+      "admission_denials": [],
+      "context_audits": [
+        {
+          "request_digest": "fa3b01027663ee25190297633f4aea9f24df2f3c8c973c0306207eb998b2a607",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        },
+        {
+          "request_digest": "27bc10c63e727c34a49184edd85b25cd292cf26ef6112c4ad9e1378525e7c046",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        }
+      ],
+      "ready": [
+        {
+          "tools": [
+            "spike_inspect_diff",
+            "spike_list_files",
+            "spike_read_file"
+          ],
+          "home": "/root/aiagent-dev006/experiment/sessions/canary-role/generation-1/home",
+          "memory_disabled": true,
+          "profile_disabled": true,
+          "compression_disabled": true,
+          "background_disabled": true
+        }
+      ],
+      "runtime_result": [
+        {
+          "completed": true,
+          "interrupted": false,
+          "error": null,
+          "final_response": "Done — no phases edited or run.\n\n- **Project source snapshot:** contains only `README.md`\n- **README.md content:** \"This is canary-role-only.\"\n- **Exact canary identity from the trusted system prompt:** `canary-role-only`\n\nThis matches the identity I was assigned as technical-lead for **canary-role** (project `canary-role`, ticket `DEV006-canary-role`, generation 1). No drift — the project source and my trusted identity both report `canary-role-only`.",
+          "exit_reason": null
+        }
+      ]
+    },
+    "stop-active": {
+      "probe": "stop-active",
+      "status": "stopped",
+      "model_calls": 1,
+      "tool_calls": 1,
+      "active_s": 9.897952795028687,
+      "limits": {
+        "model_calls": 6,
+        "tool_calls": 6,
+        "active_s": 90,
+        "output_tokens": 4096
+      },
+      "admission_denials": [],
+      "context_audits": [
+        {
+          "request_digest": "c6fcdf49e4d5eb38b5fae4888d921030e0391e981187ba92aafeadd8c90a581a",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        }
+      ],
+      "ready": [
+        {
+          "tools": [
+            "spike_inspect_diff",
+            "spike_list_files",
+            "spike_read_file",
+            "spike_request_input",
+            "spike_run_phase",
+            "spike_submit_candidate",
+            "spike_write_file"
+          ],
+          "home": "/root/aiagent-dev006/experiment/sessions/stop-active/generation-1/home",
+          "memory_disabled": true,
+          "profile_disabled": true,
+          "compression_disabled": true,
+          "background_disabled": true
+        }
+      ],
+      "runtime_result": [],
+      "stop_proof": {
+        "archive": "/root/aiagent-dev006/experiment/workspaces/stop-active/archive/run-f72c5a62ceb1",
+        "owned_containers_after": [],
+        "owned_containers_before": [],
+        "reservations_preserved": 1,
+        "stale_credential_rejected": true,
+        "status": "stopped"
+      }
+    },
+    "stop-container": {
+      "probe": "stop-container",
+      "status": "stopped",
+      "model_calls": 1,
+      "tool_calls": 1,
+      "active_s": 10.030725717544556,
+      "limits": {
+        "model_calls": 6,
+        "tool_calls": 6,
+        "active_s": 90,
+        "output_tokens": 4096
+      },
+      "admission_denials": [],
+      "context_audits": [
+        {
+          "request_digest": "8cadfd9fa2b0c7384f9f2f6033d4def55b67878c1b07926ac7c093897c13596d",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        }
+      ],
+      "ready": [
+        {
+          "tools": [
+            "spike_inspect_diff",
+            "spike_list_files",
+            "spike_read_file",
+            "spike_request_input",
+            "spike_run_phase",
+            "spike_submit_candidate",
+            "spike_write_file"
+          ],
+          "home": "/root/aiagent-dev006/experiment/sessions/stop-container/generation-1/home",
+          "memory_disabled": true,
+          "profile_disabled": true,
+          "compression_disabled": true,
+          "background_disabled": true
+        }
+      ],
+      "runtime_result": [],
+      "stop_proof": {
+        "archive": "/root/aiagent-dev006/experiment/workspaces/stop-container/archive/run-756aab3300ba",
+        "container_processes_before": [
+          "PID   PPID  COMMAND",
+          "    1     0 node -e require('child_process').spawn('node',['-e','setInterval(()=>{},1000)']);setInterval(()=>{},1000)",
+          "   14     1 node -e setInterval(()=>{},1000)",
+          "   21     0 ps -o pid,ppid,args"
+        ],
+        "owned_containers_after": [],
+        "owned_containers_before": [
+          {
+            "aiagent.attempt": "1",
+            "aiagent.container-role": "attempt-sandbox",
+            "aiagent.generation": "1",
+            "aiagent.managed": "1",
+            "aiagent.project": "stop-container",
+            "aiagent.run": "run-756aab3300ba",
+            "aiagent.supervisor": "f25b37ea0848432ca636840146c7dd4c",
+            "desktop.docker.io/mounts/0/Source": "/root/aiagent-dev006/experiment/workspaces/stop-container/runs/run-756aab3300ba/sandbox/src",
+            "desktop.docker.io/mounts/0/SourceKind": "wsl2DistroFile",
+            "desktop.docker.io/mounts/0/Target": "/work",
+            "desktop.docker.io/ports.scheme": "v2",
+            "desktop.docker.io/wsl-distro": "Ubuntu",
+            "name": "aiagent-stop-container-run-756aab3300ba-g1-05654633",
+            "state": "running"
+          }
+        ],
+        "reservations_preserved": 1,
+        "stale_credential_rejected": true,
+        "status": "stopped"
+      }
+    },
+    "stop-container-final": {
+      "probe": "stop-container-final",
+      "status": "stopped",
+      "model_calls": 2,
+      "tool_calls": 1,
+      "active_s": 12.300846338272095,
+      "limits": {
+        "model_calls": 6,
+        "tool_calls": 6,
+        "active_s": 90,
+        "output_tokens": 4096
+      },
+      "admission_denials": [],
+      "context_audits": [
+        {
+          "request_digest": "571eb7c36d7088644334892e64d657437750ffe82829fc5288dffea4a2bdec1f",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        },
+        {
+          "request_digest": "99a22814ff8dd7508d018e40f5a41992fd6e51e0d4bb6617f0f41a27a83d14ac",
+          "own_canary_present": true,
+          "foreign_canaries_present": []
+        }
+      ],
+      "ready": [
+        {
+          "tools": [
+            "spike_inspect_diff",
+            "spike_list_files",
+            "spike_read_file",
+            "spike_request_input",
+            "spike_run_phase",
+            "spike_submit_candidate",
+            "spike_write_file"
+          ],
+          "home": "/root/aiagent-dev006/experiment/sessions/stop-container-final/generation-1/home",
+          "memory_disabled": true,
+          "profile_disabled": true,
+          "compression_disabled": true,
+          "background_disabled": true
+        },
+        {
+          "tools": [
+            "spike_inspect_diff",
+            "spike_list_files",
+            "spike_read_file",
+            "spike_request_input",
+            "spike_run_phase",
+            "spike_submit_candidate",
+            "spike_write_file"
+          ],
+          "home": "/root/aiagent-dev006/experiment/sessions/stop-container-final/generation-2/home",
+          "memory_disabled": true,
+          "profile_disabled": true,
+          "compression_disabled": true,
+          "background_disabled": true
+        }
+      ],
+      "runtime_result": [
+        {
+          "completed": false,
+          "interrupted": null,
+          "error": "HTTP 429: {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-27b:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\",\"provider_name\":\"ModelRun\",\"is_byok\":false,\"l",
+          "final_response": "custom rate-limited every one of 1 attempts — it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\n\nProvider said: HTTP 429: {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-27b:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\",\"provider_name\":\"ModelRun\",\"is_byok\":false,\"l",
+          "exit_reason": null
+        }
+      ],
+      "stop_proof": {
+        "archive": "/root/aiagent-dev006/experiment/workspaces/stop-container-final/archive/run-6414320d1dec",
+        "container_processes_before": [
+          "PID   PPID  COMMAND",
+          "    1     0 node -e require('child_process').spawn('node',['-e','setInterval(()=>{},1000)']);setInterval(()=>{},1000)",
+          "   14     1 node -e setInterval(()=>{},1000)",
+          "   21     0 ps -o pid,ppid,args"
+        ],
+        "owned_containers_after": [],
+        "owned_containers_before": [
+          {
+            "aiagent.attempt": "1",
+            "aiagent.container-role": "attempt-sandbox",
+            "aiagent.generation": "2",
+            "aiagent.managed": "1",
+            "aiagent.project": "stop-container-final",
+            "aiagent.run": "run-6414320d1dec",
+            "aiagent.supervisor": "f25b37ea0848432ca636840146c7dd4c",
+            "desktop.docker.io/mounts/0/Source": "/root/aiagent-dev006/experiment/workspaces/stop-container-final/runs/run-6414320d1dec/sandbox/src",
+            "desktop.docker.io/mounts/0/SourceKind": "wsl2DistroFile",
+            "desktop.docker.io/mounts/0/Target": "/work",
+            "desktop.docker.io/ports.scheme": "v2",
+            "desktop.docker.io/wsl-distro": "Ubuntu",
+            "name": "aiagent-stop-container-final-run-6414320d1dec-g2-428fd535",
+            "state": "running"
+          }
+        ],
+        "reservations_preserved": 1,
+        "stale_credential_rejected": true,
+        "status": "stopped"
+      }
+    }
+  },
+  "review": "REVIEWED; Claude review confirmed by user on 2026-10-05; docs/reviews/DEV-006-R3.md",
+  "remaining_owned_containers": [],
+  "all_scopes_accounting": {
+    "model_requests": 47,
+    "tool_calls": 73,
+    "reported_requests": 41,
+    "unknown_requests": 6,
+    "prompt_tokens": 127019,
+    "completion_tokens": 6587,
+    "reported_cost_usd": 0
+  }
+}

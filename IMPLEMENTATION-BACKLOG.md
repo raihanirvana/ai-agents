@@ -53,7 +53,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | --- | --- | --- | --- |
 | DEV-001 | Skeleton repository dan cara menjalankan lokal | — | DONE |
 | DEV-005 | Workspace Git dan sandbox minimum | DEV-001 | DONE |
-| DEV-006 | Spike runtime nyata dan keputusan adapter | DEV-005 | TODO |
+| DEV-006 | Spike runtime nyata dan keputusan adapter | DEV-005 | DONE |
 | DEV-002 | Persistence, migrasi, dan event | DEV-001 | TODO |
 | DEV-003 | Domain tiket, versi scope, dan approval | DEV-002 | TODO |
 | DEV-004 | Worker persisten, dua lane, dan recovery | DEV-003 | TODO |
@@ -394,6 +394,162 @@ gagal mengubah accepted/ref attempt lain/config/hooks/metadata proyek lain;
 commit broker yang sah berhasil dan attempt cancelled ditolak.
 
 ## DEV-006 — Spike runtime nyata dan keputusan adapter
+
+### Catatan pengerjaan
+Status: DONE (4 Oktober UTC / 5 Oktober WIB 2026)
+Review R3: REVIEWED — Claude, dikonfirmasi pengguna 2026-10-05;
+catatan [DEV-006-R3](./docs/reviews/DEV-006-R3.md).
+
+Hasil akhir: Hermes 0.21.5 pada commit pin dijalankan melalui embed `AIAgent`,
+OpenRouter/Qwen gratis, broker DEV-005, relay terukur dan journal SQLite scoped.
+Managed candidate `d016e5a4de82144eec0a007e8160ac282f0935a3`: cappuccino,
+quantity/total interaktif dan hapus row pada nol sesuai jawaban operator.
+12/12 target node tests dan build nyata lulus; acceptance runner terpisah 4/4
+mandatory browser tests lulus. Seeded bug mengabaikan quantity: 2 pass/2 fail.
+Pengguna mencoba artefak target `8ae0c116…` dan mengonfirmasi semuanya berjalan.
+
+Start/stream, satu klarifikasi/duplicate answer, checkpoint restart, stale fences,
+actual call/tool/duration caps serta stop process group/container dengan child
+Node diuji. Satu candidate record; accepted ref proyek fitur tetap base.
+Rebuild SHA sama, config dan base berbeda memperoleh target/evidence baru.
+Canary technical-lead memakai home/context/allowlist berbeda; memory/auxiliary
+yang tidak digunakan disabled. Keputusan: pakai Hermes embed; final contract
+enam operasi di `docs/decisions/runtime.md`, product DB/job wiring tetap DEV-010.
+
+Scope fitur: 37 model requests / 66 tools / 322.39 detik aktif. Batas 32/80
+tercapai; pengguna eksplisit menambah 16/40, menjadi 48/120 tanpa reset usage.
+Semua scope/probes 47 requests/73 tools; 41 receipts melaporkan USD 0 dan 6
+receipts 429 unknown, sehingga total biaya unknown. Cohere gratis dicoba tetapi
+gagal menggunakan path relatif; Qwen kembali dipakai atas jawaban pengguna.
+Checkpoint pertama dipromosikan supervisor untuk QA setelah 429; Hermes
+generation 9 menjalankan gates dan final handoff idempotent kandidat sama.
+
+Verifikasi akhir WSL: `python -m unittest discover -s tests/runtime_spike -v`:
+35 passed (sebelum review kode; 39 setelahnya, lihat di bawah). DEV-005 full suite setup WSL sebelumnya 103 passed/0 skipped tetap
+berlaku (workspace code tidak berubah). Rebuild acceptance pertama incomplete
+akibat race container; operation lock/join cleanup diperbaiki dan invocation baru
+lulus. Raw evidence lama dipertahankan, bukan diganti menjadi pass.
+
+File hasil: `apps/backend/app/runtime_spike/**`, `tests/runtime_spike/**`,
+`contracts/dev006/**`, `.env.example`, README/backlog, docs decision/spike dan
+`docs/spikes/DEV-006-results.json`. Evidence lokal: `data/dev006/evidence/`,
+review diff tracked+untracked `data/dev006/review.patch`, full journal/build/source
+di `/root/aiagent-dev006/experiment`. Pemetaan semua tujuh AC dan reproduksi:
+`docs/spikes/DEV-006.md`. Known limits: POSIX-only standalone harness, checkpoint
+fallback bukan native continuation/arbitrary mid-tool exactly-once, free quota
+tidak dijamin. R3 berikutnya; tidak mulai tiket lain atau commit/push/deploy.
+
+Review kode Claude (2026-10-05; self-check pendukung, bukan independent R3).
+Bug diperbaiki di harness, tanpa mengubah hasil eksperimen yang sudah tercatat:
+(1) relay memetakan error tool biasa (KeyError argumen hilang, UnicodeDecodeError
+`read_file`) ke 409, yang membuat worker meng-interrupt seluruh run; kini 400
+`tool_error`, hanya AdmissionError tetap 409. `read_file` decode `errors=replace`.
+(2) Kegagalan stream setelah header terkirim menulis respons HTTP kedua; kini
+koneksi ditutup saja. Hash hasil tool dihitung dari output yang benar-benar dikirim.
+(3) `stop` memakai generation session.json; setelah crash antara answer dan save,
+stop gagal stale dan tidak me-revoke. Kini memakai generation journal.
+(4) `restart` menjalankan gates dan checkpoint commit sebelum memvalidasi status;
+restart yang ditolak bisa menggeser attempt ref. Validasi kini lebih dulu.
+(5) Kegagalan transport (status failed) me-revoke tanpa `stop_run`; kini cleanup
+container/arsip ikut dijalankan. (6) Preview `HEAD` melewati cek Host/credential.
+(7) `assert` invariant identitas pada verify hilang di `python -O`; kini eksplisit.
+Empat regression test baru gagal pada kode lama dan lulus sesudahnya. WSL
+`unittest discover -s tests/runtime_spike`: **39 passed**; Windows preflight 13
+passed/1 skip. Eksperimen nyata tidak diulang; perbaikan menyentuh jalur error.
+
+Pengecekan lanjutan Codex (2026-10-05; self-check, bukan independent R3):
+diff perbaikan diperiksa dan 39 tes WSL/13 Windows + 1 skip dikonfirmasi.
+Masih ada race cleanup transport: reader bisa menandai failed dan worker keluar
+sebelum loop pemantauan berjalan, sehingga flag revoked tidak terpasang dan
+`stop_run` terlewati. Kini status failed setelah join reader juga me-revoke dan
+menjalankan cleanup. Regression test dengan Git/SQLite nyata serta process/
+transport doubles gagal sebelum perbaikan (`stop_run` 0 calls) dan lulus sesudahnya.
+Suite WSL akhir **40 passed**; README dan laporan spike diselaraskan. Bukti
+eksperimen/model/acceptance terdahulu dipertahankan, tidak dijalankan ulang.
+Smoke check `PYTHONPATH=. python -O ../../data/dev006/check-review.py`:
+preview HEAD valid 200, Host salah/Authorization/Cookie 403, query 400;
+invariant identitas tetap menolak input salah pada interpreter optimized.
+`git diff --check` dan secret scan handoff lulus; patch handoff diperbarui.
+Perubahan review tetap unstaged; tidak ada commit/push.
+
+Finalisasi 2026-10-05: pengguna mengonfirmasi review Claude sudah oke dan
+menginstruksikan commit/push. R3 dicatat REVIEWED berdasarkan konfirmasi itu;
+self-check Codex tetap dicatat terpisah. Status saat sesi sebelumnya belum
+commit/push adalah catatan historis. Perubahan DEV-006 beserta perbaikan review
+digabung dalam commit pada branch master, lalu push ke origin sesuai instruksi.
+
+### Riwayat persiapan (sebelum eksperimen nyata)
+
+Pelaksana/sesi: Codex, sesi Windows 2026-10-04
+Rencana singkat: periksa API/versi Hermes resmi, siapkan preflight reproducible
+dan rencana eksperimen dengan evidence per AC. Gunakan broker/sandbox DEV-005;
+jangan membuat adapter dari asumsi atau mengganti bukti nyata dengan fake.
+File hasil: `apps/backend/app/runtime_spike/{__init__,preflight}.py`,
+`hermes-pin.json`, `apps/backend/tests/runtime_spike/**`, `.env.example`,
+`README.md`, `docs/decisions/runtime.md`, `docs/spikes/DEV-006.md`,
+`docs/spikes/hermes-source-inspection.json`.
+Verifikasi aktual:
+- Python 3.12.10/Git 2.46.0.windows.1; backend venv dan requirements.lock
+  berhasil diinstal. `python -m unittest tests.runtime_spike.test_preflight -v`
+  dari backend: **11 passed** (test doubles untuk preflight, bukan model/runtime).
+- `python -m app.runtime_spike.preflight --env-file ../../.env.local
+  --docker-bin <Docker Desktop docker.exe> --report ../../data/dev006/preflight.json`:
+  report **blocked**, provider/model/key ready; host/engine/image/runtime belum ready.
+- `git diff --check`, compile package/test runtime_spike, dan check-ignore
+  config secret/data: lulus. Pemeriksaan secret pada tracked/untracked diff: bersih.
+- Atas instruksi pengguna, Docker Desktop **4.93.0** dan Microsoft.WSL
+  **2.7.13** berhasil diinstal. CLI Docker **29.8.1** tersedia; engine HTTP 500.
+  `wsl --status`/install menyatakan perubahan perlu reboot. Tidak reboot otomatis.
+- Pengguna memilih OpenRouter. Config lokal gitignored; GET `/api/v1/key`
+  authenticated HTTP **200**, **0 model calls**. Model awal
+  `qwen/qwen3.8-27b:free` diverifikasi ada/tools di katalog; inference belum diuji.
+- Hermes release `v2026.9.24`, commit `f97608f178d1ffeca59860195ab7da295f7c8e5f`,
+  package `0.21.5`: pemeriksaan source statis saja; tidak diklaim installed/executed.
+Evidence/keputusan: `docs/decisions/runtime.md` berstatus PENDING,
+`docs/spikes/DEV-006.md` memuat pemetaan tujuh AC, rencana nyata/caps dan handoff.
+Report tersanitasi serta diff tracked+file baru: `data/dev006/` (gitignored).
+Blocker sesi awal (teratasi pada recheck di bawah): restart Windows untuk aktivasi WSL/Virtual Machine
+Platform, lalu distro/engine Linux dan Hermes. Broker bridge, accounting/journal
+persisten, fitur nyata/commit/tests, acceptance runner/seeded bug, operator UAT,
+stream/stop/restart/klarifikasi dan isolasi harus diimplementasikan/dibuktikan
+sesudahnya. Provider tersedia; fake/preflight tidak menutup DEV-006.
+Handoff: lanjut eksperimen nyata DEV-006 mengikuti `docs/spikes/DEV-006.md`;
+DEV-010 masih menunggu tiket ini. Tidak mulai tiket lain atau commit/push/deploy.
+Review: NOT_REVIEWED — R3 penuh belum siap tanpa bukti eksperimen nyata.
+
+Recheck setelah pengguna restart (sesi lanjutan 2026-10-04): WSL2 aktif,
+`docker version` merespons client/server 29.8.1 dan engine `linux/amd64`,
+`docker info --format '{{.OSType}}'` = `linux`. Blocker reboot sudah teratasi.
+Ubuntu 26.04.1 dan integrasi Docker dipasang. Python 3.13.16 (default Ubuntu
+3.14.4 tidak cocok) serta backend/Hermes venv terpisah tersedia di filesystem
+Linux. Source Hermes terpin di `/root/aiagent-dev006/hermes-source`, import
+`AIAgent` 0.21.5 berhasil. Preflight WSL exit 0, **10/10 prerequisites ready**.
+Bug symlink interpreter venv pada preflight diperbaiki (`absolute`, bukan
+`resolve`); **12 unittest passed** di WSL. Suite workspace aktual **103 passed,
+0 skipped**, 160.60 detik, dengan sandbox dan React/Vite install/build/test/smoke.
+Evidence: `data/dev006/{preflight-wsl.json,workspace-wsl.xml,workspace-wsl-tests.log}`.
+Scope recheck ini tidak memanggil model; seluruh eksperimen/AC yang belum
+terbukti tetap pending dan tiket masih IN_PROGRESS. Reboot bukan blocker lagi.
+
+Review lanjutan (Claude, 2026-10-04, review kode persiapan; bukan R3 penuh):
+dua bug preflight diperbaiki. (1) Check `python` memakai interpreter backend,
+bukan venv Hermes; rentang pin `>=3.11,<3.14` kini divalidasi pada interpreter
+`--hermes-python` (bagian `hermes_install`, report `hermes_python`), backend cukup
+3.11+. (2) Probe membuang `DOCKER_HOST`/`DOCKER_CONTEXT`/`DOCKER_CONFIG`/TLS/
+`XDG_RUNTIME_DIR`, sehingga bisa memeriksa engine berbeda dari yang dipakai
+sandbox DEV-005; selector itu kini diteruskan (secret provider tetap dibuang).
+Regression test ditambah: WSL **14 passed**, Windows **13 passed, 1 skipped**
+(symlink). Preflight WSL ulang: exit 0, 10/10 ready, `hermes_python` 3.13.16.
+Status tetap IN_PROGRESS; eksperimen model belum dijalankan.
+
+Sesi eksperimen (Codex, 2026-10-04, instruksi pengguna "gas"):
+rencana: embed API `AIAgent` Hermes terpin dalam subprocess/home terisolasi,
+tools registry khusus yang hanya memanggil supervisor, relay provider terukur,
+journal SQLite standalone per scope, lalu kandidat fitur cappuccino/keranjang,
+runner Playwright independen dan seeded bug. File utama pada `runtime_spike/`,
+test terfokus, suite `contracts/dev006/`, dan report di `docs/spikes/DEV-006.md`.
+Transport gateway belum dipilih final; source embed memberi batas tools eksplisit.
+Approval scope eksperimen berasal dari instruksi pengguna, bukan approval produk.
 
 **Tujuan:** membuktikan executor bisa mengerjakan satu perubahan nyata sebelum
 investasi GUI penuh.

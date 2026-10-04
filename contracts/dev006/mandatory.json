@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "mandatory": {
+    "menu-cappuccino": ["menu"],
+    "cart-add-quantity": ["quantity", "total"],
+    "cart-mixed-total": ["total"],
+    "cart-remove": ["quantity", "total"]
+  },
+  "required_uac": ["menu", "quantity", "total"]
+}

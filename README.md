@@ -100,7 +100,7 @@ Prasyarat tes sandbox: Git tersedia pada PATH (toolchain diuji: 2.56.0), Docker 
 terpin ada secara lokal (image tidak pernah ditarik otomatis oleh kode).
 Harness workspace memakai `flock`/`dir_fd`: memerlukan macOS/Linux, belum
 mendukung Windows. Verifikasi container sejauh ini dilakukan di macOS/Docker
-Desktop; Linux belum diuji. Jalankan perintah berikut dari root checkout.
+Desktop dan Ubuntu WSL (103 passed/0 skipped pada setup DEV-006). Jalankan perintah berikut dari root checkout.
 
 ```sh
 docker pull node:22.20.0-alpine
@@ -130,3 +130,39 @@ Batas yang masih ada: bind mount belum mempunyai hard disk quota (ukuran/jumlah
 entry dibatasi saat sinkronisasi), lease expiry/heartbeat menunggu DEV-004/010,
 dan recovery crash memerlukan `reap_orphans` setelah status/generation run
 direkonsiliasi. Harness ini belum merupakan scheduler produk.
+
+## Spike runtime nyata (DEV-006)
+
+DEV-006 **DONE**, R3 **REVIEWED** (Claude, dikonfirmasi pengguna).
+Catatan review: [DEV-006-R3](docs/reviews/DEV-006-R3.md). Runtime pilihan: Hermes embed
+`AIAgent` subprocess dengan broker/relay supervisor dan journal scoped. Integrasi
+DB/job produksi menunggu DEV-010. Eksperimen Qwen/OpenRouter menghasilkan fitur
+keranjang dengan 12/12 target tests, 4/4 browser acceptance, seeded total bug
+tertangkap, dan walkthrough operator pada artefak teruji. Preflight
+standalone membaca pin Hermes, konfigurasi provider/model, host POSIX, engine
+Docker Linux, image lokal dan instalasi source yang cocok. Exit 0 hanya berarti
+prasyarat terdeteksi; bukan bukti kompatibilitas, QA atau UAT. Tidak ada model
+call, instalasi otomatis, atau import kode target dalam CLI ini.
+
+```sh
+cd apps/backend
+.venv/bin/python -m unittest tests.runtime_spike.test_preflight -v
+.venv/bin/python -m app.runtime_spike.preflight --env-file ../../.env.local --report ../../data/dev006/preflight.json
+```
+
+Windows memakai `.venv/Scripts/python.exe`; preflight boleh berjalan di Windows,
+tetapi harness workspace tetap harus dijalankan di Linux/macOS. Pada mesin sesi
+ini Docker Desktop/WSL/Ubuntu sudah aktif setelah reboot, Hermes dipasang di
+venv Linux, dan preflight WSL lulus. Tests workspace di WSL: 103 lulus;
+runtime_spike checks: 40 lulus. Bukti nyata model/caps/stop/recovery dan batasannya
+dicatat terpisah dari prerequisite checks.
+Provider key hanya pada file lokal yang gitignored atau environment supervisor;
+contoh nama variabel ada di `.env.example`. CLI membaca file hanya jika
+`--env-file` diberikan dan tidak menginterpolasi isinya.
+
+Hasil, reproduksi, pemetaan AC dan handoff R3:
+[docs/spikes/DEV-006.md](docs/spikes/DEV-006.md),
+[manifest hasil](docs/spikes/DEV-006-results.json), dan
+[keputusan runtime](docs/decisions/runtime.md). CLI eksperimen/verification/preview
+berada di `app.runtime_spike`; suite browser terpisah di `contracts/dev006/`.
+Key, journal, homes, managed Git dan artefak tetap pada runtime data gitignored.
