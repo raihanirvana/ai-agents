@@ -1,0 +1,19 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap");
+
+:root { font-family: "DM Sans", sans-serif; color: #17212b; background: #f3f5f6; font-synthesis: none; text-rendering: optimizeLegibility; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+.page-shell { min-height: 100vh; display: grid; place-items: center; padding: 32px; background: radial-gradient(ellipse at 50% 42%, #fff 0, #f3f5f6 68%); }
+.welcome-card { width: min(100%, 620px); text-align: center; padding: 64px 54px 48px; }
+.brand-mark { width: 56px; height: 56px; margin: 0 auto 30px; display: grid; place-items: center; border-radius: 18px; background: #183b38; color: #d7f0df; font: 800 18px "Manrope", sans-serif; letter-spacing: -1px; box-shadow: 0 8px 22px #183b3825; }
+.eyebrow { margin: 0 0 14px; color: #658078; font-size: 11px; font-weight: 700; letter-spacing: .16em; }
+h1 { max-width: 500px; margin: 0 auto; font: 800 clamp(30px, 5vw, 42px)/1.13 "Manrope", sans-serif; letter-spacing: -1.7px; }
+.intro { max-width: 430px; margin: 18px auto 28px; color: #66737d; font-size: 15px; line-height: 1.75; }
+.health { display: inline-flex; align-items: center; gap: 9px; padding: 10px 14px; border-radius: 999px; background: #e8ecec; color: #53616a; font-size: 13px; font-weight: 600; }
+.health-dot { width: 8px; height: 8px; border-radius: 50%; background: #a0a9ad; }
+.health--connected { color: #176448; background: #e5f3eb; }
+.health--connected .health-dot { background: #29966b; box-shadow: 0 0 0 3px #29966b20; }
+.health--unavailable { color: #945444; background: #f8ece8; }
+.health--unavailable .health-dot { background: #ca725b; }
+.footer-note { margin: 58px 0 0; color: #9aa3a7; font-size: 12px; }
+@media (max-width: 520px) { .welcome-card { padding: 44px 12px 32px; } }

@@ -1,0 +1,38 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+**/.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+*.tsbuildinfo
+
+# JavaScript
+node_modules/
+dist/
+.vite/
+
+# Runtime data and generated artifacts
+data/
+workspaces/
+verification/
+artifacts/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+playwright-report/
+test-results/
+*.log
+.DS_Store
