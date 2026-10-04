@@ -80,6 +80,7 @@ class Project(Base):
     brief_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     repo_ref: Mapped[str | None] = mapped_column(String)
     runner_manifest: Mapped[Any] = mapped_column(Json, nullable=True)
+    workflow: Mapped[Any] = mapped_column(Json, nullable=False, default=dict, server_default=text("'{}'"))
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow, onupdate=utcnow)
@@ -92,6 +93,7 @@ class Project(Base):
         CheckConstraint("mode = 'new' OR repo_ref IS NOT NULL", name="existing_has_repo"),
         CheckConstraint("brief_version >= 1 AND revision >= 1", name="versions"),
         _json("runner_manifest", "object"),
+        _json("workflow", "object"),
     )
 
 
@@ -108,6 +110,7 @@ class Ticket(Base):
     current_version: Mapped[int | None] = mapped_column(Integer)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     blocker: Mapped[Any] = mapped_column(Json, nullable=True)  # {"reason": ..., "resolution": ...}
+    workflow: Mapped[Any] = mapped_column(Json, nullable=False, default=dict, server_default=text("'{}'"))
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow, onupdate=utcnow)
     # Optimistic locking: every ORM UPDATE is 'WHERE revision = <loaded>' and bumps it; a stale
@@ -121,6 +124,7 @@ class Ticket(Base):
         CheckConstraint("current_version IS NULL OR current_version >= 1", name="current_version"),
         CheckConstraint("phase = 'draft' OR current_version IS NOT NULL", name="phase_has_version"),
         _json("blocker", "object"),
+        _json("workflow", "object"),
         Index("ix_tickets_project_phase", "project_id", "phase"),
     )
 
@@ -135,6 +139,7 @@ class TicketVersion(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     uac: Mapped[Any] = mapped_column(Json, nullable=False)  # [{"id": ..., "text": ...}]
+    scope: Mapped[Any] = mapped_column(Json, nullable=False, default=dict, server_default=text("'{}'"))
     content_digest: Mapped[str] = mapped_column(String, nullable=False)
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
@@ -143,6 +148,7 @@ class TicketVersion(Base):
         CheckConstraint("version >= 1", name="version"),
         CheckConstraint(_sha("content_digest"), name="content_digest"),
         _json("uac", "array"),
+        _json("scope", "object"),
     )
 
 

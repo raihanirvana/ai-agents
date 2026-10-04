@@ -172,7 +172,7 @@ Key, journal, homes, managed Git dan artefak tetap pada runtime data gitignored.
 Persistence memakai SQLite (WAL) lewat SQLAlchemy dan Alembic. Database dan artefak berada di
 direktori `data/` yang di-ignore Git (`DATA_DIR`, `DATABASE_PATH`, `ARTIFACT_DIR` di
 `.env.example`). API dan worker belum membukanya, jadi keduanya tetap bisa start tanpa database;
-integrasinya menyusul pada DEV-003/004/008.
+command domain tersedia pada DEV-003, wiring worker/API menyusul pada DEV-004/008.
 
 ```sh
 cd apps/backend
@@ -184,3 +184,20 @@ cd apps/backend
 Gunakan `--db PATH` untuk database lain. Database harus berada di filesystem lokal yang mendukung
 WAL (engine menolak start bila tidak). Rancangan, aturan yang ditegakkan storage, dan batasnya:
 [docs/decisions/persistence.md](docs/decisions/persistence.md).
+
+## Workflow dan approval (DEV-003)
+
+`apps/backend/app/domain/Workflow` menyediakan command berizin untuk scope/proposal,
+batch approval atomik, dependency pin/revalidasi, candidate/review/QA/UAT,
+integration receipt, release approval, waiver baseline, cancel dan repair limit.
+Jalankan migrasi ke head `0002` sebelum memakainya. Belum diwire ke API/GUI/worker;
+Git integration nyata adalah DEV-012.
+
+```sh
+cd apps/backend
+./.venv/bin/python -m pytest tests/domain tests/persistence -q
+```
+
+Actor dibuat authentication/supervisor tepercaya, bukan role dari request klien.
+Kontrak receipt, izin, pemetaan AC, cara menjalankan, dan batas implementasi:
+[docs/decisions/workflow.md](docs/decisions/workflow.md).

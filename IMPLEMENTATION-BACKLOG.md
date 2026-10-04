@@ -55,7 +55,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-005 | Workspace Git dan sandbox minimum | DEV-001 | DONE |
 | DEV-006 | Spike runtime nyata dan keputusan adapter | DEV-005 | DONE |
 | DEV-002 | Persistence, migrasi, dan event | DEV-001 | DONE |
-| DEV-003 | Domain tiket, versi scope, dan approval | DEV-002 | TODO |
+| DEV-003 | Domain tiket, versi scope, dan approval | DEV-002 | DONE |
 | DEV-004 | Worker persisten, dua lane, dan recovery | DEV-003 | TODO |
 | DEV-007 | Soul, context, model client, dan pesan antar-agent | DEV-002, DEV-004 | TODO |
 | DEV-008 | API aplikasi, autentikasi lokal, dan SSE | DEV-003, DEV-004, DEV-007 | TODO |
@@ -320,6 +320,121 @@ events. Integration operation boleh disimpan sebagai data kandidat sesuai desain
 state/event konsisten, cleanup pin, serta referensi artefak hilang/corrupt.
 
 ## DEV-003 — Domain tiket, versi scope, dan approval
+
+### Catatan pengerjaan
+
+Status: **DONE** setelah perbaikan review Claude. Pelaksana: Codex, 2026-10-05.
+Putaran fix R003-01..06: fence repair langsung dari counter dan pertahankan blocker
+independen; contract invalidation integrator-only dan hanya edge terdampak;
+receipt broker per attempt untuk commit terdeduplikasi; Accepted tetap historis
+tanpa blocker baru; malformed scope menjadi domain Invalid. Required checks
+dipertahankan melintasi scope edit dan aturan tiga putaran ditulis eksplisit.
+Regresi Windows/WSL dan recheck implementer selesai; commit/push diotorisasi
+pengguna setelah perbaikan. Dependency DEV-002 DONE/REVIEWED.
+Rencana awal: command service domain di atas transaksi persistence, aktor/intensi
+spesifik, versi scope/proposal, batch atomik, dependency DAG/pin/revalidasi,
+fencing attempt, target/evidence QA/UAT/release, waiver, cancel dan repair.
+
+File hasil: `apps/backend/app/domain/{__init__,types,evidence,service}.py`,
+`apps/backend/migrations/versions/0002_workflow.py`, tambahan metadata JSON pada
+`app/persistence/models.py`, `apps/backend/tests/domain/{__init__,conftest,
+test_workflow,test_dependencies,test_evidence,test_transactions}.py`, `README.md`,
+dan [handoff/keputusan workflow](docs/decisions/workflow.md).
+
+Seluruh 8 AC dipetakan pada handoff. Bukti utama: approval pengguna exact version,
+batch revision/DAG atomik dan fault rollback/concurrent approvers; dependency
+menunggu integrated Accepted dan mem-pin version/candidate/SHA; proposal PO
+accept/reject/direct edit pengguna; scope change/cancel/feedback mencabut job dan
+generation tanpa menghapus usage; role/lease/project/attempt fencing; exact target
+dan QA suite/smoke/UAC/evidence; UAT approval lama tidak pindah ke candidate yang
+SHA-nya sama setelah rebuild config; release punya receipt/approval sendiri;
+waiver fingerprint exact user-only explicit waived; repair kumulatif/bounded
+extension; Integrating menolak mutasi hingga receipt tepercaya direkonsiliasi.
+Revalidasi mengikat ID permintaan contract change dan execution mandatory/counts,
+sehingga receipt perubahan lama tidak dapat dipakai ulang; bukti dipin melalui
+lampiran histori pesan.
+
+Verifikasi aktual (`cd apps/backend`):
+- Windows `.venv/Scripts/python.exe -m pytest tests/domain tests/persistence -q`:
+  **213 passed, 1 skipped** (symlink host). Domain baru: **84 tests**.
+- WSL Ubuntu `/root/aiagent-dev002-venv/bin/python -m pytest tests/domain tests/persistence -q`:
+  **214 passed**, termasuk symlink pada filesystem Linux.
+- WSL suite lengkap `python -m pytest -q`: **354 passed**, termasuk Docker nyata,
+  sebelum pengetatan terakhir required checks dependency (3 kasus tambahan).
+  Perubahan akhir direcheck pada suite domain+persistence di atas; perbaikan
+  terakhir test approval rebuild juga direcheck dengan `pytest tests/domain -q`
+  di Windows dan WSL (**84 passed** masing-masing).
+- `python -m app.persistence upgrade --db .../data/dev003/check.sqlite3`:
+  revisi **0002**; `check` menghasilkan **database is healthy**. Test upgrade/
+  downgrade/re-upgrade DB 0001 berisi data mempertahankan trigger/cursor dan
+  menguji JSON/revision/immutability. `git diff --check` lulus.
+
+Test menggunakan DB/artifact asli dan synthetic trusted contract receipts
+berlabel, bukan bukti model/QA harness nyata; tidak memanggil provider. Tidak
+ada status setter arbitrer atau endpoint baru. Actor harus dibentuk auth/
+supervisor tepercaya, tidak dari role JSON klien. Process/credential cleanup dan
+job scheduling aktual DEV-004, API/auth DEV-008, produksi harness DEV-010,
+Git CAS/crash recovery DEV-012, release orchestration DEV-014. Domain baru
+menerbitkan cancellation event dan menerima receipt integrator tanpa menulis Git.
+
+Handoff awal: **NOT_REVIEWED**. Ini self-check implementer; R4 menunggu independent
+review DEV-003/004, review DEV-002 tetap terpisah. Diff lengkap termasuk file
+baru: `data/dev003/review.patch` (gitignored), baseline
+`228e0d8327ac85c03d72e9edbb2bc7e4c8daa30b`; belum stage/commit/push.
+Tiket berikutnya sesuai dependency: DEV-004, belum dikerjakan pada assignment ini.
+
+Review DEV-003 oleh Claude (Opus 5.5, 2026-10-05): **NEEDS_FIX**, bukan penutupan R4 penuh.
+Scope: staged tree `6b134fc855fe5e21107b91427e9c4697bc7b778c`, baseline
+`228e0d8327ac85c03d72e9edbb2bc7e4c8daa30b`. Suite dijalankan ulang: Windows 213 passed /
+1 symlink skipped, WSL 214 passed. Temuan direproduksi dengan DB/artifact asli:
+(P1) batas repair `needs_human` hilang setelah contract change + revalidasi, attempt ke-4
+bisa diikat tanpa `authorize_repair`; (P2) technical-lead dengan job tiket lain dapat
+menginvalidasi downstream termasuk kandidat UAT; (P2) commit attempt scope lama dapat
+dikirim sebagai kandidat scope baru (provenance commit tidak diikat ke attempt);
+(P3) contract change menandai edge upstream yang tidak berubah; (P3) downstream Accepted
+mendapat blocker yang tidak bisa diselesaikan; (P3) dokumen scope non-object
+menghasilkan AttributeError. AC5 dan AC8 belum terpenuhi, sehingga DONE dibuka kembali.
+Pada sesi review tersebut kode implementasi/index tidak diubah; laporan dan status
+review saat itu adalah perubahan dokumentasi unstaged. Detail, reproduksi, observasi dan pemetaan AC:
+[docs/reviews/DEV-003-review.md](./docs/reviews/DEV-003-review.md).
+
+Recheck perbaikan — Codex, 2026-10-05: **R003-01..06 FIX_VERIFIED oleh implementer**.
+Batas repair kini ditegakkan dari counter di eligibility/bind; revalidasi tidak
+memberi budget repair, dan bounded extension tidak menghapus dependency gate.
+`contract_changed` integrator-only, mencatat reporter/perubahan dan hanya edge
+terdampak. Accepted/Cancelled tetap historis tanpa blocker baru. Commit submission
+memerlukan receipt broker exact project/ticket/job/generation/scope/base/commit,
+terpisah dari artifact Git terdeduplikasi SHA; receipt dipin melalui pesan submission.
+Malformed scope dan artifact ID kosong menjadi domain Invalid tanpa partial write/
+SAWarning. File baru: `tests/domain/test_review_regressions.py` dan laporan review.
+
+Observasi scope: title/UAC edit mempertahankan pending checks dan merotasi request
+ID; UAC benar-benar diubah pada test version 2. Approval scope baru tetap perlu
+required checks. Riwayat contract change upstream mencegah tiket baru atau edge
+hapus-lalu-tambah melewati checks. Observasi repair: batas semula tiga putaran
+review/QA/UAT yang berakhir request-changes, termasuk putaran awal, dipertahankan;
+dua perbaikan otomatis, request-changes ketiga memerlukan keputusan pengguna.
+Tidak menambah budget tanpa otorisasi. Kontrak/keputusan di `docs/decisions/workflow.md`.
+
+Verifikasi **snapshot final**:
+- Windows `.venv/Scripts/python.exe -m pytest tests/domain tests/persistence -q --tb=short`:
+  **232 passed, 1 skipped** (symlink host). Domain kini **103 tests**.
+- WSL `/root/aiagent-dev002-venv/bin/python -m pytest -q --tb=short`:
+  **376 passed**, seluruh suite backend termasuk Docker nyata; tidak skipped.
+- **19 regression tests baru gagal pada tree original review**
+  `6b134fc855fe5e21107b91427e9c4697bc7b778c`, lalu lulus di kode perbaikan.
+  `data/dev003/check-regressions-original.py` (gitignored) memuat original service/
+  evidence dari Git object, tidak mengubah file/index. Hanya keyword receipt baru
+  dibuang agar signature lama dapat dijalankan; logic lama tidak diganti.
+- `python -m app.persistence check --db .../data/dev003/check.sqlite3`:
+  **database is healthy** (0002); whitespace/secret scan seluruh reviewable files/
+  patch lulus. DB/helper/patch tetap gitignored.
+
+AC5 dan AC8 kini terpenuhi menurut regresi implementer, seluruh delapan AC
+terpetakan di handoff. DEV-003 kembali DONE. Review awal Claude NEEDS_FIX tetap
+historis; **diff fix belum independent re-review**, R4 belum ditutup. User meminta
+commit/push setelah perbaikan, tanpa approval tambahan atau klaim review Claude
+atas kode baru. DEV-004 belum dimulai.
 
 **Tujuan:** aturan produk ditegakkan sebelum agent bisa bekerja.
 
