@@ -54,7 +54,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-001 | Skeleton repository dan cara menjalankan lokal | — | DONE |
 | DEV-005 | Workspace Git dan sandbox minimum | DEV-001 | DONE |
 | DEV-006 | Spike runtime nyata dan keputusan adapter | DEV-005 | DONE |
-| DEV-002 | Persistence, migrasi, dan event | DEV-001 | TODO |
+| DEV-002 | Persistence, migrasi, dan event | DEV-001 | DONE |
 | DEV-003 | Domain tiket, versi scope, dan approval | DEV-002 | TODO |
 | DEV-004 | Worker persisten, dua lane, dan recovery | DEV-003 | TODO |
 | DEV-007 | Soul, context, model client, dan pesan antar-agent | DEV-002, DEV-004 | TODO |
@@ -167,6 +167,133 @@ Tidak perlu membuat alur agent palsu atau test yang sekadar menyalin implementas
 baru, bukti checks, dan cara menjalankan sebelum melanjutkan sesuai assignment.
 
 ## DEV-002 — Persistence, migrasi, dan event
+
+### Catatan pengerjaan
+Status: DONE — perbaikan dan re-review Codex selesai 2026-10-05.
+Pelaksana/sesi: Claude (Sonnet 5.5), sesi Windows 2026-10-05
+Rencana singkat: paket `apps/backend/app/persistence/` (engine SQLite WAL + FK +
+`BEGIN IMMEDIATE`, 12 model SQLAlchemy, helper state+event satu transaksi, artifact
+store dengan checksum/availability, pin turunan dari referensi produk + cleanup),
+Alembic `apps/backend/migrations/` dengan trigger penegak aturan, CLI
+`python -m app.persistence`, dan test di `apps/backend/tests/persistence/`. API tetap
+bisa start tanpa DB (AC-001-02); DB belum diwire ke API/worker (itu DEV-003/004/008).
+Tidak memakai provider/model/Hermes.
+
+File hasil: `apps/backend/app/persistence/{__init__,__main__,columns,models,db,changes,
+events,artifacts,pins,cleanup,usage,messages,migrate}.py`, `apps/backend/alembic.ini`,
+`apps/backend/migrations/{env.py,script.py.mako,versions/0001_initial_schema.py}`,
+`apps/backend/tests/persistence/{conftest,factories,test_migrations,test_constraints,
+test_events_changes,test_artifacts,test_pins_cleanup,test_usage_messages,test_restart}.py`,
+`apps/backend/app/config.py` (DATA_DIR/DATABASE_PATH/ARTIFACT_DIR), `.env.example`,
+`apps/backend/requirements.{txt,lock}` (SQLAlchemy 2.1.3, Alembic 1.20.0, Mako, MarkupSafe),
+`README.md`, `docs/decisions/persistence.md` (rancangan, aturan storage, cara pakai, batas).
+
+Pemetaan AC ke bukti (test dalam `apps/backend/tests/persistence/`):
+- AC migrasi/FK/revision/unique: `test_migrations` (DB kosong -> 12 entitas, head, tanpa drift
+  terhadap model, downgrade lalu upgrade, migrasi gagal rollback total, WAL/FK/synchronous/
+  busy_timeout, CLI check) dan `test_constraints` (36 test: FK, unique, CHECK, trigger).
+  Revision: trigger "naik tepat satu" + `version_id_col`; test di `test_events_changes`.
+- AC state+event satu transaksi: `apply_change`; `test_events_changes` (commit bersama, error
+  setelah perubahan, IntegrityError setelah event, stale revision, tanpa celah cursor).
+- AC cursor/artefak checksum: `read_events(after=cursor)`, cursor tidak reset lintas restart
+  (`test_restart`), `ArtifactStore` + `test_artifacts` (checksum, read-only, canonical JSON,
+  nama/path tidak aman, rollback menghapus file).
+- AC target manifest/evidence refs/input request/usage/waiver: FK komposit
+  `(target_artifact_id, target_digest)`, artifact `target_manifest`, messages input
+  request/answer (satu jawaban), `jobs.usage` + `scope_usage` (unknown bukan 0), approvals
+  `baseline_waiver`: `test_constraints`, `test_usage_messages`.
+- AC pin dan cleanup: `pins.py`, `cleanup.py`, `test_pins_cleanup` (pin approval/release/
+  verification/kandidat aktif/job/lampiran, superseded melepas pin, dry-run, umur, ownership,
+  proyek lain, cleaned tidak hidup lagi); file hilang/rusak/terpotong -> `unavailable` + event,
+  approval baru ditolak storage: `test_artifacts`.
+- AC data tersedia setelah restart: `test_restart` (reopen, `os._exit` setelah commit,
+  `os._exit` saat memegang kunci tulis sebelum commit tanpa sisa state/event/cursor).
+- AC transaksi pendek/konflik writer: `test_events_changes` (6 thread x 5 update tanpa
+  kehilangan, retry `transact` hanya pada RevisionConflict, writer kedua menunggu kunci,
+  pembaca tidak diblok) dan `test_usage_messages` (update usage dan jawaban bersamaan).
+
+Verifikasi aktual (dari `apps/backend`):
+- Windows: `.venv/Scripts/python.exe -m pytest tests/persistence -q`: **109 passed, 1 skipped**
+  (symlink tidak bisa dibuat pada host ini). Linux/WSL venv baru dari `requirements-dev.txt`
+  (Python 3.13.16, SQLite 3.53.1): **110 passed, 0 skipped**, 6.5 detik.
+- `python -m app.persistence upgrade` lalu `check` pada DB baru lewat `DATABASE_PATH`: revisi 0001,
+  "database is healthy", exit 0. `pip check`: tidak ada requirement rusak.
+- Regresi: import `app.api`/`app.worker` tidak membuat database; `tests/runtime_spike` di WSL:
+  40 passed. Test workspace DEV-005 tidak dijalankan ulang (kode workspace tidak berubah).
+- Mutation check: mengganti `BEGIN IMMEDIATE` dengan `BEGIN` membuat
+  `test_concurrent_usage_updates_are_not_lost` gagal; kode dikembalikan.
+- `git diff --check` pada file baru bersih; pemindaian secret pada file baru bersih.
+
+Temuan saat pengerjaan (semua diperbaiki sebelum DONE): kolom JSON opsional ter-infer NOT NULL
+(terlihat di autogenerate); CHECK `availability` dan `storage_shape` meloloskan NULL (alasan/
+size kosong); nama artifact dengan `/` menjadi sub-direktori; `Database.read()` meng-expire
+objek karena `rollback()`; modul bernama `types.py` menimpa stdlib saat dijalankan dari
+direktorinya (diganti `columns.py`).
+
+Keterbatasan: bukan scheduler (claim/lease/heartbeat = DEV-004); slot execution tunggal belum
+dipaksa di storage; status kandidat/dependency/release adalah usulan dari ARCHITECTURE §4 dan
+dapat direvisi DEV-003 lewat migrasi (migrasi batch harus membuat ulang trigger); file yatim
+akibat crash antara tulis file dan commit belum ada penyapunya; database di `/mnt/c` dari WSL
+tidak diuji; backup/restore adalah DEV-017. Detail: `docs/decisions/persistence.md`.
+Handoff R4: diff = 6 file tracked yang berubah + file baru di atas (belum di-stage; gunakan
+`git status`/`git ls-files --others --exclude-standard`). Cara menjalankan ada di README bagian
+"Database lokal (DEV-002)". Tiket berikutnya sesuai dependency: DEV-003.
+Review: NOT_REVIEWED — R4 menunggu DEV-003/004; ini self-check implementer, bukan independent review.
+
+Review DEV-002 oleh Codex (2026-10-05): **NEEDS_FIX**, bukan penutupan R4 penuh.
+Scope: staged tree `600bcdcfb0941760b6cb473e91407294afd204a5`, baseline
+`5b5ec1d52f0b28032d38678e3185a14e338ed0bb`. Suite Windows dijalankan ulang:
+109 passed / 1 symlink skipped. Tiga bug direproduksi dengan DB/file sementara:
+(P1) pin approval tidak melindungi build/context setelah kandidat superseded;
+(P1) rollback savepoint menghapus file artefak transaksi luar yang kemudian commit;
+(P2) idempotency pesan mengabaikan recipient/ticket/metadata/attachments, sehingga
+generation berbeda bisa diterima sebagai retry identik. AC pin/cleanup belum
+terpenuhi, sehingga DONE dibuka kembali. Kode implementasi/index tidak diubah;
+laporan dan status review adalah perubahan dokumentasi unstaged.
+Detail, langkah reproduksi, pemetaan AC dan sisa pekerjaan:
+[docs/reviews/DEV-002-review.md](./docs/reviews/DEV-002-review.md).
+
+Perbaikan temuan review (Claude, 2026-10-05); ketiganya direproduksi dulu dengan DB/file nyata:
+- **R002-01 (P1)**: closure bukti sekarang immutable. `verifications` menyimpan snapshot
+  `commit/build/context` (kolom FK baru di migrasi 0001, belum dirilis sehingga direvisi di tempat),
+  trigger mewajibkan snapshot = keadaan kandidat saat itu (hasil untuk target lama ditolak), dan pin
+  verification mencakup semuanya selamanya. Ekspektasi test lama yang keliru (build tidak dipin setelah
+  supersede) dikoreksi. Regresi: supersede dengan approval lalu cleanup nyata `now`+2 hari menyisakan
+  commit/build/context/target/evidence (bytes masih terbaca), rebuild mempertahankan build target lama,
+  kandidat rejected tanpa verifikasi tetap melepas pin.
+- **R002-02 (P1)**: file artifact terikat pada rantai transaksi pembuatnya. Hook rollback hanya membuang
+  file milik savepoint yang di-rollback (termasuk rollback dari sub-transaksi flush yang gagal); pelepasan
+  savepoint memicu `after_commit` sehingga bookkeeping hanya dilepas pada commit transaksi luar. Regresi:
+  rollback inner/commit outer, commit inner/rollback outer, savepoint bersarang, flush gagal di savepoint.
+- **R002-03 (P2)**: dedupe pesan membandingkan seluruh payload (recipient, tiket, metadata, lampiran, sender,
+  thread, kind; JSON dinormalisasi). Key sama dengan payload berbeda -> `IdempotencyConflict`; jawaban input
+  juga membandingkan sender/metadata. Regresi: 8 variasi override, retry identik dengan urutan key berbeda.
+Verifikasi: Windows `pytest tests/persistence` **126 passed, 1 skipped** (symlink); Linux/WSL **127 passed**;
+`python -m app.persistence check` pada DB baru sehat (tanpa drift). Mutation check: dengan `pins.py`,
+`artifacts.py`, `messages.py` versi lama, 13 test baru gagal; dengan kode baru semuanya lulus.
+- **Sisa temuan release (dilaporkan pengguna)**: cleanup dapat menghapus build/context yang dirujuk release
+  `approved`. Direproduksi: skema `releases` memang tidak punya rujukan ke build/context. Kini `releases`
+  menyimpan snapshot beku `build_artifact_id` (wajib), `commit_artifact_id`, `context_artifact_id`
+  (FK, frozen oleh trigger, guard available/satu proyek) dan pin release mencakup semuanya selamanya.
+  Regresi: cleanup nyata `now`+10 tahun setelah release approved menyisakan build/commit/context/target/
+  evidence dengan bytes terbaca; build wajib; kolom beku; artifact tak tersedia/proyek lain ditolak.
+  Mutation check: tanpa pin release, 2 test gagal. Audit: semua kolom rujukan artifact kini tercakup pin
+  (kecuali `jobs.context_artifact_id` job terminal, sengaja). Windows 129 passed/1 skipped; Linux 130 passed.
+Dokumentasi diperbarui di `docs/decisions/persistence.md`. Status DEV-002 kembali **DONE**.
+Review: NEEDS_FIX -> perbaikan selesai, **menunggu re-review independen** (ini bukan penutupan R4).
+
+Re-review Codex (2026-10-05): **REVIEWED untuk DEV-002**, tidak menutup R4
+DEV-003/004. R002-01/02/03 terverifikasi fixed melalui kode/migrasi dan regresi.
+Sisa pin release yang ditemukan pada recheck juga fixed: release mem-pin snapshot
+build/commit/context sendiri, build wajib, referensi frozen serta tersedia/satu
+proyek diperiksa storage. Cleanup nyata 10 tahun kemudian menjaga bytes build/
+context; artefak tak dirujuk tetap dibuang. Suite dijalankan ulang: Windows
+**129 passed / 1 skipped**, 8.66 detik; WSL **130 passed**, 7.95 detik.
+Tidak ada temuan blocking tambahan pada scope perbaikan ini. Log review lama
+dipertahankan sebagai riwayat; status akhir DONE/REVIEWED. Catatan lengkap:
+`docs/reviews/DEV-002-review.md`. Tidak ada commit/push atau perubahan staging
+oleh reviewer. Migrasi 0001 direvisi sebelum rilis; DB percobaan versi sebelumnya
+tidak otomatis di-upgrade hanya karena revision ID masih sama.
 
 **Tujuan:** restart tidak menghilangkan pekerjaan atau percakapan.
 

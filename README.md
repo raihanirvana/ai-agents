@@ -166,3 +166,21 @@ Hasil, reproduksi, pemetaan AC dan handoff R3:
 [keputusan runtime](docs/decisions/runtime.md). CLI eksperimen/verification/preview
 berada di `app.runtime_spike`; suite browser terpisah di `contracts/dev006/`.
 Key, journal, homes, managed Git dan artefak tetap pada runtime data gitignored.
+
+## Database lokal (DEV-002)
+
+Persistence memakai SQLite (WAL) lewat SQLAlchemy dan Alembic. Database dan artefak berada di
+direktori `data/` yang di-ignore Git (`DATA_DIR`, `DATABASE_PATH`, `ARTIFACT_DIR` di
+`.env.example`). API dan worker belum membukanya, jadi keduanya tetap bisa start tanpa database;
+integrasinya menyusul pada DEV-003/004/008.
+
+```sh
+cd apps/backend
+./.venv/bin/python -m app.persistence upgrade   # membuat/memigrasikan database
+./.venv/bin/python -m app.persistence check     # revisi, drift skema, integrity, foreign key
+./.venv/bin/python -m pytest tests/persistence -q
+```
+
+Gunakan `--db PATH` untuk database lain. Database harus berada di filesystem lokal yang mendukung
+WAL (engine menolak start bila tidak). Rancangan, aturan yang ditegakkan storage, dan batasnya:
+[docs/decisions/persistence.md](docs/decisions/persistence.md).

@@ -25,3 +25,15 @@ CORS_ORIGINS = [
     ).split(",")
     if origin.strip()
 ]
+
+
+def _local_path(name: str, default: Path) -> Path:
+    raw = os.getenv(name, "").strip()
+    path = Path(raw).expanduser() if raw else default
+    return path if path.is_absolute() else ROOT / path
+
+
+# Runtime state (database, artifacts) lives under the gitignored data directory.
+DATA_DIR = _local_path("DATA_DIR", ROOT / "data")
+DATABASE_PATH = _local_path("DATABASE_PATH", DATA_DIR / "app.sqlite3")
+ARTIFACT_DIR = _local_path("ARTIFACT_DIR", DATA_DIR / "artifacts")
