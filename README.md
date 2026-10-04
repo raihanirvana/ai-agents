@@ -87,3 +87,46 @@ Test menjalankan web pada `127.0.0.1:19832` dan memock health API untuk menguji
 koneksi putus/pulih tanpa reload, startup tertunda, dan respons tidak valid.
 Ini menguji skeleton UI, bukan QA aplikasi hasil agent. Bukti review API dan
 worker aktual ada di `docs/reviews/DEV-001-R1.md`.
+
+## Workspace Git dan sandbox (DEV-005)
+
+Paket `apps/backend/app/workspace/` adalah harness standalone: managed repo
+Git, worktree per attempt, snapshot sumber tanpa `.git`, Git broker, sandbox
+Docker, dan tool broker dengan otorisasi per run. Ini bukan scheduler produk;
+run spec, generation, dan lease disuplai pemanggil dan dipersist di
+`workspaces/` (gitignored). Wiring ke DB/job produk ada di DEV-010.
+
+Prasyarat tes sandbox: Git tersedia pada PATH (toolchain diuji: 2.56.0), Docker berjalan dan image
+terpin ada secara lokal (image tidak pernah ditarik otomatis oleh kode).
+Harness workspace memakai `flock`/`dir_fd`: memerlukan macOS/Linux, belum
+mendukung Windows. Verifikasi container sejauh ini dilakukan di macOS/Docker
+Desktop; Linux belum diuji. Jalankan perintah berikut dari root checkout.
+
+```sh
+docker pull node:22.20.0-alpine
+apps/backend/.venv/bin/python -m pip install -r apps/backend/requirements-dev.txt
+git --version
+apps/backend/.venv/bin/python -m pytest apps/backend/tests/workspace -m "not docker"
+apps/backend/.venv/bin/python -m pytest apps/backend/tests/workspace
+```
+
+Tes `docker` di-skip dengan alasan jika daemon/image tidak ada. Tes
+`test_reference_target.py` menjalankan install/build/test/smoke React/Vite nyata.
+Semua container target, termasuk install, menggunakan `--network none`.
+`allow_install_egress` hanya mengizinkan supervisor mengunduh tarball HTTPS dari
+`registry.npmjs.org` sesuai package-lock v2/v3 dan memverifikasi SHA-512-nya.
+Redirect dan proxy environment tidak dipakai. Npm kemudian mengisi cache dan
+menjalankan `npm ci --offline --ignore-scripts` di container tanpa jaringan.
+Untuk MVP, private registry, dependency Git/local, project `.npmrc`, dan override
+environment runner belum didukung; input tersebut ditolak. Supervisor memerlukan
+akses HTTPS ke registry untuk test referensi.
+
+Stop dan renewal mencabut generation sebelum menunggu command selesai;
+evidence command dan snapshot perubahan yang belum di-commit diarsipkan sebelum
+cleanup. Smoke memakai artefak build yang dipin dan di-mount read-only, dengan
+verifikasi digest dan image ID. Hasil review: `docs/reviews/DEV-005-R2.md`.
+
+Batas yang masih ada: bind mount belum mempunyai hard disk quota (ukuran/jumlah
+entry dibatasi saat sinkronisasi), lease expiry/heartbeat menunggu DEV-004/010,
+dan recovery crash memerlukan `reap_orphans` setelah status/generation run
+direkonsiliasi. Harness ini belum merupakan scheduler produk.

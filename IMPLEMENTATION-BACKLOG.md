@@ -52,7 +52,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | ID | Hasil | Dependency | Status |
 | --- | --- | --- | --- |
 | DEV-001 | Skeleton repository dan cara menjalankan lokal | — | DONE |
-| DEV-005 | Workspace Git dan sandbox minimum | DEV-001 | TODO |
+| DEV-005 | Workspace Git dan sandbox minimum | DEV-001 | DONE |
 | DEV-006 | Spike runtime nyata dan keputusan adapter | DEV-005 | TODO |
 | DEV-002 | Persistence, migrasi, dan event | DEV-001 | TODO |
 | DEV-003 | Domain tiket, versi scope, dan approval | DEV-002 | TODO |
@@ -256,6 +256,108 @@ lama berjalan. Fake model yang terus meminta tool berhenti pada cap; restart/
 retry tidak menghapus usage sebelumnya, quota shared tampil sebagai waiting_quota.
 
 ## DEV-005 — Workspace Git dan sandbox minimum
+
+### Catatan pengerjaan
+Status: DONE
+Pelaksana/sesi: Claude (Sonnet 5.5), sesi 2026-10-04
+Rencana singkat: paket `apps/backend/app/workspace/` berisi run spec persisten,
+Git broker tepercaya, snapshot sumber tanpa `.git` dengan validasi path/symlink,
+runner manifest React/Vite + target manifest immutable, sandbox Docker, dan
+tool broker per run (role/project/ticket/version/attempt/generation). Stop
+mengarsipkan bukti sebelum cleanup dengan pemeriksaan label ownership.
+File hasil: `apps/backend/app/workspace/{__init__,errors,fsutil,gitbroker,manifest,
+runspec,sandbox,supervisor}.py`; `apps/backend/tests/workspace/**` (termasuk target
+referensi `fixtures/reference-react-vite/`); `apps/backend/pytest.ini`,
+`apps/backend/requirements-dev.txt`; bagian DEV-005 di `README.md`.
+Verifikasi (dari `apps/backend`, macOS, Docker Desktop 24.0.5 aarch64, image
+`node:22.20.0-alpine`, Python 3.11.6, Git 2.56.0):
+- `./.venv/bin/python -m pytest` — 86 passed (67 tanpa Docker, 19 dengan
+  container nyata). `pytest -m "not docker"` — 67 passed. Tidak ada container
+  `aiagent-*` tersisa setelah run (`docker ps -a`).
+- Probe manual sebelum desain: container bridge default dapat menjangkau layanan
+  loopback host lewat `host.docker.internal` (HTTP 200 dari server di
+  127.0.0.1); `--network none` tidak. Container juga dapat membuat symlink ke
+  `/etc/passwd` dan FIFO di bind mount sehingga sinkron balik memakai
+  lstat/O_NOFOLLOW dan menolak tipe khusus.
+- Satu kegagalan nyata selama pengerjaan: skrip test fixture `node --test test/`
+  gagal di Node 22; harness mencatatnya sebagai fase test gagal (bukan pass).
+  Fixture diperbaiki menjadi `node --test`.
+
+Pemetaan AC ke bukti:
+- Worktree per attempt dengan base accepted tercatat; checkpoint bukan accepted:
+  `supervisor.start_attempt/_commit`; `test_attempt_gets_own_worktree_*`,
+  `test_checkpoint_is_not_a_candidate_or_accepted`.
+- Initial empty commit sebagai base teknis: `GitBroker.init_project`;
+  `test_init_creates_empty_base_on_accepted`.
+- Sandbox tanpa `.git`; broker memvalidasi path/symlink dan hanya menulis ref
+  attempt; hook/helper/filter tidak dijalankan: `fsutil.py`, `gitbroker.py`;
+  `test_fsutil.py`, `test_gitbroker.py` (hook repo + global config tidak
+  dieksekusi, accepted/ref attempt lain tidak bergerak),
+  `test_hostile_sandbox_content_is_rejected_and_nothing_moves` (symlink absolut/
+  berantai, FIFO, `.git`, hook, oversize) serta versi container nyata
+  `test_planted_symlink_fifo_and_git_dir_from_real_container_are_rejected`.
+- Kandidat menunjuk SHA, base SHA, scope version: record `candidates/*.json`;
+  `test_submit_candidate_commits_on_attempt_ref_only`.
+- Build/target manifest (build digest, manifest revision, toolchain/image ID,
+  config, fixture/migration, dependency digest; write-once): `build_target`;
+  `test_target_manifest_records_*`, `test_rebuild_of_same_sha_is_a_new_target`.
+- Manifest memvalidasi install/build/test/start, toolchain, port, fixture:
+  `manifest.py`; `test_manifest.py`.
+- Tanpa secret provider/DB kontrol/repo asli/Docker socket; batas filesystem,
+  waktu, resource, jaringan: `sandbox.py`; `test_sandbox_has_no_git_secret_socket_
+  network_or_root`, `test_command_timeout_*`, `test_memory_and_pid_limits_*`,
+  `test_target_shell_cannot_reach_git_metadata_or_other_runs`.
+- Tool broker mengotorisasi role/project/ticket/version/attempt/lease:
+  `supervisor.authorize` (identitas dari spec/state persisten, bukan argumen);
+  `test_credential_must_match_run_*`, `test_role_permissions_*`,
+  `test_stale_generation_*`, `test_cancelled_attempt_cannot_submit_*`,
+  `test_tampered_manifest_*`.
+- Stop mengarsipkan bukti dahulu dan menghormati ownership:
+  `test_stop_archives_evidence_before_cleanup_*`, `test_cancel_while_tool_is_
+  active_*`, `test_cleanup_respects_ownership_labels` (preview, run lain, dan
+  supervisor lain tidak disentuh), `test_reap_orphans_*`.
+- Verifikasi tiket: build/run target referensi React/Vite nyata (npm ci, build,
+  `node --test` 2 pass, kandidat, target, smoke health, rebuild SHA sama →
+  target baru): `test_reference_target.py`.
+
+Keterbatasan setelah perbaikan R2:
+- `allow_install_egress` kini hanya mengizinkan supervisor mengunduh tarball HTTPS
+  dari registry.npmjs.org dan memverifikasi integrity SHA-512. Semua container,
+  termasuk install, selalu `--network none`; npm ci berjalan offline dengan
+  lifecycle scripts dimatikan. Private registry, dependency Git/local, project
+  `.npmrc`, dan override environment runner ditolak untuk MVP.
+- Kuota disk bind mount sandbox belum diterapkan (batas entry/byte diperiksa saat
+  sinkronisasi, tmpfs dibatasi). Batas memori/CPU/PID/waktu diterapkan.
+- Expiry/heartbeat lease tetap menunggu job DB DEV-004/010. R2 menambahkan
+  serialisasi operasi, pembatalan generation lama, pemeriksaan ulang kredensial,
+  serta test interleaving cancel/renew ketika command aktif.
+- Setelah crash, `reap_orphans` memerlukan rekonsiliasi status/generation run;
+  active run dengan generation sama tidak otomatis dianggap yatim. Full process
+  crash recovery belum diuji. Stop kini menunggu evidence command, menyimpan
+  snapshot uncommitted yang valid, dan mengulang arsip parsial sebelum cleanup.
+- Git config repo dimiliki supervisor; global/system config dan hook dinonaktifkan.
+  Integrator accepted ref baru ada pada DEV-012; ref writes per project sekarang
+  diserialkan untuk mencegah false positive pada commit paralel.
+- Diuji di macOS/Docker Desktop. Linux bind-mount UID belum diuji; Windows tidak
+  didukung harness workspace (flock/dir_fd).
+- Tidak ada Hermes/model/provider yang dipakai; tidak ada klaim terkait DEV-006.
+
+Blocker/sisa: tidak ada blocker tersisa untuk DEV-005; batas harness tercatat di atas.
+Handoff R2: file baru tercantum di atas; periksa `git status` untuk file baru,
+serta tracked diff README/backlog. Baseline Git: `324acda`. Cara menjalankan di README. Fokus R2
+sesuai DEVELOPMENT-WORKFLOW: broker/path/symlink, metadata Git tidak writable,
+ref lain, mounts/network/resource, cleanup ownership. Tiket berikutnya sesuai
+dependency: DEV-006 setelah R2 (butuh provider/key nyata; tanpa itu BLOCKED) atau
+DEV-002.
+Review: REVIEWED — R2, Codex, 4 Oktober 2026. Sembilan temuan diperbaiki langsung
+sesuai instruksi pengguna. Bukti terbaru:
+[docs/reviews/DEV-005-R2.md](./docs/reviews/DEV-005-R2.md).
+Tambahan hasil review: `dependencies.py`, `test_review_regressions.py`, perbaikan
+broker/fs/lifecycle/build/runner, tests Docker/reference target, README, dan report.
+Gabungan hasil terbaru per test ID: 103 test unik lulus (81 non-Docker, 22 Docker).
+Suite penuh sempat 100 passed/1 failed karena read timeout registry pada rebuild;
+setelah bounded retry, recheck terdampak 32 passed; filesystem/regressions 38 passed.
+Tidak ada container test tersisa. Perubahan belum di-commit/push dalam sesi review.
 
 **Tujuan:** agent dapat mengubah dan menjalankan kode di workspace terisolasi.
 
