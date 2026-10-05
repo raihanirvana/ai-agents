@@ -101,9 +101,10 @@ penyimpanan/public response; validation error tidak menyertakan input mentah.
 | Events | GET `/projects/{id}/events?cursor=N`, optional `follow=false` |
 
 Runtime prefix memperjelas pemisahan credential dari command browser. UAT repair
-memakai request-changes; accept memakai uat-decisions. Repo existing hanya
-didaftarkan sebagai metadata dengan onboarding pending; API tidak membaca atau
-mengeksekusi instruksi repo asli. Clone/onboarding DEV-013. Kandidat memerlukan
+memakai request-changes; accept memakai uat-decisions. Repo existing
+didaftarkan dengan onboarding pending. `POST /projects/{id}/onboarding` (DEV-013)
+mempersist job dengan manifest dan patch/SHA opsional; worker melakukan import/baseline
+tanpa target execution pada HTTP atau mutation repo sumber. Kandidat memerlukan
 commit receipt broker yang sudah dipercaya; API tidak menyediakan minting target,
 evidence atau receipt dari model. Build/QA execution DEV-010, integrasi DEV-012,
 release creation/export DEV-014. Endpoint future yang belum ada menghasilkan

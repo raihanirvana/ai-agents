@@ -281,25 +281,40 @@ class PreviewService:
     def _socket_dir(self, preview_id: str) -> Path:
         return self.sockets / preview_id[:16]
 
-    def _remove_container(self, preview_id: str, name: str) -> None:
-        """Remove only a container that is provably this preview's. An inspect error is not proof of absence."""
+    def _owner_label(self, name: str):
+        """(label, absent): the container's preview label, or absent=True only on an explicit not-found answer.
+        Any other inspect failure is not proof of absence, and a lost engine never counts as 'gone'."""
         probe = self.sandbox._docker("inspect", "--format", '{{index .Config.Labels "' + LABEL_PREVIEW + '"}}', name, check=False)
         if probe.returncode == 0:
-            if probe.stdout.decode().strip() != preview_id:
-                raise PreviewFailed("container ownership mismatch; refusing to remove it")
-            self.sandbox.kill_and_remove(name)
-        else:
-            self.sandbox._docker("info", "--format", "{{.ServerVersion}}")  # engine loss is not "container gone"
-            error = probe.stderr.lower()
-            if b"no such object" not in error and b"no such container" not in error:
-                raise PreviewFailed("container absence could not be verified")
-            return
-        after = self.sandbox._docker("inspect", name, check=False)
-        if after.returncode == 0:
-            raise PreviewFailed("owned container remains after cleanup")
+            return probe.stdout.decode().strip(), False
         self.sandbox._docker("info", "--format", "{{.ServerVersion}}")
-        if b"no such object" not in after.stderr.lower() and b"no such container" not in after.stderr.lower():
-            raise PreviewFailed("container absence could not be verified after cleanup")
+        error = probe.stderr.lower()
+        if b"no such object" not in error and b"no such container" not in error:
+            raise PreviewFailed("container absence could not be verified")
+        return None, True
+
+    def _remove_container(self, preview_id: str, name: str) -> None:
+        """Remove only a container that is provably this preview's."""
+        label, absent = self._owner_label(name)
+        if absent:
+            return
+        if label != preview_id:
+            raise PreviewFailed("container ownership mismatch; refusing to remove it")
+        # Stop and the start path's own cleanup may remove the same container at once: `docker rm -f` then answers
+        # "removal already in progress" while it is still visible. That is not a leak; wait for it to finish.
+        deadline = time.monotonic() + 15
+        while True:
+            self.sandbox.kill_and_remove(name)
+            after = self.sandbox._docker("inspect", name, check=False)
+            if after.returncode != 0:  # only an explicit not-found answer is proof that it is gone
+                self.sandbox._docker("info", "--format", "{{.ServerVersion}}")
+                error = after.stderr.lower()
+                if b"no such object" not in error and b"no such container" not in error:
+                    raise PreviewFailed("container absence could not be verified after cleanup")
+                return
+            if time.monotonic() >= deadline:
+                raise PreviewFailed("owned container remains after cleanup")
+            time.sleep(0.2)
 
     # -- ready previews ------------------------------------------------------------------------
     def _check_ready(self) -> None:

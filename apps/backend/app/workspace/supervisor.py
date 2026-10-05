@@ -397,6 +397,16 @@ class WorkspaceSupervisor:
     # -- verification target ----------------------------------------------------
     @serialized_operation
     def build_target(self, ref: RunRef, candidate_sha: str, *, run_tests: bool = False) -> dict[str, Any]:
+        return self._build_target(ref, candidate_sha, run_tests=run_tests)
+
+    @serialized_operation
+    def build_baseline(self, ref: RunRef) -> dict[str, Any]:
+        """Trusted onboarding build of this attempt's accepted base; never a candidate submission."""
+        spec, _, _ = self._require_active(ref)
+        return self._build_target(ref, spec.base_sha, run_tests=False, baseline=True)
+
+    def _build_target(self, ref: RunRef, candidate_sha: str, *, run_tests: bool = False,
+                      baseline: bool = False) -> dict[str, Any]:
         """Clean build of an immutable candidate and write its verification target manifest.
 
         Every call is a new build record: the same SHA rebuilt yields a new target.
@@ -404,7 +414,8 @@ class WorkspaceSupervisor:
         spec, manifest, store = self._require_active(ref)
         generation = store.state()["generation"]
         broker = self.broker(ref.project_id)
-        if not is_sha(candidate_sha) or not self._known_candidate(store, candidate_sha):
+        known = (candidate_sha == spec.base_sha == broker.accepted_sha()) if baseline else self._known_candidate(store, candidate_sha)
+        if not is_sha(candidate_sha) or not known:
             raise WorkspaceError("candidate is not a recorded commit of this attempt")
         image_id = self.sandbox.image_id(manifest.image)
         build_id = f"build-{uuid.uuid4().hex[:12]}"

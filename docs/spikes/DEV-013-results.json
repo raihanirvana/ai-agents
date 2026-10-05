@@ -1,0 +1,112 @@
+{
+  "ticket": "DEV-013",
+  "checked_on": "2026-10-05",
+  "independent_review": "NOT_REVIEWED",
+  "scenario": "Existing coffee app exported from DEV-010 verified candidate; add receipt feature via real Hermes/provider.",
+  "source": {
+    "pilot_candidate_sha": "7a98e11127adea05ab73fdde54036f70cab62631",
+    "fixture_sha": "95382c14a9f69137919d29cd3455e874c4a407d3",
+    "dirty": true,
+    "unchanged_full_inventory_including_git": true,
+    "refs_digest": "f0a1443571885def71e154a062744da9905a63f3c3bd9264270ac2e84f648db9",
+    "config_digest": "cfe7ba1238c9a78be7535d7c63bcaf5a4d5011d46b07c9b45d3bbf7d6c312dfe",
+    "dirty_status": [
+      " M src/main.jsx",
+      "?? README.md"
+    ]
+  },
+  "baseline": {
+    "report_id": "c483cdbfa359473c9aa038206092d2c3",
+    "status": "ready",
+    "repo_tests": {
+      "discovered": 2,
+      "executed": 2,
+      "failed": 0,
+      "passed": 2,
+      "skipped": 0
+    },
+    "start_healthy": true,
+    "command_exit_codes": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "note": "Qualification ran before the separate node/npm version probes were added; final runtime probes are covered by Docker tests."
+  },
+  "pipeline": {
+    "provider": "openrouter",
+    "model": "openai/gpt-4.1-mini",
+    "real_provider": true,
+    "usage": {
+      "totals": {
+        "model_calls": 14,
+        "active_s": 254.09286604897352,
+        "output_tokens": 2142,
+        "total_tokens": 68612,
+        "cost_usd": 0.0176504,
+        "prompt_tokens": 8847,
+        "cached_tokens": 0,
+        "input_tokens": 66470,
+        "tool_calls": 34
+      },
+      "unknown": [],
+      "jobs": 6
+    },
+    "phase": "accepted",
+    "candidate_id": "0c7c450f01da4ba2bb32c2a13fd4fae5",
+    "candidate_sha": "d430e55bbaac72efc059bb01570a5f0ede1daf1e",
+    "accepted_tip": "d430e55bbaac72efc059bb01570a5f0ede1daf1e",
+    "target_artifact_id": "d2e5ea49d3764139ba032d186c5622ec",
+    "target_digest": "90f3f58335def69847453512aea01756dcb840540618303450137361407ef60e",
+    "verification_id": "8fd5517b391e43589ecf43a585eb83e8",
+    "counts": {
+      "discovered": 1,
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "uac_coverage": {
+      "UAC-receipt": [
+        "receipt-button-click-shows-receipt-status"
+      ]
+    },
+    "evidence_ids": [
+      "0a48c819d6a244e5835f308ee9732be2",
+      "d980e16277b84c0a90c481250755e5f6",
+      "102dd5fe2d13441fb964ec262e0ec402",
+      "a0f6cd94621246bea2445b7ed8a75cac",
+      "0074c008e463440dbfdcaa1d78e46de7"
+    ],
+    "required_checks": {
+      "status": "passed",
+      "waiver_ids": []
+    },
+    "baseline_browser_status": "failed",
+    "candidate_browser_status": "passed",
+    "integrator": {
+      "operation_id": "6bdfeb01895e439482bc32a327af0dd0",
+      "status": "done",
+      "expected_base": "95382c14a9f69137919d29cd3455e874c4a407d3",
+      "target_sha": "d430e55bbaac72efc059bb01570a5f0ede1daf1e",
+      "target_artifact_id": "d2e5ea49d3764139ba032d186c5622ec",
+      "approval_id": "5ef9a1bcb6e1440ebf5709c1249a6c99",
+      "evidence_artifact_id": "bbf10c2b47e849d5ab40ac548bd1a230"
+    }
+  },
+  "approval": {
+    "fixture_uat_approval": true,
+    "manual_user_uat": false,
+    "accepted_by_production_integrator": true,
+    "approval_ids": [
+      "5ef9a1bcb6e1440ebf5709c1249a6c99"
+    ],
+    "actors": [
+      "user:qualification-fixture"
+    ],
+    "note": "Scope/UAT commands came from a named test-user in an isolated qualification DB. This is not manual user acceptance or DEV-015 pilot completion."
+  },
+  "artifact_location_note": "Private WSL qualification-01 SQLite, managed Git and artifact store retained locally; no secrets/DB/build bundles committed."
+}

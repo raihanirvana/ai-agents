@@ -1,0 +1,2 @@
+# Preserve captured Node TAP diagnostics, including indented empty error lines.
+node-tap-*.txt text eol=lf whitespace=-blank-at-eol

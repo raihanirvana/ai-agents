@@ -26,9 +26,19 @@ def remove_owned(sandbox, name, owner):
         return
     if actual != owner:
         raise ValueError('container cleanup ownership mismatch')
-    sandbox.kill_and_remove(name)
-    if inspect_owner() is not None:
-        raise RuntimeError('owned container remains after cleanup')
+    # Stop and the run's own cleanup can remove the same container at the same moment: `docker rm -f` then answers
+    # "removal already in progress" and the container is still visible for a moment. That is not a leak; wait for it.
+    deadline = time.monotonic() + 15
+    while True:
+        sandbox.kill_and_remove(name)
+        current = inspect_owner()
+        if current is None:
+            return
+        if current != owner:
+            raise ValueError('container cleanup ownership mismatch')
+        if time.monotonic() >= deadline:
+            raise RuntimeError('owned container remains after cleanup')
+        time.sleep(0.2)
 
 
 def code_digest():

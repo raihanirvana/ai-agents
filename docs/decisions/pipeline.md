@@ -68,9 +68,11 @@ repo tidak pernah menjadi authoritative browser report.
 Baseline memakai command/image/config yang sama dalam sandbox baru. Failure asli
 baseline memperoleh fingerprint artifact dari verification service. Hanya waiver
 pengguna yang cocok dengan scope, base SHA, environment, test ID, dan signature
-failure dapat menutup gate yang gagal. Signature mencakup diagnostics/output dengan
-timing TAP dihapus; ia konservatif, sehingga perubahan output lain bisa membutuhkan
-waiver baru. Jumlah failure sama tidak cukup. Incomplete/infrastructure failure tidak
+failure dapat menutup gate yang gagal. DEV-013 memfingerprint diagnostics per test gagal
+tanpa timing, ordinal, nomor baris/kolom, frame internal Node, dan baris rencana TAP; tambahan test hijau atau
+pergeseran baris tidak mengubah failure lama, sedangkan pesan error yang berbeda tetap failure baru.
+Semua failures memerlukan waiver masing-masing. Receipt lama tanpa per-test list tetap
+memakai exact aggregate signature. Jumlah failure sama tidak cukup. Incomplete/infrastructure failure tidak
 dapat di-waive; browser UAC tetap wajib. Evidence menampilkan `required_checks:
 {status: waived, waiver_ids: [...]}` bila waiver dipakai.
 
@@ -193,6 +195,6 @@ Batas minimum: static React/Vite, Node TAP, fixture stateless, migrations `none`
 DSL belum mendukung arbitrary browser scripts, upload, auth flows, atau backend DB
 target. Custom manifest `start`/port/health dicatat sebagai identity, tetapi acceptance
 minimum menggunakan trusted static server pada internal 4173 dan health `/`.
-Preview GUI, integration accepted ref, existing-repo onboarding, release, dan pilot
-masing-masing tetap DEV-011/012/013/014/015. Artifact besar, DB, serta private Hermes
+Preview GUI, integration accepted ref dan existing-repo onboarding tersedia melalui
+DEV-011/012/013. Release dan pilot tetap DEV-014/015. Artifact besar, DB, serta private Hermes
 transcripts tidak di-commit. Review independen R6 belum dilakukan.

@@ -153,6 +153,15 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     def brief(request: Request, project_id: str, body: b.Brief):
         return command(request, body, lambda s, svc, key, p: {"project": q.project(svc.workflow.update_brief(
             user_actor(p, project_id), body.expected_revision, request.app.state.api.redactor.redact(body.brief)))})
+    @app.post("/projects/{project_id}/onboarding")
+    def onboarding(request: Request, project_id: str, body: b.Onboarding):
+        def action(s, svc, key, principal):
+            from app.onboarding.requests import request as request_onboarding
+            project, job = request_onboarding(s, svc, request.app.state.api.store,
+                user_actor(principal, project_id), body.expected_revision, body.manifest, key,
+                patch=body.patch, source_sha=body.source_sha)
+            return {"project": q.project(project), "job_id": job.id}
+        return command(request, body, action)
     @app.get("/projects/{project_id}/tickets")
     def board(request: Request, project_id: str):
         auth(request)

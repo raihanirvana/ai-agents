@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.worker", description=__doc__)
     parser.add_argument("--db", type=Path)
     parser.add_argument("--artifacts", type=Path)
-    parser.add_argument("--runtime", choices=("none", "fake", "structured", "pipeline"), default=os.getenv("WORKER_RUNTIME", "none"))
+    parser.add_argument("--runtime", choices=("none", "fake", "structured", "pipeline", "onboarding"), default=os.getenv("WORKER_RUNTIME", "none"))
     parser.add_argument("--worker-id")
     parser.add_argument("--lease-s", type=float, default=float(os.getenv("WORKER_LEASE_S", "30")))
     args = parser.parse_args(argv)
@@ -43,6 +43,15 @@ def main(argv: list[str] | None = None) -> int:
         print("PERINGATAN: runtime FAKE aktif; hasilnya bukan bukti provider/QA nyata.", flush=True)
     maintenance = []
     previews = integrator = None
+    if args.runtime in ('onboarding', 'pipeline'):
+        if os.name != 'posix':
+            raise ValueError('onboarding execution requires Linux/macOS; use WSL on Windows')
+        from app.onboarding.runtime import OnboardingRuntime
+        from app.agents import Redactor
+        root = Path(os.getenv('PIPELINE_WORKSPACE_ROOT', 'data/pipeline-workspaces')).resolve()
+        redactor = Redactor([v for k, v in os.environ.items() if any(
+            marker in k.upper() for marker in ('API_KEY', 'SECRET', 'TOKEN', 'PASSWORD'))])
+        runtimes['onboarding'] = OnboardingRuntime(db, store, root, redactor)
     if args.runtime in ("structured", "pipeline"):
         from app.agents.wiring import build_structured_runtime
         runtime, threads, notes = build_structured_runtime(db, store, workflow, queue)

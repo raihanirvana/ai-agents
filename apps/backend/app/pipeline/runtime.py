@@ -48,7 +48,8 @@ class PipelineRuntime:
         broker = WorkspaceSupervisor(self.workspace.root).broker(identity['project_id'])
         files = broker._bare('ls-tree', '-r', '--name-only', broker.accepted_sha()).decode().splitlines()
         output, meta, snapshot = self.structured._ask(ctx, identity,
-            {'name': 'technical_plan', 'ticket_id': identity['ticket_id'], 'source_files': files}, LeadPlanOutput)
+            {'name': 'technical_plan', 'ticket_id': identity['ticket_id'], 'source_files': files,
+             'onboarding': self._onboarding_context(identity['project_id'])}, LeadPlanOutput)
         if isinstance(output, Clarification):
             ctx.request_input(output.as_text(), {}, 'pipeline-clarify:' + identity['root_job_id'] + ':' + str(identity['generation']))
         key = 'pipeline-plan:' + identity['root_job_id'] + ':' + snapshot.sha256
@@ -63,6 +64,13 @@ class PipelineRuntime:
                 {'plan_message_id': message.id}, key)
         return self.structured._result(meta, plan_message_id=message.id, decision_proposal_ids=decisions,
                                        needs_user=False, authoritative=False)
+
+    def _onboarding_context(self, project_id):
+        from app.persistence.models import Project
+        with self.db.read() as s:
+            p = s.get(Project, project_id)
+            return {'status': p.workflow.get('onboarding'), 'baseline': p.workflow.get('onboarding_detail'),
+                    'plan': p.workflow.get('onboarding_plan')}
 
     def _qa_plan(self, ctx, identity):
         with self.db.read() as s:
@@ -239,10 +247,16 @@ class PipelineRuntime:
         with self.db.read() as s:
             approvals = list(s.scalars(select(Approval).where(Approval.ticket_id == identity['ticket_id'], Approval.type == 'baseline_waiver')))
         actor = Actor('service:verification', 'verification', identity['project_id'])
-        matches = [ap.id for ap in approvals if self.workflow.waiver_matches(actor, ap.id, ticket_id=identity['ticket_id'],
-            scope_version=identity['scope_version'], base_sha=candidate.base_sha,
-            environment_digest=gate['environment_digest'], test_id=gate['test_id'], signature=gate['signature'])]
-        return {'status': 'waived' if matches else 'failed', 'waiver_ids': matches}
+        failures = gate.get('failures', [{'test_id': gate['test_id'], 'signature': gate['signature']}])
+        matches = []
+        for failure in failures:
+            exact = [ap.id for ap in approvals if self.workflow.waiver_matches(actor, ap.id, ticket_id=identity['ticket_id'],
+                scope_version=identity['scope_version'], base_sha=candidate.base_sha,
+                environment_digest=gate['environment_digest'], test_id=failure['test_id'], signature=failure['signature'])]
+            if not exact:
+                return {'status': 'failed', 'waiver_ids': matches}
+            matches.extend(exact)
+        return {'status': 'waived' if failures else 'failed', 'waiver_ids': list(dict.fromkeys(matches))}
 
     def _verify(self, ctx, identity):
         candidate = self._candidate(identity)
@@ -296,6 +310,7 @@ class PipelineRuntime:
             ctx.queue.verify_identity(s, identity)
             attachments = [target['gate_artifact_id']]
             attachments += [baseline[k] for k in ('artifact_id', 'fingerprint_artifact_id') if k in baseline]
+            attachments += baseline.get('fingerprint_artifact_ids', [])
             for item in proof.pop('diagnostics', []):
                 a = self.store.put_bytes(s, project_id=identity['project_id'], kind=item['kind'],
                     data=item['data'], name=item['kind'] + ('.png' if item['kind'] == 'screenshot' else '.zip'),

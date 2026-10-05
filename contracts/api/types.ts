@@ -11,6 +11,9 @@ export type ProjectCreate = Body.ProjectCreate;
 export interface Project {
   id: string; name: string; mode: "new" | "existing"; brief: string; brief_version: number;
   revision: number; onboarding: string; accepted_tip: string | null;
+  onboarding_detail?: { job_id: string; report_artifact_id?: string; source_sha?: string | null;
+    baseline_sha?: string | null; dirty?: boolean; dirty_status?: string[]; dirty_total?: number; patch_applied?: boolean;
+    blocker?: string | null; required_checks?: string } | null;
 }
 export interface Ticket {
   id: string; project_id: string; number: number; title: string; phase: Phase; revision: number;
@@ -84,6 +87,7 @@ export type MessageCreate = Body.MessageCreate;
 export type InputAnswer = Body.InputAnswer;
 export type UatDecision = Body.Uat;
 export interface Commands {
+  onboarding: { body: Body.Onboarding; response: { project: Project; job_id: string } };
   createProject: { body: ProjectCreate; response: { project: Project } };
   brief: { body: Revision & { brief: string }; response: { project: Project } };
   createTicket: { body: Scope; response: { ticket: Ticket } };

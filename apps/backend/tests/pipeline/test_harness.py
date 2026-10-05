@@ -86,3 +86,66 @@ def test_inspection_error_is_not_proof_of_absent_container_even_if_engine_is_ava
             return super()._docker(*args, **kwargs)
     with pytest.raises(RuntimeError, match='absence could not be verified'):
         remove_owned(UncertainDocker(), 'name', 'our-job:1')
+
+
+def test_cleanup_waits_for_a_concurrent_removal_instead_of_calling_it_a_leak():
+    """DEV-013 review: stop and the run's own cleanup remove the same container at once; `docker rm -f` answers
+    'removal already in progress' and the container stays visible for a moment. 18 of 25 real concurrent cleanups failed."""
+    class SlowRemoval(DockerStub):
+        removals = 0
+
+        def kill_and_remove(self, name):
+            self.removals += 1
+            if self.removals >= 3:  # the other remover finishes after our first two attempts
+                self.containers.pop(name, None)
+    docker = SlowRemoval()
+    docker.containers['name'] = ('our-job:1', ())
+    remove_owned(docker, 'name', 'our-job:1')
+    assert 'name' not in docker.containers and docker.removals == 3
+
+
+def test_a_container_that_never_goes_away_is_still_reported_after_the_wait(monkeypatch):
+    import app.pipeline.harness as module
+    clock = [0.0]
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + s)))
+
+    class Stuck(DockerStub):
+        def kill_and_remove(self, name):
+            pass
+    docker = Stuck()
+    docker.containers['name'] = ('our-job:1', ())
+    with pytest.raises(RuntimeError, match='remains after cleanup'):
+        remove_owned(docker, 'name', 'our-job:1')
+    assert clock[0] >= 15 and 'name' in docker.containers
+
+
+def test_concurrent_cleanups_of_one_real_container_both_succeed():
+    import threading, uuid
+    import os
+    if os.name != 'posix':
+        pytest.skip('actual Docker on Linux/macOS required')
+    from app.workspace.sandbox import SandboxError
+    from app.workspace.sandbox import DockerSandbox
+    sandbox = DockerSandbox(supervisor_id='race-test')
+    if not sandbox.available():
+        pytest.skip('actual Docker on Linux/macOS required')
+    try:
+        sandbox.image_id('node:22.20.0-alpine')
+    except SandboxError:
+        pytest.skip('node:22.20.0-alpine is not present locally')
+    for _ in range(6):
+        name = 'race-' + uuid.uuid4().hex[:8]
+        sandbox._docker('run', '-d', '--name', name, '--network', 'none', '--label', 'aiagent.owner=race:1',
+                        'node:22.20.0-alpine', 'sleep', '60')
+        errors = []
+
+        def clean():
+            try:
+                remove_owned(sandbox, name, 'race:1')
+            except Exception as exc:  # noqa: BLE001
+                errors.append(repr(exc))
+        threads = [threading.Thread(target=clean) for _ in range(2)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        sandbox._docker('rm', '-f', name, check=False)
+        assert errors == []

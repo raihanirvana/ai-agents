@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ACTIVE_RUN } from "../format";
 import { useWorkspace } from "../workspace";
 import Activity from "./Activity";
+import Onboarding from "./Onboarding";
 import Board from "./Board";
 import Chat from "./Chat";
 import TicketPanel from "./Ticket";
@@ -34,6 +35,7 @@ export default function Workspace({ onProjects, onLogout }: { onProjects: () => 
         </div>
       </header>
       <ErrorBanner error={error} onDismiss={dismissError} />
+      <Onboarding />
       {board && (
         <details className="brief" open={editing} onToggle={(e) => {
           if (e.currentTarget.open && !editing) { setBrief(board.project.brief); setBriefRevision(board.project.revision); }

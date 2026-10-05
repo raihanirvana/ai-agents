@@ -22,7 +22,8 @@ def row(s, model, identity, project_id=None):
 def project(p):
     return {"id": p.id, "name": p.name, "mode": p.mode, "brief": p.brief, "brief_version": p.brief_version,
             "revision": p.revision, "onboarding": p.workflow.get("onboarding", "pending"),
-            "accepted_tip": p.workflow.get("accepted_tip")}
+            "accepted_tip": p.workflow.get("accepted_tip"),
+            "onboarding_detail": p.workflow.get("onboarding_detail")}
 
 
 def ticket(t):

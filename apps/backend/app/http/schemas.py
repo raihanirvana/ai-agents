@@ -30,6 +30,12 @@ class Brief(Revision):
     brief: str = Field(max_length=30000)
 
 
+class Onboarding(Revision):
+    manifest: dict[str, Any]
+    patch: str | None = Field(default=None, max_length=1000000)
+    source_sha: str | None = Field(default=None, max_length=40)
+
+
 class Criterion(Body):
     id: str = Field(min_length=1, max_length=100)
     text: str = Field(min_length=1, max_length=4000)

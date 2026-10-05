@@ -50,8 +50,9 @@ Kantor Three.js tidak termasuk.
   Checklist manual terikat candidate/scope/target/verifikasi/evidence; tidak berpindah ke
   build baru. Payload UAT memakai seluruh evidence kandidat, termasuk receipt preview smoke,
   dan bukti tambahan itu ikut ditampilkan.
-  Release dan clone/onboarding belum dikerjakan (DEV-014/013): GUI tidak menyediakan tombol
-  release.
+  Onboarding existing (DEV-013) menyediakan form manifest/pilihan patch dengan source SHA,
+  status dirty/baseline/blocker dan report. Release DEV-014 belum dikerjakan; GUI tidak
+  menyediakan tombol release.
 - **Label fake.** Run dengan `fake: true`, atau pesan dengan `metadata.fake`, diberi badge
   "FAKE · bukan QA nyata" di kartu, topbar, run, chat, dan usulan. Tiket dengan run fake
   menampilkan catatan bahwa hasil verifikasinya tidak membuktikan QA nyata. Status `incomplete`

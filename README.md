@@ -338,3 +338,30 @@ lulus kandidat dan gagal base. Total enam percobaan tercatat $0,12668808, termas
 percobaan awal yang gagal. Ini bukan approval UAT/release atau pilot PO DEV-015.
 Evidence summary: [DEV-010-results.json](docs/spikes/DEV-010-results.json).
 Handoff dan status review R6: [DEV-010-handoff.md](docs/reviews/DEV-010-handoff.md).
+
+## Repository existing (DEV-013)
+
+Buat project mode existing dengan path Git lokal yang dapat dibaca worker. Buka panel onboarding,
+pilih runner manifest JSON (`examples/dev010/runner-manifest.json`), lalu mulai job. Perubahan
+staged/unstaged/untracked dilaporkan dan tidak disalin otomatis; patch eksplisit memerlukan source
+HEAD SHA. Clone memiliki config/hooks/refs/objects sendiri. Install/build/test/start berjalan
+di sandbox, lalu laporan baseline/blocker tersedia di panel dan Aktivitas.
+
+```sh
+cd apps/backend
+export PIPELINE_WORKSPACE_ROOT=/absolute/linux/managed-workspaces
+python -m app.onboarding inspect --source /absolute/linux/source-repo
+python -m app.worker --runtime onboarding --db /absolute/linux/app.sqlite3 --artifacts /absolute/linux/artifacts
+```
+
+Onboarding tidak membutuhkan model/Hermes/key. Worker pipeline juga mengambil job onboarding,
+kemudian menjalankan tiket yang scope-nya disetujui. API dan worker harus memakai DB/artifacts
+yang sama. Pada Windows, worker/sumber/workspaces memakai WSL dan path Linux. Dukungan awal:
+static React/Vite, npm public lockfile, flat Node TAP, fixture stateless, migrations none.
+Baseline tests yang gagal tetap tampil failed; waiver hanya oleh pengguna per failure/scope.
+
+[Setup dan keputusan](docs/decisions/onboarding.md), [handoff R8](docs/reviews/DEV-013-handoff.md),
+dan [hasil kualifikasi nyata](docs/spikes/DEV-013-results.json). Fitur receipt melalui provider
+nyata mencapai Accepted dengan test-user UAT dan production integrator; repo sumber dirty
+tetap utuh. Ini tidak menggantikan UAT manual pengguna atau pilot DEV-015. Review independen
+DEV-013: NOT_REVIEWED.

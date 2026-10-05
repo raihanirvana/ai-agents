@@ -59,7 +59,7 @@ export default function Projects({ onOpen, onAuthLost }: { onOpen: (id: string) 
             </label>
             {mode === "existing" && (
               <label>Path repo lokal<input value={repo} onChange={(e) => setRepo(e.target.value)} required />
-                <span className="muted">Hanya didaftarkan; repo asli tidak dibaca atau dijalankan. Onboarding menyusul.</span></label>
+                <span className="muted">Path pada host worker (WSL memakai path Linux). Setelah dibuat, pilih manifest untuk onboarding clone managed.</span></label>
             )}
             <label>Brief (opsional)
               <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={4} placeholder="Mis. Aplikasi kedai kopi dengan profil, menu, dan transaksi." />

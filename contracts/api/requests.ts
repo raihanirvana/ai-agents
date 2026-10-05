@@ -14,6 +14,7 @@ export type InputAnswer = { "expected_revision": number; "request_id": string; "
 export type Login = { "code": string; };
 export type MessageCreate = { "expected_revision": number; "body": string; "task"?: "breakdown" | "revise" | "note"; "ticket_id"?: string | null; };
 export type NonblockingAnswer = { "scope_version": number | null; "generation": number; "answer": string; };
+export type Onboarding = { "expected_revision": number; "manifest": { [key: string]: unknown; }; "patch"?: string | null; "source_sha"?: string | null; };
 export type Phase = "draft" | "scope_review" | "ready" | "development" | "technical_review" | "qa" | "uat" | "integrating" | "accepted" | "cancelled";
 export type Priority = { "expected_revision": number; "priority": number; };
 export type ProjectCreate = { "name": string; "mode"?: "new" | "existing"; "brief"?: string; "repo_ref"?: string | null; };
@@ -36,6 +37,7 @@ export interface RequestBodies {
   "POST /projects/{project_id}/decisions/{proposal_id}": Decision;
   "POST /projects/{project_id}/inputs/{request_id}": NonblockingAnswer;
   "POST /projects/{project_id}/messages": MessageCreate;
+  "POST /projects/{project_id}/onboarding": Onboarding;
   "POST /projects/{project_id}/scope-approvals": ApprovalBatch;
   "POST /projects/{project_id}/tickets": Scope;
   "POST /releases/{release_id}/decisions": ReleaseDecision;

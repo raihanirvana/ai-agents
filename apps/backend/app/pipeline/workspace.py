@@ -319,7 +319,7 @@ class ProductWorkspace:
                                      manifest, result, image_id=image)
         return {**node_gate(result.stdout, result.stderr, result.exit_code),
             'environment_digest': digest_of({'image': image, 'manifest': manifest.effective_config()}),
-            'infrastructure_failure': result.timed_out or result.cancelled or result.oom_killed,
+            'infrastructure_failure': result.timed_out or result.cancelled or result.oom_killed or result.truncated,
             'exit_code': result.exit_code, 'command': report}
 
     def base_build(self, ctx):
@@ -360,13 +360,17 @@ class ProductWorkspace:
             attachments.append(artifact.id)
             gate = result.get('gate')
             if gate and gate['status'] == 'failed' and not gate['infrastructure_failure']:
-                fp = self.store.put_json(s, project_id=identity['project_id'], kind='report', name='baseline-failure.json',
-                    document={'kind': 'baseline_failure', 'ticket_id': identity['ticket_id'], 'scope_version': identity['scope_version'],
-                        'base_sha': result['base_sha'], 'category': 'baseline', 'uac_ids': [], 'infrastructure_failure': False,
-                        'test_id': gate['test_id'], 'signature': gate['signature'], 'environment_digest': gate['environment_digest'],
-                        'environment': {'image_id': image, 'manifest_digest': manifest.digest}}, meta={'producer': 'verification'})
-                attachments.append(fp.id)
-                result['fingerprint_artifact_id'] = fp.id
+                result['fingerprint_artifact_ids'] = []
+                for failure in gate.get('failures', [gate]):
+                    fp = self.store.put_json(s, project_id=identity['project_id'], kind='report', name='baseline-failure.json',
+                        document={'kind': 'baseline_failure', 'ticket_id': identity['ticket_id'], 'scope_version': identity['scope_version'],
+                            'base_sha': result['base_sha'], 'category': 'baseline', 'uac_ids': [], 'infrastructure_failure': False,
+                            'test_id': failure['test_id'], 'signature': failure['signature'], 'environment_digest': gate['environment_digest'],
+                            'environment': {'image_id': image, 'manifest_digest': manifest.digest}}, meta={'producer': 'verification'})
+                    attachments.append(fp.id)
+                    result['fingerprint_artifact_ids'].append(fp.id)
+                if result['fingerprint_artifact_ids']:
+                    result['fingerprint_artifact_id'] = result['fingerprint_artifact_ids'][0]
             self._post(s, identity, 'baseline:' + identity['job_id'] + ':' + str(identity['generation']),
                 'Accepted base checks: ' + result['status'] + '. Baseline failures require an exact user waiver or a fix.',
                 attachments, 'baseline_evidence', base_sha=result['base_sha'], baseline_artifact_id=artifact.id)

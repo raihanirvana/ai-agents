@@ -63,7 +63,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-010 | Pipeline lead/developer/QA dengan bukti test | DEV-003, DEV-006, DEV-007 | DONE |
 | DEV-011 | Preview kandidat dan feedback UAT | DEV-008, DEV-009, DEV-010 | DONE |
 | DEV-012 | Integrasi accepted, dependency, dan recovery Git/DB | DEV-005, DEV-010, DEV-011 | DONE |
-| DEV-013 | Onboarding repository existing | DEV-005, DEV-012 | TODO |
+| DEV-013 | Onboarding repository existing | DEV-005, DEV-012 | DONE |
 | DEV-014 | Release yang dibekukan dan verifikasi gabungan | DEV-012, DEV-013 | TODO |
 | DEV-015 | Pilot end-to-end dan panduan operasional | DEV-009, DEV-011, DEV-013, DEV-014 | TODO |
 | DEV-016 | Kantor Three.js dari aktivitas nyata | DEV-015 | TODO |
@@ -1508,6 +1508,67 @@ dua accept bersamaan, ref divergence, UAT stale base/build, unauthorized ref
 write, dan revalidasi dependency setelah tiket perubahan/revert.
 
 ## DEV-013 — Onboarding repository existing
+
+### Catatan pengerjaan
+
+Status: DONE. Pelaksana/sesi: Codex, 2026-10-05. Review: REVIEWED untuk DEV-013 setelah review
+Claude (Sonnet 5.5) dan recheck perbaikannya oleh Codex. Checkpoint R8 keseluruhan belum ditutup.
+Rencana: onboarding persisten melalui job DB; import Git independen tanpa hooks/config/alternates sumber,
+laporkan dirty status; patch hanya atas pilihan eksplisit dengan pin SHA/provenance. Validasi manifest,
+instruksi dan batas stack; install/build/test/start baseline di sandbox; hubungkan API/GUI/context/pipeline.
+File relevan: `app/onboarding`, `workspace/gitbroker.py`, `worker.py`, HTTP/contracts, GUI dan tests onboarding.
+File hasil: `app/onboarding/{requests,source,runtime,__main__}.py`, workspace baseline builder,
+worker registration, HTTP/contracts/GUI/context/lead plan, per-failure gate/waiver,
+tests onboarding/HTTP/browser, `examples/dev013/{qualification,summary}.py`,
+[onboarding decision](docs/decisions/onboarding.md), [handoff R8](docs/reviews/DEV-013-handoff.md)
+dan [evidence summary](docs/spikes/DEV-013-results.json).
+Verifikasi implementasi awal (sebelum perbaikan reviewer):
+- WSL `python -m pytest tests -q`: 794 passed, 1 failed, 0 skipped (488.28s). Failure di
+  `test_stop_terminates_an_inflight_browser_runner_without_waiting_for_its_timeout`: concurrent
+  cleanup masih melihat container Docker sedang dihapus. Rerun test terpisah: 1 passed (4.37s).
+  Tidak mengklaim full suite seluruhnya hijau; harness cleanup itu tidak diubah DEV-013.
+- Final WSL `python -m pytest tests/onboarding tests/http/test_onboarding.py tests/agents/test_context.py -q`:
+  38 passed (113.95s), termasuk Docker nyata, latest source/filter hardening, explicit patch,
+  blocked/failed baseline, stale publication, crash rollback/replay, recovery ownership dan exact waiver.
+- Source safety final `tests/onboarding/test_source.py`: 10 passed, termasuk local line-ending policy
+  tanpa refresh index; context/source recheck sebelum itu 27 passed.
+- `npm run build`: passed. `npx playwright test --config playwright.web.config.ts`: 32 passed (18.4s).
+- `git diff --check`: passed. OpenAPI/requests regenerated; HTTP contract checks passed.
+Evidence/keputusan: kualifikasi menggunakan source fixture dari kandidat terverifikasi DEV-010,
+dirty working tree, Hermes/OpenRouter nyata. Fitur receipt → review → QA browser separate →
+test-user UAT → production integrator Accepted. 14 model calls, $0,0176504 reported, usage unknown kosong.
+Source inventory termasuk `.git`/refs/config/index/dirty files unchanged. QA kandidat 1/1 pass;
+feature test gagal di base. Approval fixture bukan UAT manual pengguna dan bukan penutupan DEV-015.
+Blocker/sisa: tidak ada AC implementasi tersisa menurut implementer. Batas stack static React/Vite,
+public npm lockfile/flat Node TAP/migrations none, source Git lokal; partial import butuh inspeksi operator.
+Full-suite Docker cleanup race awal telah diperbaiki reviewer; lihat laporan dan recheck di bawah.
+Independent review DEV-013 telah dilakukan; checkpoint R8 keseluruhan belum ditutup.
+Handoff: pemetaan keenam AC, diff termasuk files baru dan cara reproduksi ada di handoff; artifact
+authoritative private tetap di WSL. Pengguna mengotorisasi commit/push sesudah recheck; tidak ada deployment.
+DEV-014 adalah tiket berikutnya; tidak dimulai.
+
+Review DEV-013 oleh Claude (Sonnet 5.5, 2026-10-05): **NEEDS_FIX** pada review awal, bukan penutupan R8. Isolasi sumber
+(hook/fsmonitor/filter tidak berjalan, repo asli utuh, clone tanpa alternates) tidak ditemukan celah. Temuan, direproduksi
+lalu diperbaiki reviewer atas instruksi pengguna: (P1) fingerprint waiver per failure tidak pernah cocok pada keluaran
+`node --test` nyata (baris:kolom, frame internal Node, dan baris rencana `1..N` ikut dihitung; tes sintetis tidak
+menangkapnya); (P1, harness DEV-010) pembersihan container bersamaan gagal "owned container remains" pada 18 dari 25
+ronde nyata, penyebab kegagalan full suite yang dicatat handoff, kini 0/25 (juga di `PreviewService`); (P2) baseline
+yang diblokir tidak dapat di-onboard lagi setelah sumber diperbaiki, kini import tak teraktivasi diarsipkan; (P2) daftar
+perubahan lokal tak terbatas disimpan di baris proyek, kini dibatasi 200 entri dengan digest lengkap; (P3) dua modul tes
+memutus koleksi suite Windows. Sesudah fix: WSL+Docker 804 passed, Windows 557 passed/20 skipped, GUI 32 passed. DEV-013
+tetap **DONE**; saat handoff reviewer, perbaikan **menunggu re-review independen**. Detail dan observasi O1-O8:
+[docs/reviews/DEV-013-review.md](./docs/reviews/DEV-013-review.md).
+
+Recheck 2026-10-05 oleh Codex terhadap diff perbaikan Claude: **REVIEWED (DEV-013 saja)**; tidak ditemukan blocker
+baru. Codex adalah implementer awal, tetapi bukan penulis lima fix tersebut; ini re-review fix reviewer, bukan klaim
+independent review ulang seluruh implementasi oleh implementer. Tree final: WSL+Docker `python -m pytest tests -q`
+**804 passed**, 0 failed/0 skipped (516,34s); Windows dengan dua direktori POSIX dikecualikan **557 passed, 20 skipped**
+(75,82s); GUI **32 passed** (23,5s); `npm run build` dan `git diff --cached --check` lulus. Cleanup PreviewService
+bersamaan diuji terpisah dengan Docker nyata: **8/8 ronde lulus**, tidak ada container milik percobaan tersisa.
+Ringkasan kualifikasi cocok dengan DB/report privat; delapan artefak ter-pin lolos checksum dan ref accepted cocok
+kandidat. Provider berbayar tidak diulang; approval fixture tetap bukan UAT manual. Fixtures TAP mempertahankan
+spasi diagnostik asli melalui `.gitattributes` yang scoped ke dua file tersebut. O1-O8 tetap follow-up, R8 belum
+ditutup, DEV-014 belum dimulai. Commit/push ke `origin/master` mengikuti instruksi pengguna setelah checks ini.
 
 **Tujuan:** platform mendukung repo pengguna tanpa mengubah repo asli.
 
