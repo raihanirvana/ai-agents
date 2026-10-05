@@ -27,7 +27,7 @@ from app.domain import Actor
 from app.domain.types import Conflict, Invalid
 from app.persistence import ArtifactUnavailable, NotFound, RevisionConflict, append_message
 from app.persistence.columns import utcnow
-from app.persistence.models import Approval, Candidate, Ticket
+from app.persistence.models import Approval, Candidate, Job, Ticket
 from app.persistence.transactions import bind_service
 from app.workspace import WorkspaceSupervisor
 from app.workspace.errors import GitBrokerError
@@ -71,7 +71,11 @@ class Integrator:
         """Tickets with a pending operation, oldest acceptance first (serial per project)."""
         with self.db.read() as s:
             rows = []
+            frozen = set(s.scalars(select(Job.project_id).where(
+                Job.stage == "release", Job.status.in_(("queued", "running", "waiting_input", "waiting_quota")))))
             for t in s.scalars(select(Ticket).where(Ticket.phase == "integrating")):
+                if t.project_id in frozen:
+                    continue  # release freeze: the operation stays pending and its ticket joins the next release
                 c = s.get(Candidate, t.workflow.get("candidate_id")) if t.workflow.get("candidate_id") else None
                 if c is not None and (c.integration or {}).get("status") == "pending":
                     approval = s.get(Approval, c.integration.get("approval_id"))

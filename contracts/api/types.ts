@@ -61,6 +61,21 @@ export interface Integration {
   operation_id: string; status: "pending" | "done" | "diverged" | "blocked"; expected_base: string; target_sha: string;
   observed_tip: string | null; reason: string | null; evidence_artifact_id: string | null;
 }
+export interface ReleaseEntry {
+  ticket_id: string; number: number; title: string; scope_version: number; candidate_id: string; integrated_sha: string;
+  uac: Criterion[]; checklist: string[]; affected_by_sync?: boolean; overlap_files?: string[];
+}
+export interface ReleaseExport {
+  formats: string[]; tip: string; base_sha: string; branch: string; ref_in_bundle: string; patch_artifact_id: string;
+  bundle_artifact_id: string; pushed: boolean; deployed: boolean; how_to_use: string; exported_at: string;
+}
+/** `evidence_ids[0]` is the combined verification report; approval must send exactly this list. */
+export interface Release {
+  id: string; project_id: string; status: "draft" | "approved" | "exported" | "deployed" | "failed"; accepted_tip: string;
+  scope: ReleaseEntry[]; checklist: string[]; target_artifact_id: string; target_digest: string; build_artifact_id: string;
+  evidence_ids: string[]; export: ReleaseExport | null; deployment: Json; deployed: boolean; revision: number; created_at: string;
+  technical_review_evidence_ids?: string[];
+}
 export interface Candidate {
   id: string; ticket_id: string; scope_version: number; commit_sha: string; base_sha: string; status: string;
   target_artifact_id: string | null; target_digest: string | null; evidence_ids: string[]; preview: Json;
@@ -68,7 +83,7 @@ export interface Candidate {
   integrated_sha: string | null; integration: Integration | null;
   verifications: Verification[];
 }
-export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; preview: Preview | null; cursor: number }
+export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; preview: Preview | null; releases: Release[]; cursor: number }
 export interface TicketDetail {
   ticket: Ticket; versions: { version: number; title: string; description: string; uac: Criterion[]; scope: Json }[];
   dependencies: { upstream_id: string; state: string; scope_version: number | null; candidate_id: string | null;
@@ -106,6 +121,11 @@ export interface Commands {
   input: { body: InputAnswer; response: { answer_id: string; resumed: boolean } };
   nonblockingInput: { body: { scope_version: number | null; generation: number; answer: string }; response: { answer_id: string; resumed: boolean } };
   stop: { body: Empty; response: { run: Run; cleanup: "supervisor_pending" } };
+  freezeRelease: { body: Revision; response: { job_id: string; accepted_tip: string; tickets: string[] } };
+  approveRelease: { body: Body.ReleaseDecision; response: { release_id: string; status: string; revision: number } };
+  discardRelease: { body: Revision; response: { release: Release } };
+  exportRelease: { body: Revision; response: { job_id: string } };
+  syncRelease: { body: Revision; response: { job_id: string } };
   startPreview: { body: Empty; response: { preview: Preview } };
   stopPreview: { body: Empty; response: { preview: Preview } };
   budget: { body: Revision & { additions: { [key: string]: number } }; response: { run: Run } };

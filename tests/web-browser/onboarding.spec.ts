@@ -19,7 +19,7 @@ test('existing onboarding submits an explicit patch with pinned SHA and displays
     if (path.endsWith('/tickets')) return json({ project: { ...current, ...(current.accepted_tip ? { onboarding_detail: {
       job_id: 'onboarding-1', source_sha: 'a'.repeat(40), baseline_sha: 'b'.repeat(40), dirty: true,
       dirty_status: [' M src/main.jsx'], patch_applied: true, required_checks: 'failed', report_artifact_id: 'baseline-1' } } : {}) },
-      tickets: [], runs: [], preview: null, cursor: 5 });
+      tickets: [], runs: [], preview: null, releases: [], cursor: 5 });
     if (path.endsWith('/messages')) return json({ messages: [], cursor: 5 });
     if (path.endsWith('/events')) return route.abort();
     return json({});

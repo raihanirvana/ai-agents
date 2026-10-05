@@ -19,6 +19,7 @@ from app.persistence import (Database, ArtifactStore, migrate, NotFound, Revisio
 from app.persistence.columns import new_id, utcnow
 from app.persistence.models import Project, Ticket, Message, Job, Candidate, Artifact, Release, LocalSession, Preview
 from app.preview import requests as previews
+from app.release import requests as releases
 from app.workers import JobQueue, ProviderLimiter
 from app.workers.queue import StaleLease, BudgetExhausted, QueueError
 from app.workers.runtime import RunContext, WaitingForInput
@@ -220,8 +221,46 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     def release(request: Request, release_id: str, body: b.ReleaseDecision):
         def action(s, svc, key, p):
             r = q.row(s, Release, release_id)
-            r = svc.workflow.approve_release(user_actor(p, r.project_id), release_id, body.expected_revision, body.target_artifact_id, body.target_digest, body.evidence_ids)
+            r = svc.workflow.approve_release(user_actor(p, r.project_id), release_id, body.expected_revision, body.target_artifact_id,
+                body.target_digest, body.evidence_ids, body.manual_uac_ids, body.reviewed_diff_ids)
             return {"release_id": r.id, "status": r.status, "revision": r.revision}
+        return command(request, body, action)
+    @app.post("/projects/{project_id}/releases")
+    def freeze_release(request: Request, project_id: str, body: b.Revision):
+        """Freeze the accepted tip and the accepted tickets not yet released. Verification runs on the worker."""
+        def action(s, svc, key, p):
+            job, tip, entries = releases.request_freeze(s, svc, user_actor(p, project_id), body.expected_revision, key)
+            return {"job_id": job.id, "accepted_tip": tip, "tickets": [e["ticket_id"] for e in entries]}
+        return command(request, body, action)
+    @app.get("/projects/{project_id}/releases")
+    def list_releases(request: Request, project_id: str):
+        auth(request)
+        with request.app.state.api.db.read() as s:
+            q.row(s, Project, project_id)
+            return clean(request, {"releases": [releases.public(r, s) for r in releases.releases(s, project_id)]})
+    @app.get("/releases/{release_id}")
+    def get_release(request: Request, release_id: str):
+        auth(request)
+        with request.app.state.api.db.read() as s:
+            return clean(request, {"release": releases.public(releases.get(s, release_id), s)})
+    @app.post("/releases/{release_id}/discard")
+    def discard_release(request: Request, release_id: str, body: b.Revision):
+        def action(s, svc, key, p):
+            r = q.row(s, Release, release_id)
+            return {"release": releases.public(svc.workflow.discard_release(user_actor(p, r.project_id), release_id, body.expected_revision), s)}
+        return command(request, body, action)
+    @app.post("/releases/{release_id}/export")
+    def export_release(request: Request, release_id: str, body: b.Revision):
+        """Explicit local export (patch + bundle). Never pushes, opens a PR or deploys; runs on the worker."""
+        def action(s, svc, key, p):
+            r = q.row(s, Release, release_id)
+            return {"job_id": releases.request_export(s, svc, user_actor(p, r.project_id), release_id, body.expected_revision, key).id}
+        return command(request, body, action)
+    @app.post("/releases/{release_id}/sync")
+    def sync_release(request: Request, release_id: str, body: b.Revision):
+        def action(s, svc, key, p):
+            r = q.row(s, Release, release_id)
+            return {"job_id": releases.request_sync(s, svc, user_actor(p, r.project_id), release_id, body.expected_revision, key).id}
         return command(request, body, action)
     @app.post("/projects/{project_id}/messages")
     def post_message(request: Request, project_id: str, body: b.MessageCreate):

@@ -52,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         redactor = Redactor([v for k, v in os.environ.items() if any(
             marker in k.upper() for marker in ('API_KEY', 'SECRET', 'TOKEN', 'PASSWORD'))])
         runtimes['onboarding'] = OnboardingRuntime(db, store, root, redactor)
+        from app.release.runtime import ReleaseRuntime
+        runtimes['release'] = ReleaseRuntime(db, store, workflow, root, redactor)
     if args.runtime in ("structured", "pipeline"):
         from app.agents.wiring import build_structured_runtime
         runtime, threads, notes = build_structured_runtime(db, store, workflow, queue)

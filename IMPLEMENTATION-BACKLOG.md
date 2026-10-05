@@ -64,7 +64,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-011 | Preview kandidat dan feedback UAT | DEV-008, DEV-009, DEV-010 | DONE |
 | DEV-012 | Integrasi accepted, dependency, dan recovery Git/DB | DEV-005, DEV-010, DEV-011 | DONE |
 | DEV-013 | Onboarding repository existing | DEV-005, DEV-012 | DONE |
-| DEV-014 | Release yang dibekukan dan verifikasi gabungan | DEV-012, DEV-013 | TODO |
+| DEV-014 | Release yang dibekukan dan verifikasi gabungan | DEV-012, DEV-013 | DONE |
 | DEV-015 | Pilot end-to-end dan panduan operasional | DEV-009, DEV-011, DEV-013, DEV-014 | TODO |
 | DEV-016 | Kantor Three.js dari aktivitas nyata | DEV-015 | TODO |
 | DEV-017 | Packaging satu VPS | DEV-015 | TODO |
@@ -1596,6 +1596,40 @@ refs, dan config sumber sebelum/sesudah, termasuk sumber dengan dirty changes.
 Uji baseline waiver yang cocok dan failure baru dengan jumlah kegagalan yang sama.
 
 ## DEV-014 — Release yang dibekukan dan verifikasi gabungan
+
+### Catatan pengerjaan
+Status: DONE. Pelaksana awal: Claude (Sonnet 5.5), 2026-10-05. Review independen awal Codex: NEEDS_FIX; tujuh temuan diperbaiki dan diverifikasi. Fix reviewer menunggu re-review independen, bukan klaim penutupan R8.
+Rencana: `POST /projects/{id}/releases` membekukan accepted tip dan scope (tiket Accepted yang belum masuk release
+approved/exported sebelumnya) sebagai job `release` DB; selama freeze aktif integrator tidak menggeser tip (accept
+baru tetap tercatat dan masuk release berikutnya). Runtime release (worker, Docker) membangun commit beku dalam
+sandbox, menjalankan repo gate dan regression browser gabungan dari suite QA tiket yang termasuk pada satu target
+release (build/config/toolchain/fixture identity), lalu menerbitkan draft release + receipt `release_verification`
+(atau release `failed` bila regression gagal). Approval release (pengguna) mem-pin target/evidence dan checklist UAC
+manual; tip beku boleh sudah dilewati tip baru (riwayat tip). Export lokal eksplisit (patch + git bundle, tanpa push);
+export ditolak bila HEAD repo sumber berubah dari baseline onboarding; sinkronisasi gabungan membangun kandidat
+pengganti (patch rilis diterapkan ke HEAD sumber baru) dengan diff, tiket terdampak, regression, dan approval baru.
+Approved bukan deployed. API/GUI panel release, tes fault/restart.
+File rencana: `app/release/**`, `domain/service.py`, `integration/integrator.py`, `workspace/supervisor.py`,
+`onboarding/source.py`, `worker.py`, HTTP/contracts, GUI Releases, `tests/release/**`, `docs/decisions/release.md`,
+handoff. Tidak mulai DEV-015. Belum commit/push.
+
+Hasil: freeze accepted tip dan scope (integrator menahan tip selama job release), verifikasi gabungan pada satu target
+(build bersih, repo tests, regression browser gabungan dari suite QA tiap tiket), draf release dengan receipt dan bukti
+terpin atau `failed` bila regression gagal, approval pengguna yang mem-pin target/evidence dan checklist UAC manual,
+tip beku tetap sah sesudah tip maju (riwayat tip), ekspor lokal patch + Git bundle tanpa push/PR/deploy (ditolak bila
+repo sumber bergerak), sinkronisasi gabungan menjadi satu release pengganti dengan tiket terdampak dan checklist baru,
+API/GUI tab Release. Pemetaan AC, perintah, dan known issues: [DEV-014-handoff](docs/reviews/DEV-014-handoff.md).
+Keputusan: [release](docs/decisions/release.md).
+
+Verifikasi: WSL+Docker suite backend lengkap 832 passed (sebelum dua tes tambahan; `tests/release tests/domain tests/http
+tests/integration` 220 passed sesudahnya, termasuk 15 tes Git/Docker nyata di `tests/release`); Windows 572 passed/21
+skipped; GUI 35 passed; browser preview 4, smoke 5, browser DEV-008 3 passed; build lulus. Uji mutasi: menghapus penahanan
+integrator dan menghapus riwayat tip menggagalkan tesnya. Bug yang ditemukan tes: receipt sinkronisasi diparse dari semua
+artefak verification termasuk screenshot biner (kini hanya laporan JSON). Keterbatasan: repo tests wajib lulus penuh pada
+release, basis sumber setelah sinkronisasi hanya berlaku untuk release pengganti, tanpa tag/deployment, stack statis
+stateless. Belum commit/push; DEV-015 tidak dikerjakan.
+
+Review Codex 2026-10-05: tujuh fix mencakup regression seluruh fitur accepted saat freeze, ekspor patch onboarding dari source SHA, retry sinkronisasi setelah kandidat dibuat, review teknis manusia yang mem-pin dua diff, drift source saat ekspor, discard selama sync, dan eviction riwayat tip. Laporan: [DEV-014-review](docs/reviews/DEV-014-review.md). WSL backend 841 passed sebelum dua guard domain terakhir; WSL targeted 241 passed setelah guard discard sebelum fallback tip; final domain release/HTTP 17 passed di WSL dan Windows setelah seluruh edit. Windows full 573 passed/21 skipped, domain/HTTP 174 passed/2 skipped; GUI 36 passed; build, kontrak dan whitespace lulus. Paid provider/UAT manusia tidak dijalankan pada review. Angka implementer sebelumnya adalah catatan historis. Pengguna mengotorisasi commit/push dan lanjut DEV-015; checkpoint R8 tetap terbuka sampai bukti pilot serta review fix lengkap.
 
 **Tujuan:** full release berasal dari accepted build yang benar-benar diuji.
 

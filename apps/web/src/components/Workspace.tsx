@@ -3,12 +3,13 @@ import { ACTIVE_RUN } from "../format";
 import { useWorkspace } from "../workspace";
 import Activity from "./Activity";
 import Onboarding from "./Onboarding";
+import Releases from "./Releases";
 import Board from "./Board";
 import Chat from "./Chat";
 import TicketPanel from "./Ticket";
 import { Badge, ErrorBanner, FakeBadge } from "./ui";
 
-type Tab = "chat" | "ticket" | "activity";
+type Tab = "chat" | "ticket" | "activity" | "release";
 
 export default function Workspace({ onProjects, onLogout }: { onProjects: () => void; onLogout: () => void }) {
   const { board, connection, error, dismissError, selectedTicket, command, busy } = useWorkspace();
@@ -60,7 +61,7 @@ export default function Workspace({ onProjects, onLogout }: { onProjects: () => 
         <Board />
         <aside className="side" aria-label="Panel kerja">
           <div className="tabs" role="tablist">
-            {([["chat", "Chat PO"], ["ticket", "Tiket"], ["activity", `Aktivitas${active ? ` (${active})` : ""}`]] as [Tab, string][]).map(([id, label]) => (
+            {([["chat", "Chat PO"], ["ticket", "Tiket"], ["activity", `Aktivitas${active ? ` (${active})` : ""}`], ["release", "Release"]] as [Tab, string][]).map(([id, label]) => (
               <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "tab tab--on" : "tab"}
                 onClick={() => { setTab(id); }}>{label}</button>
             ))}
@@ -69,6 +70,7 @@ export default function Workspace({ onProjects, onLogout }: { onProjects: () => 
             {tab === "chat" && <Chat />}
             {tab === "ticket" && <TicketPanel />}
             {tab === "activity" && <Activity />}
+            {tab === "release" && <Releases />}
           </div>
         </aside>
       </div>

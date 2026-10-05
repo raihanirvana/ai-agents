@@ -532,8 +532,9 @@ class Workflow:
             c.integrated_sha, c.status = observed_tip, "accepted"
             c.integration = {**op, "status": "done"}
             s.flush()
+            history = [*p.workflow.get("tip_history", []), p.workflow.get("accepted_tip")][-2000:]
             apply_change(s, Project, p.id, expected_revision=p.revision,
-                values={"workflow": {**p.workflow, "accepted_tip": observed_tip}},
+                values={"workflow": {**p.workflow, "accepted_tip": observed_tip, "tip_history": history}},
                 event=EventSpec("project.accepted_tip_changed", actor.id, {"accepted_tip": observed_tip}))
             t = self._change(s, actor, t, "integrated", phase="accepted",
                 workflow={**t.workflow, "accepted_candidate_id": c.id})
@@ -755,7 +756,27 @@ class Workflow:
             remaining = s.scalar(select(Dependency.id).where(Dependency.ticket_id == t.id, Dependency.state != "satisfied"))
             return self._change(s, actor, t, "dependency_revalidated", blocker=self._work_blocker(t, bool(remaining)))
 
-    def approve_release(self, actor, release_id, expected_revision, target_artifact_id, target_digest, evidence_ids):
+    @staticmethod
+    def scope_digest(snapshot) -> str:
+        return sha256_bytes(canonical_json(snapshot))
+
+    def tip_known(self, project, sha) -> bool:
+        """A release tip is the current accepted tip, an earlier accepted tip, or a verified release-sync candidate."""
+        w = project.workflow
+        if sha == w.get("accepted_tip") or sha in w.get("tip_history", []) or sha in w.get("release_tips", []):
+            return True
+        # The bounded display history is not the authoritative acceptance record. Accepted candidates and their
+        # integration identity remain persisted even after thousands of later tickets move the tip.
+        with self.db.read() as s:
+            return s.scalar(select(Candidate.id).where(Candidate.project_id == project.id,
+                Candidate.status == "accepted", Candidate.integrated_sha == sha).limit(1)) is not None
+
+    @staticmethod
+    def release_checklist(snapshot) -> list[str]:
+        return sorted({key for entry in snapshot for key in entry.get("checklist", [])})
+
+    def approve_release(self, actor, release_id, expected_revision, target_artifact_id, target_digest, evidence_ids,
+                        manual_uac_ids=(), reviewed_diff_ids=()):
         with self.db.write() as s:
             self._permit(s, actor, "user")
             r = self._row(s, Release, release_id, actor)
@@ -763,8 +784,13 @@ class Workflow:
                 raise RevisionConflict("releases", r.id, expected_revision, r.revision)
             if r.status != "draft" or r.target_artifact_id != target_artifact_id or r.target_digest != target_digest or set(evidence_ids) != set(r.evidence_artifact_ids) or len(evidence_ids) != len(set(evidence_ids)):
                 raise Conflict("release target/evidence changed")
-            if r.accepted_tip != s.get(Project, actor.project_id).workflow.get("accepted_tip"):
-                raise Conflict("release accepted tip changed")
+            project = s.get(Project, actor.project_id)
+            # Tickets accepted after the freeze moved the tip on; the frozen tip must still be one the product accepted.
+            if not self.tip_known(project, r.accepted_tip):
+                raise Conflict("release accepted tip is not a tip this project accepted")
+            required = self.release_checklist(r.scope_snapshot)
+            if sorted(manual_uac_ids) != required or len(set(manual_uac_ids)) != len(list(manual_uac_ids)):
+                raise Invalid("manual UAC checklist of this release must be confirmed exactly")
             for aid in [r.target_artifact_id, r.build_artifact_id, r.commit_artifact_id, r.context_artifact_id, *evidence_ids]:
                 if aid:
                     evidence.artifact(s, self.store, r.project_id, aid)
@@ -773,8 +799,16 @@ class Workflow:
                 raise Invalid("release digest/evidence missing")
             # DEV-014 verification service publishes a bound combined regression receipt.
             target_doc = evidence.document(s, self.store, r.target_artifact_id)
-            if target_doc.get("accepted_tip") != r.accepted_tip or target_doc.get("build_artifact_id") != r.build_artifact_id:
-                raise Conflict("release manifest does not identify its frozen build/tip")
+            if (target_doc.get("accepted_tip") != r.accepted_tip or target_doc.get("build_artifact_id") != r.build_artifact_id
+                    or target_doc.get("scope_digest") != self.scope_digest(r.scope_snapshot)):
+                raise Conflict("release manifest does not identify its frozen build/tip/scope")
+            diffs = target_doc.get("technical_review_evidence_ids", [])
+            if target_doc.get("sync") and (len(diffs) != 2 or len(set(diffs)) != 2):
+                raise Invalid("synchronised release requires pinned diffs for technical review")
+            if sorted(reviewed_diff_ids) != sorted(diffs) or len(set(reviewed_diff_ids)) != len(list(reviewed_diff_ids)):
+                raise Invalid("technical review of the exact synchronisation diffs must be confirmed")
+            if not set(diffs).issubset(evidence_ids):
+                raise Invalid("technical review diffs must be included in release evidence")
             receipts = [evidence.document(s, self.store, aid) for aid in evidence_ids
                         if s.get(Artifact, aid).kind == "report" and s.get(Artifact, aid).meta.get("producer") == "verification"]
             if not any(p.get("kind") == "release_verification" and p.get("status") == "passed" and
@@ -784,11 +818,137 @@ class Workflow:
                     p.get("counts"), p.get("expected_test_ids"), p.get("executed_test_ids"), p.get("commands")) for p in receipts):
                 raise Invalid("release requires matching combined verification receipt")
             s.add(Approval(project_id=r.project_id, type="release", user_id=actor.id, release_id=r.id,
-                target_artifact_id=r.target_artifact_id, target_digest=r.target_digest, evidence_artifact_ids=list(evidence_ids)))
+                target_artifact_id=r.target_artifact_id, target_digest=r.target_digest, evidence_artifact_ids=list(evidence_ids),
+                details={"manual_uac_ids": required, "scope_digest": self.scope_digest(r.scope_snapshot),
+                         "accepted_tip": r.accepted_tip, **({"technical_review": {
+                             "reviewer": actor.id, "diff_artifact_ids": list(diffs), "target_digest": r.target_digest}}
+                             if diffs else {})}))
             s.flush()
             r.status = "approved"
             s.flush()
             self._event(s, actor, "release.approved", r, {"target_artifact_id": r.target_artifact_id, "target_digest": r.target_digest})
+            return r
+
+    def freeze_release_scope(self, actor, *, include_released=False):
+        """User intent to cut a release: the accepted tip and the accepted tickets not yet in an approved release.
+
+        Nothing is built or approved here. Returns (accepted_tip, entries); the caller records the freeze as a job."""
+        with self.db.read() as s:
+            self._permit(s, actor, "user")
+            project = self._row(s, Project, actor.project_id, actor)
+            tip = project.workflow.get("accepted_tip")
+            if not tip:
+                raise Conflict("project has no accepted base yet")
+            if s.scalar(select(Ticket.id).where(Ticket.project_id == project.id, Ticket.phase == "integrating")):
+                raise Conflict("reconcile pending integrations before freezing a release")
+            if s.scalar(select(Release.id).where(Release.project_id == project.id, Release.status == "draft")):
+                raise Conflict("a draft release already exists; approve or discard it first")
+            released = {e["ticket_id"] for r in s.scalars(select(Release).where(
+                Release.project_id == project.id, Release.status.in_(("approved", "exported", "deployed"))))
+                for e in r.scope_snapshot}
+            entries = []
+            for t in s.scalars(select(Ticket).where(Ticket.project_id == project.id, Ticket.phase == "accepted").order_by(Ticket.number)):
+                c = s.get(Candidate, t.workflow.get("accepted_candidate_id")) if t.workflow.get("accepted_candidate_id") else None
+                if (t.id in released and not include_released) or c is None or c.status != "accepted" or not c.integrated_sha:
+                    continue
+                version = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id,
+                                                               TicketVersion.version == c.scope_version))
+                approval = s.scalar(select(Approval).where(Approval.type == "uat", Approval.candidate_id == c.id))
+                entries.append({"ticket_id": t.id, "number": t.number, "title": version.title, "scope_version": c.scope_version,
+                    "candidate_id": c.id, "integrated_sha": c.integrated_sha, "uat_approval_id": approval.id if approval else None,
+                    "target_artifact_id": c.target_artifact_id, "target_digest": c.target_digest,
+                    "uac": [{"id": u["id"], "text": u["text"], "mode": u.get("mode", "automated")} for u in version.uac],
+                    "checklist": [f"{t.id}:{u['id']}" for u in version.uac if u.get("mode") == "manual"]})
+            if not entries:
+                raise Invalid("no accepted tickets are waiting for a release")
+            return tip, entries
+
+    def draft_release(self, actor, *, scope_snapshot, accepted_tip, target_artifact_id, target_digest, build_artifact_id,
+                      evidence_ids, verification_passed, commit_artifact_id=None, sync_candidate=False, replaces=None):
+        """Verification service publishes the release verified on ONE combined target. A failed regression is still
+        recorded (status failed) with its evidence, so the user sees why; it can never be approved."""
+        with self.db.write() as s:
+            self._permit(s, actor, "verification")
+            project = self._row(s, Project, actor.project_id, actor)
+            drafts = list(s.scalars(select(Release.id).where(Release.project_id == project.id, Release.status == "draft")))
+            if drafts and drafts != [replaces]:
+                raise Conflict("a draft release already exists")
+            old = self._row(s, Release, replaces, actor) if replaces else None
+            if old is not None and old.status not in ("draft", "approved"):
+                raise Conflict("the source release is no longer eligible for replacement")
+            evidence.digest(accepted_tip, (40, 64))
+            if not sync_candidate and not self.tip_known(project, accepted_tip):
+                raise Conflict("release tip is not a tip this project accepted")
+            if not isinstance(scope_snapshot, list) or not scope_snapshot or not evidence_ids:
+                raise Invalid("a release needs its frozen scope and verification evidence")
+            for aid in [target_artifact_id, build_artifact_id, commit_artifact_id, *evidence_ids]:
+                if aid:
+                    evidence.artifact(s, self.store, project.id, aid)
+            target = evidence.document(s, self.store, target_artifact_id)
+            if (target.get("accepted_tip") != accepted_tip or target.get("build_artifact_id") != build_artifact_id
+                    or target.get("scope_digest") != self.scope_digest(scope_snapshot)):
+                raise Conflict("release target does not identify the frozen tip/build/scope")
+            if sync_candidate:
+                # The combined candidate becomes a valid release tip only through its own verification evidence.
+                sync = [evidence.document(s, self.store, aid) for aid in evidence_ids
+                        if s.get(Artifact, aid).kind == "report" and s.get(Artifact, aid).meta.get("producer") == "verification"]
+                if not any(d.get("kind") == "release_sync" and d.get("candidate_sha") == accepted_tip for d in sync):
+                    raise Invalid("sync candidate has no verification receipt")
+            r = Release(project_id=project.id, scope_snapshot=scope_snapshot, accepted_tip=accepted_tip,
+                        target_artifact_id=target_artifact_id, target_digest=target_digest, build_artifact_id=build_artifact_id,
+                        commit_artifact_id=commit_artifact_id, evidence_artifact_ids=list(evidence_ids))
+            s.add(r)
+            s.flush()
+            if sync_candidate:
+                apply_change(s, Project, project.id, expected_revision=project.revision, values={"workflow": {
+                    **project.workflow, "release_tips": [*project.workflow.get("release_tips", []), accepted_tip][-200:]}},
+                    event=EventSpec("project.release_tip_recorded", actor.id, {"release_id": r.id, "tip": accepted_tip}))
+            if replaces:
+                if old.status == "draft":
+                    old.status = "failed"
+                    s.flush()
+                    self._event(s, actor, "release.superseded", old, {"replaced_by": r.id})
+            self._event(s, actor, "release.drafted", r, {"accepted_tip": accepted_tip, "target_digest": target_digest,
+                                                          "verification_passed": bool(verification_passed)})
+            if not verification_passed:
+                r.status = "failed"  # never approvable; the evidence stays attached
+                s.flush()
+                self._event(s, actor, "release.failed", r, {"reason": "combined verification did not pass"})
+            return r
+
+    def discard_release(self, actor, release_id, expected_revision):
+        with self.db.write() as s:
+            self._permit(s, actor, "user")
+            r = self._row(s, Release, release_id, actor)
+            if r.revision != expected_revision:
+                raise RevisionConflict("releases", r.id, expected_revision, r.revision)
+            if r.status != "draft":
+                raise Conflict("only a draft release can be discarded")
+            r.status = "failed"
+            s.flush()
+            self._event(s, actor, "release.discarded", r, {})
+            return r
+
+    def record_export(self, actor, release_id, expected_revision, export_result):
+        """Integrator receipt: local export artifacts exist for exactly the approved target. Never push or deploy."""
+        with self.db.write() as s:
+            self._permit(s, actor, "integrator")
+            r = self._row(s, Release, release_id, actor)
+            if r.revision != expected_revision:
+                raise RevisionConflict("releases", r.id, expected_revision, r.revision)
+            if r.status != "approved":
+                raise Conflict("only an approved release can be exported")
+            if (not isinstance(export_result, dict) or export_result.get("tip") != r.accepted_tip
+                    or export_result.get("pushed") is not False or export_result.get("deployed") is not False):
+                raise Invalid("export receipt must name the release tip and state that nothing was pushed or deployed")
+            for key in ("patch_artifact_id", "bundle_artifact_id"):
+                row = evidence.artifact(s, self.store, r.project_id, export_result.get(key))
+                if row.meta.get("producer") != "integrator":
+                    raise Invalid("export artifacts must be published by the integrator")
+            r.export_result, r.status = export_result, "exported"
+            s.flush()
+            self._event(s, actor, "release.exported", r, {"patch_artifact_id": export_result["patch_artifact_id"],
+                                                          "bundle_artifact_id": export_result["bundle_artifact_id"]})
             return r
 
     def waive_baseline(self, actor, ticket_id, expected_revision, fingerprint_artifact_id, reason):

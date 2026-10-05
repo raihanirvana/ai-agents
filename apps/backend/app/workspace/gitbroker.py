@@ -121,6 +121,10 @@ class GitBroker:
         out = self._bare("for-each-ref", "--format=%(refname) %(objectname)").decode()
         return dict(line.split(" ", 1) for line in out.splitlines() if line)
 
+    def release_shas(self) -> set[str]:
+        """Commits the release machinery pinned under refs/releases/ (never accepted or attempt refs)."""
+        return {sha for ref, sha in self.refs().items() if ref.startswith("refs/releases/")}
+
     # -- attempts ------------------------------------------------------------
     def create_worktree(self, attempt_ref: str, worktree: Path, base_sha: str) -> None:
         if not is_attempt_ref(attempt_ref) or not is_sha(base_sha):

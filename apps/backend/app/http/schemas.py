@@ -127,6 +127,8 @@ class ReleaseDecision(Revision):
     target_artifact_id: str
     target_digest: str
     evidence_ids: list[str]
+    manual_uac_ids: list[str] = Field(default_factory=list, max_length=500)
+    reviewed_diff_ids: list[str] = Field(default_factory=list, max_length=2)
 
 
 class CandidateSubmit(Revision):

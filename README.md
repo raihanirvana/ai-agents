@@ -146,6 +146,19 @@ cd ../..
 npx playwright test --config playwright.preview.config.ts
 ```
 
+## Release (DEV-014)
+
+Tab **Release** membekukan accepted tip dan tiket Accepted yang belum masuk release (integrator menahan tip selama
+freeze), membangun satu target gabungan, menjalankan repo tests dan regression browser gabungan, lalu menunggu approval
+Anda atas target dan bukti itu (termasuk checklist UAC manual). Ekspor lokal (patch + Git bundle) adalah aksi
+eksplisit; tidak ada push, PR, atau deployment, dan release approved tidak ditampilkan sebagai deployed. Bila repo
+sumber bergerak, ekspor ditolak dan **Sinkronkan** membuat release pengganti dengan verifikasi dan approval baru.
+Regression mencakup fitur release sebelumnya. Untuk sinkronisasi, pengguna meninjau kedua diff yang dipin ke target
+dan mengonfirmasi review teknis secara terpisah dari checklist UAC manual sebelum approval.
+Butuh worker `--runtime pipeline` (atau `onboarding`) dan Docker. Detail: [release](docs/decisions/release.md).
+Tes: `cd apps/backend && python -m pytest tests/domain/test_release.py tests/release tests/http/test_releases.py -q`
+(tes `tests/release` memakai Git, Docker, dan image runner nyata; POSIX).
+
 ## Integrasi accepted (DEV-012)
 
 Menerima UAT hanya mencatat operasi integrasi `pending`. Worker `--runtime pipeline` menjalankan integrator yang
@@ -364,4 +377,4 @@ Baseline tests yang gagal tetap tampil failed; waiver hanya oleh pengguna per fa
 dan [hasil kualifikasi nyata](docs/spikes/DEV-013-results.json). Fitur receipt melalui provider
 nyata mencapai Accepted dengan test-user UAT dan production integrator; repo sumber dirty
 tetap utuh. Ini tidak menggantikan UAT manual pengguna atau pilot DEV-015. Review independen
-DEV-013: NOT_REVIEWED.
+DEV-013: REVIEWED; hasil review DEV-014 ada di [laporan review](docs/reviews/DEV-014-review.md).

@@ -400,10 +400,11 @@ class WorkspaceSupervisor:
         return self._build_target(ref, candidate_sha, run_tests=run_tests)
 
     @serialized_operation
-    def build_baseline(self, ref: RunRef) -> dict[str, Any]:
-        """Trusted onboarding build of this attempt's accepted base; never a candidate submission."""
+    def build_baseline(self, ref: RunRef, sha: str | None = None) -> dict[str, Any]:
+        """Trusted build of this attempt's accepted base (onboarding, release freeze), or of a commit the release
+        machinery pinned under refs/releases/. Never a candidate submission."""
         spec, _, _ = self._require_active(ref)
-        return self._build_target(ref, spec.base_sha, run_tests=False, baseline=True)
+        return self._build_target(ref, sha or spec.base_sha, run_tests=False, baseline=True)
 
     def _build_target(self, ref: RunRef, candidate_sha: str, *, run_tests: bool = False,
                       baseline: bool = False) -> dict[str, Any]:
@@ -414,7 +415,8 @@ class WorkspaceSupervisor:
         spec, manifest, store = self._require_active(ref)
         generation = store.state()["generation"]
         broker = self.broker(ref.project_id)
-        known = (candidate_sha == spec.base_sha == broker.accepted_sha()) if baseline else self._known_candidate(store, candidate_sha)
+        known = ((candidate_sha == spec.base_sha == broker.accepted_sha() or candidate_sha in broker.release_shas())
+                 if baseline else self._known_candidate(store, candidate_sha))
         if not is_sha(candidate_sha) or not known:
             raise WorkspaceError("candidate is not a recorded commit of this attempt")
         image_id = self.sandbox.image_id(manifest.image)

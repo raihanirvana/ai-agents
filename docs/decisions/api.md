@@ -96,7 +96,8 @@ penyimpanan/public response; validation error tidak menyertakan input mentah.
 | Run | GET `/runs/{id}`, GET `/runs/{id}/logs?generation=N&after_seq=N`; POST `/stop`, `/budget-authorizations` |
 | Candidate/evidence | GET `/tickets/{id}/candidates/{candidate}`, GET `/artifacts/{id}` dan `/content` |
 | Preview | POST `/tickets/{id}/candidates/{candidate}/previews`, POST `/previews/{id}/stop`, GET `/previews/{id}` (kandidat memuat `live_preview`, board memuat `preview` aktif; lihat [preview](preview.md)) |
-| Approval | POST `/tickets/{id}/uat-decisions`, `/projects/{id}/baseline-waivers`, `/releases/{id}/decisions` |
+| Release | POST `/projects/{id}/releases` (freeze + verifikasi sebagai job), GET `/projects/{id}/releases`, GET `/releases/{id}`, POST `/releases/{id}/export`, `/sync`, `/discard`; board memuat `releases` (lihat [release](release.md)). `deployed` tidak pernah diturunkan |
+| Approval | POST `/tickets/{id}/uat-decisions`, `/projects/{id}/baseline-waivers`, `/releases/{id}/decisions` (mem-pin target/evidence dan `manual_uac_ids` checklist release; release sinkronisasi juga memerlukan `reviewed_diff_ids` untuk kedua diff target) |
 | Runtime | POST `/runtime/tools`, `/runtime/tickets/{id}/candidates`, `/runtime/candidates/{id}/reviews` |
 | Events | GET `/projects/{id}/events?cursor=N`, optional `follow=false` |
 

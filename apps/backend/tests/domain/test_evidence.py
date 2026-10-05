@@ -168,7 +168,8 @@ def test_waiver_is_user_only_exact_and_explicitly_waived(world):
 
 def release(world, **override):
     build = json_art(world, "build_record", {"build_digest": HASH}, "builder")
-    target = json_art(world, "target_manifest", {"accepted_tip": f.SHA_B, "build_artifact_id": build.id}, "builder")
+    target = json_art(world, "target_manifest", {"accepted_tip": f.SHA_B, "build_artifact_id": build.id,
+        "scope_digest": world.w.scope_digest([])}, "builder")
     receipt = json_art(world, "report", {"kind": "release_verification", "status": "passed",
         "target_artifact_id": target.id, "target_digest": target.checksum, "accepted_tip": f.SHA_B,
         "fake_provider": False, "infrastructure_failure": False, "expected_test_ids": ["regression"],

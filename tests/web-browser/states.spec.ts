@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { Artifact, Board, Candidate, Message, Preview, Project, Run, Ticket, TicketDetail } from "../../contracts/api/types";
+import type { Artifact, Board, Candidate, Message, Preview, Project, Release, Run, Ticket, TicketDetail } from "../../contracts/api/types";
 
 /**
  * Display states that the fake-provider fixture cannot reach on demand (quota wait, user questions, evidence that
@@ -24,7 +24,7 @@ const run = (over: Partial<Run>): Run => ({
 interface State {
   tickets: Ticket[]; runs: Run[]; messages: Message[]; detail: TicketDetail | null;
   artifacts: { [id: string]: Artifact }; runInput: { [id: string]: Message | null };
-  posts: { path: string; body: unknown; key: string | undefined }[]; events: "open" | "abort";
+  posts: { path: string; body: unknown; key: string | undefined }[]; events: "open" | "abort"; releases?: Release[];
 }
 const fresh = (): State => ({ tickets: [], runs: [], messages: [], detail: null, artifacts: {}, runInput: {}, posts: [], events: "abort" });
 
@@ -40,7 +40,7 @@ async function mockApi(page: Page, state: State) {
     }
     if (path === "/auth/session") return json({ csrf_token: "csrf" });
     if (path === "/projects") return json({ projects: [project] });
-    if (path === "/projects/p1/tickets") return json({ project, tickets: state.tickets, runs: state.runs, preview: null, cursor: 5 } satisfies Board);
+    if (path === "/projects/p1/tickets") return json({ project, tickets: state.tickets, runs: state.runs, preview: null, releases: state.releases ?? [], cursor: 5 } satisfies Board);
     if (path === "/projects/p1/messages") return json({ messages: state.messages, cursor: 5 });
     if (path === "/projects/p1/events") return state.events === "abort" ? route.abort("failed") : route.fulfill({ status: 200, contentType: "text/event-stream", body: ": open\n\n", headers: CORS });
     if (/^\/tickets\/[^/]+$/.test(path)) return state.detail ? json(state.detail) : json({ error: { code: "not_found", message: "no", details: {} } }, 404);
@@ -259,4 +259,101 @@ test("an integrating ticket shows the pending/blocked operation, the refs involv
   await expect(row.locator('[data-artifact="ev-int"]')).toContainText("bukti integrasi");
   await expect(page.locator(".ticket-head .blocker")).toContainText("Integrasi diblokir");
   await expect(page.locator('section[aria-label="Preview untuk UAT"]')).toHaveCount(0);  // not in UAT any more
+});
+
+const release = (over: Partial<Release> = {}): Release => ({
+  id: "rel-aaaaaaaa11", project_id: "p1", status: "draft", accepted_tip: "a".repeat(40),
+  scope: [
+    { ticket_id: "t1", number: 1, title: "Menu kopi", scope_version: 2, candidate_id: "c1", integrated_sha: "1".repeat(40),
+      uac: [{ id: "UAC-1", text: "Menu tampil" }, { id: "UAC-M", text: "Tampilan nyaman", mode: "manual" }], checklist: ["t1:UAC-M"] },
+    { ticket_id: "t2", number: 2, title: "Keranjang", scope_version: 1, candidate_id: "c2", integrated_sha: "2".repeat(40),
+      uac: [{ id: "UAC-1", text: "Keranjang tampil" }], checklist: [], affected_by_sync: true, overlap_files: ["index.html"] },
+  ],
+  checklist: ["t1:UAC-M"], target_artifact_id: "rt", target_digest: "sha256:" + "d".repeat(64), build_artifact_id: "rb",
+  evidence_ids: ["rep", "suite", "log"], export: null, deployment: null, deployed: false, revision: 3, created_at: "2026-10-05T01:00:00Z", ...over });
+
+test("a draft release needs its manual checklist, approval pins the exact target/evidence, and nothing says deployed", async ({ page }) => {
+  const state = fresh();
+  state.tickets = [ticket({ phase: "accepted" })];
+  state.releases = [release()];
+  state.artifacts = { rep: artifact("rep"), suite: artifact("suite"), log: artifact("log") };
+  await mockApi(page, state);
+  await page.goto("/#/p/p1");
+  await page.getByRole("tab", { name: "Release" }).click();
+  const card = page.locator('article[data-release="rel-aaaaaaaa11"]');
+  await expect(card).toHaveAttribute("data-status", "draft");
+  await expect(card.getByText("Disetujui")).toHaveCount(0);
+  await expect(card.getByText("Di-deploy")).toHaveCount(0);
+  await expect(card.getByText("terdampak sinkronisasi")).toBeVisible();
+  await expect(card.getByRole("link", { name: "Laporan verifikasi gabungan" })).toHaveAttribute("href", /\/artifacts\/rep\/content$/);
+  await expect(page.getByRole("button", { name: /Bekukan dan verifikasi release/ })).toBeDisabled();  // a draft is open
+  const approve = card.getByRole("button", { name: "Setujui release ini" });
+  await expect(approve).toBeDisabled();
+  await card.getByLabel(/#1 UAC-M: Tampilan nyaman/).check();
+  await approve.click();
+  await card.getByRole("button", { name: "Ya, setujui target ini" }).click();
+  await expect.poll(() => state.posts.length).toBe(1);
+  expect(state.posts[0].path).toBe("/releases/rel-aaaaaaaa11/decisions");
+  expect(state.posts[0].body).toEqual({ expected_revision: 3, target_artifact_id: "rt", target_digest: "sha256:" + "d".repeat(64),
+    evidence_ids: ["rep", "suite", "log"], manual_uac_ids: ["t1:UAC-M"] });
+  expect(state.posts[0].key).toBeTruthy();
+});
+
+test("an approved release offers an explicit local export; the export result states nothing was pushed or deployed", async ({ page }) => {
+  const state = fresh();
+  state.tickets = [ticket({ phase: "accepted" })];
+  state.releases = [release({ id: "rel-bbbbbbbb22", status: "approved" })];
+  await mockApi(page, state);
+  await page.goto("/#/p/p1");
+  await page.getByRole("tab", { name: "Release" }).click();
+  const card = page.locator('article[data-release="rel-bbbbbbbb22"]');
+  await expect(card.getByText("belum diekspor, belum di-deploy")).toBeVisible();
+  await card.getByRole("button", { name: "Ekspor lokal (patch + bundle)" }).click();
+  await card.getByRole("button", { name: "Ya, ekspor" }).click();
+  await expect.poll(() => state.posts.length).toBe(1);
+  expect(state.posts[0]).toMatchObject({ path: "/releases/rel-bbbbbbbb22/export", body: { expected_revision: 3 } });
+
+  state.releases = [release({ id: "rel-bbbbbbbb22", status: "exported", revision: 4, export: {
+    formats: ["patch", "bundle"], tip: "a".repeat(40), base_sha: "b".repeat(40), branch: "release/rel-bbbb", ref_in_bundle: "refs/releases/x",
+    patch_artifact_id: "pp", bundle_artifact_id: "bb", pushed: false, deployed: false, how_to_use: "git apply --index release.patch", exported_at: "2026-10-05T02:00:00Z" } })];
+  await page.reload();
+  await page.getByRole("tab", { name: "Release" }).click();
+  const done = page.locator('article[data-release="rel-bbbbbbbb22"]');
+  await expect(done.getByText("Diekspor lokal (belum di-push, belum di-deploy)")).toBeVisible();
+  await expect(done.locator('[aria-label="Hasil ekspor"]')).toContainText("Pushed: tidak · Deployed: tidak");
+  await expect(done.getByRole("link", { name: "Unduh patch" })).toHaveAttribute("href", /\/artifacts\/pp\/content$/);
+  await expect(done.getByRole("button", { name: /Ekspor lokal/ })).toHaveCount(0);
+});
+
+test("a synchronised release pins technical diff review separately from its manual UAC", async ({ page }) => {
+  const state = fresh();
+  state.releases = [release({ technical_review_evidence_ids: ["drift-diff", "combined-diff"] })];
+  await mockApi(page, state);
+  await page.goto("/#/p/p1");
+  await page.getByRole("tab", { name: "Release" }).click();
+  const card = page.locator('article[data-release="rel-aaaaaaaa11"]');
+  const approve = card.getByRole("button", { name: "Setujui release ini" });
+  await card.getByLabel(/#1 UAC-M/).check();
+  await expect(approve).toBeDisabled();
+  await expect(card.getByRole("link", { name: "Diff perubahan sumber" })).toHaveAttribute("href", /drift-diff\/content$/);
+  await expect(card.getByRole("link", { name: "Diff gabungan release" })).toHaveAttribute("href", /combined-diff\/content$/);
+  await card.getByLabel(/Saya telah meninjau kedua diff/).check();
+  await approve.click();
+  await card.getByRole("button", { name: "Ya, setujui target ini" }).click();
+  await expect.poll(() => state.posts.length).toBe(1);
+  expect(state.posts[0].body).toMatchObject({ reviewed_diff_ids: ["drift-diff", "combined-diff"], manual_uac_ids: ["t1:UAC-M"] });
+});
+
+test("a failed release shows no approval and an in-flight release job holds the freeze button", async ({ page }) => {
+  const state = fresh();
+  state.tickets = [ticket({ phase: "accepted" })];
+  state.releases = [release({ status: "failed" })];
+  state.runs = [run({ id: "rj", stage: "release", status: "running", role: "technical-lead", ticket_id: null })];
+  await mockApi(page, state);
+  await page.goto("/#/p/p1");
+  await page.getByRole("tab", { name: "Release" }).click();
+  await expect(page.locator("[data-release-run]")).toContainText("Integrasi tiket baru ditahan");
+  await expect(page.getByRole("button", { name: "Setujui release ini" })).toHaveCount(0);
+  await expect(page.getByText("release gagal tidak dapat disetujui")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Bekukan dan verifikasi release/ })).toBeDisabled();
 });

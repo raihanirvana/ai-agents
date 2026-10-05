@@ -5,6 +5,7 @@ from app.persistence import NotFound, latest_cursor
 from app.persistence.models import (Project, Ticket, TicketVersion, Candidate, Verification, Artifact,
                                     Approval, Dependency, Job, Message)
 from app.preview import requests as previews
+from app.release import requests as releases
 
 
 def not_runtime_log():
@@ -107,6 +108,7 @@ def board(s, project_id):
             Ticket.project_id == project_id).order_by(Ticket.priority.desc(), Ticket.number))],
             "runs": _runs(s, project_id),
             "preview": (lambda rows: previews.public(rows[0]) if rows else None)(previews.active(s, project_id)),
+            "releases": [releases.public(r, s) for r in releases.releases(s, project_id)[:5]],
             "cursor": latest_cursor(s, project_id=project_id)}
 
 

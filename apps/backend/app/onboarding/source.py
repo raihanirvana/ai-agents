@@ -143,6 +143,40 @@ def archive_import(pdir, broker, receipt, saved):
 
 
 @serialized_import
+def fetch_source_head(supervisor, project_id, source, ref, expected_sha=None, check=lambda: None):
+    """Bring the CURRENT source HEAD (objects only) into the managed repository under `ref` (refs/releases/...), never
+    under accepted or attempt refs, so a release can be re-applied onto it. Same read-only, hook-free source handling
+    and the same tree validation as onboarding; the source is never modified."""
+    check()
+    broker = supervisor.broker(project_id)
+    before, source = inspect_source(broker, source)
+    if expected_sha and before['source_sha'] != expected_sha:
+        raise ValueError('source HEAD changed from the explicitly selected SHA')
+    if not ref.startswith('refs/releases/'):
+        raise ValueError('source heads are only stored under refs/releases/')
+    pdir = supervisor._project_dir(project_id)
+    bundle = pdir / ('sync-' + uuid.uuid4().hex[:12] + '.bundle')
+    try:
+        broker.run(['-C', str(source), 'bundle', 'create', str(bundle), 'HEAD'], extra_env=source_environment(broker, source))
+        broker._bare('-c', 'protocol.file.allow=always', 'fetch', '--no-tags', '--no-write-fetch-head', str(bundle), 'HEAD')
+        heads = broker.run(['bundle', 'list-heads', str(bundle)]).decode().splitlines()
+        sha = next(line.split()[0] for line in heads if line.endswith(' HEAD'))
+        if sha != before['source_sha']:
+            raise ValueError('source HEAD changed during the fetch')
+        validate_tree(broker, sha)
+        after, _ = inspect_source(broker, source)
+        if before != after:
+            raise ValueError('source changed during the fetch; retry with a stable source')
+        check()
+        existing = broker.refs().get(ref)
+        broker._bare('update-ref', ref, sha, existing or ZERO_SHA)
+    finally:
+        if bundle.exists():
+            bundle.unlink()
+    return before
+
+
+@serialized_import
 def import_source(supervisor, project_id, source, request_id, expected_sha=None, patch=None, check=lambda: None,
                   replace_uninitialized=False):
     """Independent import. `replace_uninitialized` is passed only for a project whose DB has no accepted base: a previous
