@@ -15,6 +15,7 @@ import hashlib
 import json
 from typing import Any
 
+from pydantic import TypeAdapter
 from sqlalchemy import select
 
 from app.domain import DomainError, Workflow
@@ -94,7 +95,11 @@ class StructuredAgentRuntime:
         if saved is not None:
             ctx.queue.set_context(ctx.lease, saved["snapshot"]["artifact_id"])
             return parse_output(saved["text"], union), saved["meta"], ContextSnapshot(**saved["snapshot"])
-        snapshot = self.builder.build(identity, task=task, repo_refs=repo_refs, answer=ctx.answer,
+        # Give the model the same contract we validate, including task-specific
+        # union alternatives. Prose alone confused revision dependency IDs with
+        # breakdown keys in the real DEV-015 pilot; repair needs the shape too.
+        snapshot = self.builder.build(identity, task={**task, 'output_schema': TypeAdapter(union).json_schema()},
+                                      repo_refs=repo_refs, answer=ctx.answer,
                                       lease=ctx.lease, queue=ctx.queue)
         ctx.log(f"context {snapshot.sha256[:12]} ~{snapshot.estimated_tokens} tokens (estimate), "
                 f"{len(snapshot.manifest['gaps']) - 1} gaps")

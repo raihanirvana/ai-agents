@@ -378,3 +378,18 @@ dan [hasil kualifikasi nyata](docs/spikes/DEV-013-results.json). Fitur receipt m
 nyata mencapai Accepted dengan test-user UAT dan production integrator; repo sumber dirty
 tetap utuh. Ini tidak menggantikan UAT manual pengguna atau pilot DEV-015. Review independen
 DEV-013: REVIEWED; hasil review DEV-014 ada di [laporan review](docs/reviews/DEV-014-review.md).
+
+## Pilot dan operasi lokal (DEV-015)
+
+Pilot coffee fixture memakai PO/OpenRouter dan developer/QA Hermes nyata, dengan approval test-user pada DB terisolasi.
+Backup/restore offline memindahkan SQLite, managed Git, build bundle/evidence/context dan inventory ke data root baru,
+memvalidasi checksum/refs, menghapus credential lama dan menjaga usage serta pin produk. Jalankan pada POSIX/WSL
+setelah API, worker dan preview berhenti; snapshot tidak memuat key provider atau repo sumber asli.
+
+Setup murah, start/stop, caps, restart, backup/restore, lokasi bukti dan batas dukungan:
+[runbook operasional](docs/runbooks/local-operations.md). Bukti aktual dan pemisahan automated/manual serta nyata/fake:
+[pilot-report](docs/pilot-report.md). Keputusan: [recovery](docs/decisions/recovery.md).
+Pilot selesai: tiga tiket Accepted, release 9 browser + 2 Node tests, serta backup/restore 472 pin terverifikasi.
+Reported cost USD 0,2141148 termasuk percobaan gagal: [receipt](docs/spikes/DEV-015-results.json).
+[Review kode Claude](docs/reviews/DEV-015-review-claude.md) dan recheck fix selesai; R8 tetap terbuka sesuai batas
+review. Test-user approval bukan UAT manual Anda atau deployment.

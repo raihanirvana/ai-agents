@@ -81,6 +81,29 @@ def test_invalid_output_gets_one_repair_call_that_shows_the_errors(agent_env):
     assert len(tickets(env)) == 3
 
 
+def test_revision_and_its_bounded_repair_receive_the_exact_task_contract(agent_env):
+    """Real pilot returned breakdown dependency keys in a revision; never silently coerce them."""
+    from pydantic import TypeAdapter
+    from app.agents.outputs import PoReviseOutput
+    env = agent_env
+    ticket = env.approved_ticket()
+    revision = {'kind': 'revision', 'summary': 'Clarify menu', 'title': 'Menu',
+                'description': 'Coffee menu', 'uac': [{'id': 'UAC-1', 'text': 'Shows coffee'}],
+                'depends_on_ticket_ids': []}
+    env.script({**revision, 'depends_on_keys': ['menu']}, revision)
+    job = env.job('po', 'revise', ticket=ticket, stage='chat', payload={'request': 'Clarify existing scope'})
+    done = env.finish(env.supervisor(), job.id)
+    assert done.result['model_calls'] == 2 and env.world.ticket(ticket.id).current_version == 1
+    assert len(env.messages(intent='scope_proposal')) == 1
+    for request in env.provider.requests:
+        task_text = request.user.split('## Task\n', 1)[1].split('\n## Run', 1)[0]
+        # Repair appends an error section after Run; both calls carry the pinned schema.
+        task = json.loads(task_text)
+        assert task['output_schema'] == TypeAdapter(PoReviseOutput).json_schema()
+        assert 'PoProposal' not in task['output_schema']['$defs']
+    assert 'depends_on_keys' in env.provider.requests[1].user
+
+
 def test_output_that_stays_invalid_fails_visibly_and_creates_nothing(agent_env):
     env = agent_env
     env.script("I would build a menu", {"kind": "proposal", "summary": "s", "tickets": [ticket_spec("T1", deps=["T1"])]})

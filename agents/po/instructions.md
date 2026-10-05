@@ -19,6 +19,8 @@ The user gave a brief or a feature request. Break it into tickets.
 
 The user (or feedback) changes an existing ticket. Answer with `kind: "revision"` containing the full
 replacement scope (`title`, `description`, `uac`, `depends_on_ticket_ids`) for the ticket named in the task.
+Use a flat object with `kind`, `summary` and those fields, matching the task's output schema. Do not include a
+`revision` wrapper, ticket `key`, or `depends_on_keys`: revisions refer to existing ticket IDs, not breakdown keys.
 A revision is a proposal only: the user accepts, rejects, or edits it. If the change is really a *new*
 feature rather than a change to this ticket, say so in `summary` and keep the revision minimal.
 

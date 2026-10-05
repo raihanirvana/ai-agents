@@ -660,6 +660,42 @@ class JobQueue:
         return self.finish_cleanup(job_id, cleanup["generation"], recovery_token=token)
 
     # -- budget decisions ---------------------------------------------------------------------
+    def retry_failed(self, job_id: str, *, user: str, authorization_id: str) -> str:
+        """One explicit local operator retry after fixing a permanent failure. No raised/reset caps.
+
+        Not automatic recovery and not budget extension. Parent/root identity, checkpoints,
+        historical usage and fake labels survive; a new claim creates fresh capabilities.
+        """
+        if not user.startswith('user:') or not authorization_id:
+            raise QueueError('retry requires an explicit user authorization')
+        with self.db.write() as s:
+            job = s.get(Job, job_id)
+            if job is None or job.status != 'failed' or self._cleanup(job):
+                raise QueueError('retry requires a failed job with completed cleanup')
+            key = f'{job.idempotency_key}#operator-{authorization_id}'
+            existing = s.scalar(select(Job).where(Job.project_id == job.project_id, Job.idempotency_key == key))
+            if existing is not None:
+                if existing.runtime_ref.get('retry_authorization') != {'user': user, 'id': authorization_id}:
+                    raise QueueError('retry authorization reused by a different user')
+                return existing.id
+            if s.scalar(select(Job.id).where(Job.parent_job_id == job.id)):
+                raise QueueError('job already has a retry; operate on the latest attempt')
+            ticket = s.get(Ticket, job.ticket_id) if job.ticket_id else None
+            if ticket and (ticket.current_version != job.scope_version or ticket.phase in ('accepted','cancelled','integrating')):
+                raise QueueError('failed job belongs to an obsolete scope/phase')
+            if self._claimable(s, job) != 'ok':
+                raise QueueError('failed job is no longer eligible for its stage')
+            if self._budget_limit(s, job, self.budget_usage(s, job), calls=True):
+                raise QueueError('retry cannot bypass an exhausted budget')
+            retry = Job(project_id=job.project_id, ticket_id=job.ticket_id, scope_version=job.scope_version,
+                lane=job.lane, stage=job.stage, parent_job_id=job.id, attempt=job.attempt+1,
+                idempotency_key=key, limits=dict(job.limits), context_artifact_id=job.context_artifact_id,
+                runtime_ref={**self._retry_ref(job), 'retry_authorization': {'user': user, 'id': authorization_id}})
+            s.add(retry)
+            s.flush()
+            self._event(s, retry, 'operator_retry', user, parent_job_id=job.id, authorization_id=authorization_id)
+            return retry.id
+
     def extend_budget(self, job_id: str, *, user: str, additions: dict[str, float], authorization_id: str) -> str:
         """User decision after budget exhaustion: a new attempt with raised caps. Usage is kept."""
         if not user.startswith("user:") or not authorization_id:

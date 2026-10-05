@@ -65,7 +65,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-012 | Integrasi accepted, dependency, dan recovery Git/DB | DEV-005, DEV-010, DEV-011 | DONE |
 | DEV-013 | Onboarding repository existing | DEV-005, DEV-012 | DONE |
 | DEV-014 | Release yang dibekukan dan verifikasi gabungan | DEV-012, DEV-013 | DONE |
-| DEV-015 | Pilot end-to-end dan panduan operasional | DEV-009, DEV-011, DEV-013, DEV-014 | TODO |
+| DEV-015 | Pilot end-to-end dan panduan operasional | DEV-009, DEV-011, DEV-013, DEV-014 | DONE |
 | DEV-016 | Kantor Three.js dari aktivitas nyata | DEV-015 | TODO |
 | DEV-017 | Packaging satu VPS | DEV-015 | TODO |
 
@@ -1659,6 +1659,18 @@ serta penyimpanan approval/target/evidence setelah restart.
 
 ## DEV-015 — Pilot end-to-end dan panduan operasional
 
+### Catatan pengerjaan
+
+Status: DONE. Pelaksana: Codex, 2026-10-05. Baseline `b12d11f` (DEV-014 telah push).
+Rencana: backup/restore offline dengan inventory, validasi refs/artefak dan fencing recovery; pilot coffee fixture
+melalui PO/provider dan pipeline nyata dengan caps/usage kumulatif; preview, feedback, dependency, repo existing,
+restart, restore dan release; runbook, `docs/pilot-report.md` serta handoff AC. Approval eksperimen adalah test-user
+eksplisit pada DB terisolasi dan tidak diklaim UAT manual pengguna. Tidak memulai DEV-016/017 atau deployment.
+File: `app/recovery/**`, tests recovery/release, `examples/dev015/**`, instruksi QA, README, keputusan recovery,
+runbook, pilot-report dan handoff. Asumsi produk: React/Vite stateless, fixture profil/menu/cart tanpa pembayaran nyata,
+konfigurasi provider yang telah dikualifikasi, finite caps. Scope display menu diperjelas melalui revisi PO/test-user
+setelah assertion QA ambigu dan lead menolak penghapusan harga; bukti gagal dan biaya scope lama dipertahankan.
+
 **Tujuan:** membuktikan workflow utuh sebelum menambah visual dan hosting.
 
 **Scope:** skenario coffee shop, tambah fitur pada repo existing, recovery drill,
@@ -1688,6 +1700,37 @@ provider, usage/biaya aktual yang tersedia, dan keterbatasan yang diketahui.
 
 **Verifikasi:** simpan evidence skenario dan hasil checks yang sudah relevan;
 jangan menambah test yang sekadar menyalin detail implementasi.
+
+Hasil DEV-015: tiga tiket fixture Accepted lewat provider/role nyata; release test-user approved pada tip
+`5f999b802f273e16bc9a3a71891dff3975e067eb`, 9/9 browser + 2/2 Node tests, 13 UAC dan 472 pin diaudit.
+Preview reopen sesudah offline restore tetap target yang sama; drill sesudah release memulihkan 585 file/472 pin,
+target/build/evidence/approval/ref tetap dan tidak ada pin unavailable. Source fingerprint termasuk `.git` utuh.
+Waiting/quota/stale lease/same-SHA/empty-skipped-forged/waiver memakai automated checks dengan fake/contract label;
+paid quota outage dan manual UAT manusia tidak diklaim. Pemetaan seluruh AC: [handoff](docs/reviews/DEV-015-handoff.md).
+File hasil juga mencakup `app/agents/runtime.py` (JSON Schema request/repair), `app/workers/queue.py` (authorized
+idempotent retry), tests regresi, instruksi PO/QA/developer dan [receipt](docs/spikes/DEV-015-results.json).
+Menu/transaksi memerlukan revisi scope, satu retry PO, satu repair tambahan serta dua bounded token extensions;
+seluruh histori usage/caps/failure dipertahankan. Total 148 model calls, 281 tools, 982.335 tokens, reported USD
+0,2141148 termasuk run wiring gagal; invoice belum dicocokkan. Tidak ada edit kode target/suite oleh operator.
+Verifikasi: WSL full 853 passed sebelum schema fix; final agents/pipeline 219 passed sesudahnya; recovery/workers/
+release 87 passed. Windows full 577 passed/22 skipped sebelum schema fix, final agents/retry 160 passed sesudahnya.
+GUI 36 passed, TypeScript/Vite build lulus; rincian perintah/durasi dan batas di [pilot-report](docs/pilot-report.md).
+Self-check temuan/fix: [DEV-015-review](docs/reviews/DEV-015-review.md), **NOT_REVIEWED independen, R8 OPEN**.
+Instruksi pengguna sesudah review Claude: commit/push DEV-015 setelah recheck lulus; tanpa export/deployment repo fixture.
+DEV-016/017 tidak dimulai.
+
+Review Claude 2026-10-05: satu bug diperbaiki (R015-A) — snapshot tidak menyalin `onboarding-import.json`, sehingga
+proyek dengan baseline diblokir tidak bisa di-onboard ulang sesudah restore; kini disalin + regresi
+`test_a_blocked_onboarding_import_keeps_its_provenance_across_backup_and_restore`. Windows 578 passed/22 skipped,
+GUI 36 passed, build dan `git diff --check` lulus, `tests/recovery` WSL 7 passed. Pilot berbayar tidak dijalankan
+ulang; UAT manual dan outage quota nyata belum ada, **R8 tetap OPEN**. Laporan:
+[DEV-015-review-claude](docs/reviews/DEV-015-review-claude.md).
+
+Recheck fix Claude oleh Codex (2026-10-05): R015-A diterima, tidak ditemukan blocker baru.
+WSL `/root/aiagent-dev002-venv/bin/python -m pytest tests/recovery tests/onboarding/test_source.py
+ tests/release/test_recovery.py tests/workers/test_operator_retry.py -q`: **24 passed, 12,07s**.
+Review kode DEV-015 oleh Claude selesai; perbaikan reviewer diverifikasi Codex. R8 tetap OPEN sesuai batas review:
+pilot berbayar tidak diulang reviewer, UAT manual dan outage provider nyata belum diverifikasi.
 
 ## DEV-016 — Kantor Three.js dari aktivitas nyata
 
