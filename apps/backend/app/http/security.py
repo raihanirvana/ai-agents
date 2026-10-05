@@ -39,10 +39,13 @@ class Settings:
     replay_events: int = 10000
     poll_s: float = .25
     cookie: str = "ai_team_session"
+    preview_port: int = 5180
 
     def __post_init__(self):
         if not 1 <= self.port <= 65535 or not 1 <= self.session_s <= 86400:
             raise ValueError("local API port and session lifetime must be bounded")
+        if not 1024 <= self.preview_port <= 65535 or self.preview_port == self.port:
+            raise ValueError("preview port must be an unprivileged port different from the API port")
         if self.replay_events < 1 or not .01 <= self.poll_s <= 5:
             raise ValueError("event window and poll interval must be bounded")
         for origin in self.origins:

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { Artifact, Board, Candidate, Message, Project, Run, Ticket, TicketDetail } from "../../contracts/api/types";
+import type { Artifact, Board, Candidate, Message, Preview, Project, Run, Ticket, TicketDetail } from "../../contracts/api/types";
 
 /**
  * Display states that the fake-provider fixture cannot reach on demand (quota wait, user questions, evidence that
@@ -40,7 +40,7 @@ async function mockApi(page: Page, state: State) {
     }
     if (path === "/auth/session") return json({ csrf_token: "csrf" });
     if (path === "/projects") return json({ projects: [project] });
-    if (path === "/projects/p1/tickets") return json({ project, tickets: state.tickets, runs: state.runs, cursor: 5 } satisfies Board);
+    if (path === "/projects/p1/tickets") return json({ project, tickets: state.tickets, runs: state.runs, preview: null, cursor: 5 } satisfies Board);
     if (path === "/projects/p1/messages") return json({ messages: state.messages, cursor: 5 });
     if (path === "/projects/p1/events") return state.events === "abort" ? route.abort("failed") : route.fulfill({ status: 200, contentType: "text/event-stream", body: ": open\n\n", headers: CORS });
     if (/^\/tickets\/[^/]+$/.test(path)) return state.detail ? json(state.detail) : json({ error: { code: "not_found", message: "no", details: {} } }, 404);
@@ -116,7 +116,7 @@ test("ticket evidence shows target identity, missing artifacts, manual UAC and s
   const candidate: Candidate = {
     id: "c1", ticket_id: "t1", scope_version: 2, commit_sha: "a".repeat(40), base_sha: "b".repeat(40), status: "verified",
     target_artifact_id: "art-target", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok", "ev-gone"], preview: null,
-    commit_artifact_id: "art-commit", build_artifact_id: "art-build",
+    commit_artifact_id: "art-commit", build_artifact_id: "art-build", live_preview: null,
     verifications: [{ id: "v1", status: "passed", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok", "ev-gone"],
       counts: { executed: 4, passed: 4, failed: 0 }, results: {}, uac_coverage: { "UAC-1": ["test_menu"], "UAC-2": [] } }] };
   state.tickets = [t];
@@ -195,3 +195,40 @@ for (const size of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }, 
     expect(await fits()).toEqual({ overflowX: 0, overflowY: 0 });
   });
 }
+
+test("a failed preview shows why and leaves nothing running; a non-localhost URL is never offered as a link", async ({ page }) => {
+  const state = fresh();
+  const t = ticket({ phase: "uat", revision: 12, scope_version: 2 });
+  const preview = (over: Partial<Preview>): Preview => ({
+    id: "pv1", project_id: "p1", ticket_id: "t1", candidate_id: "c1", scope_version: 2, target_artifact_id: "art-target",
+    target_digest: "sha256:" + "d".repeat(64), status: "failed", revision: 3, url: null, port: 5180, stop_reason: null,
+    error: "PreviewFailed: smoke health check failed: HTTP 404", requested_at: "2026-10-05T01:00:00Z", ready_at: null,
+    stopped_at: "2026-10-05T01:00:05Z", details: { build_digest: "b".repeat(64), config_digest: "c".repeat(64), fixture: { id: "coffee-menu-v1" }, evidence_ids: ["ev-ok"] }, ...over });
+  const candidate: Candidate = {
+    id: "c1", ticket_id: "t1", scope_version: 2, commit_sha: "a".repeat(40), base_sha: "b".repeat(40), status: "verified",
+    target_artifact_id: "art-target", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok"], preview: null,
+    commit_artifact_id: "art-commit", build_artifact_id: "art-build", live_preview: preview({}), verifications: [] };
+  state.tickets = [t];
+  state.artifacts = { "art-target": artifact("art-target"), "art-commit": artifact("art-commit"), "art-build": artifact("art-build"), "ev-ok": artifact("ev-ok") };
+  state.detail = { ticket: t, cursor: 5, candidates: [candidate], messages: [], dependencies: [], approvals: [],
+    versions: [{ version: 2, title: "Menu kopi", description: "", uac: [{ id: "UAC-1", text: "Menu tampil" }], scope: null }] };
+  await mockApi(page, state);
+  await page.goto("/#/p/p1/t/t1");
+  const panel = page.locator('section[aria-label="Preview untuk UAT"]');
+  await expect(panel).toHaveAttribute("data-preview-status", "failed");
+  await expect(panel.getByRole("alert")).toContainText("smoke health check failed: HTTP 404");
+  await expect(panel.getByRole("button", { name: "Buka ulang preview" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Hentikan preview" })).toHaveCount(0);
+  await panel.getByRole("button", { name: "Buka ulang preview" }).click();
+  await expect.poll(() => state.posts.length).toBe(1);
+  expect(state.posts[0]).toMatchObject({ path: "/tickets/t1/candidates/c1/previews", body: {} });
+  expect(state.posts[0].key).toBeTruthy();
+
+  candidate.live_preview = preview({ status: "ready", url: "http://127.0.0.1:5180/", error: null, stopped_at: null, ready_at: "2026-10-05T01:00:06Z" });
+  await page.reload();
+  await expect(panel).toHaveAttribute("data-preview-status", "ready");
+  await expect(panel.getByRole("link")).toHaveCount(0);  // control host: refused as a preview origin
+  candidate.live_preview = preview({ status: "ready", url: "http://localhost:5180/", error: null, stopped_at: null, ready_at: "2026-10-05T01:00:06Z" });
+  await page.reload();
+  await expect(panel.getByRole("link", { name: "Buka preview di tab baru" })).toHaveAttribute("href", "http://localhost:5180/");
+});

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Artifact, Candidate, Criterion, Message, TicketDetail, Verification } from "../../../../contracts/api/types";
+import type { Artifact, Candidate, Criterion, Message, Preview, TicketDetail, Verification } from "../../../../contracts/api/types";
 import { ApiError } from "../api/client";
 import { api } from "../api/instance";
 import { asScope, diffScope, type ScopeDoc } from "../diff";
@@ -288,7 +288,71 @@ function CandidateCard({ candidate: c, detail }: { candidate: Candidate; detail:
       {c.verifications.map((v) => <VerificationRow key={v.id} v={v} />)}
       <div className="evidence">{c.evidence_ids.filter((id) => !c.verifications.some((v) => v.evidence_ids.includes(id)))
         .map((id) => <ArtifactChip key={id} id={id} label="bukti kandidat / preview" />)}</div>
+      <PreviewPanel candidate={c} detail={detail} />
     </article>
+  );
+}
+
+const PREVIEW_LABEL: Record<Preview["status"], string> = {
+  requested: "Menunggu supervisor", starting: "Memulai…", ready: "Siap dibuka", stopping: "Menghentikan…", stopped: "Berhenti", failed: "Gagal",
+};
+const STOP_REASON: Record<string, string> = {
+  user_stop: "dihentikan oleh Anda", switched: "digantikan preview lain (hanya satu preview aktif)",
+  superseded: "kandidat diganti atau tiket meninggalkan UAT", worker_restart: "worker dimulai ulang; buka ulang dari artefak yang sama",
+  worker_stopped: "worker berhenti",
+};
+
+/** localhost link only: the preview must never be opened on the control host, which holds the session cookie. */
+function previewLink(url: string | null): string | null {
+  try { return url && new URL(url).hostname === "localhost" ? url : null; } catch { return null; }
+}
+
+function PreviewPanel({ candidate, detail }: { candidate: Candidate; detail: TicketDetail }) {
+  const { command } = useWorkspace();
+  const { ticket } = detail;
+  const p = candidate.live_preview ?? null;
+  const eligible = ticket.phase === "uat" && candidate.status === "verified" && candidate.scope_version === ticket.scope_version;
+  if (!eligible && !p) return null;
+  const running = p !== null && ["requested", "starting", "ready"].includes(p.status);
+  const link = p?.status === "ready" ? previewLink(p.url) : null;
+  const d = p?.details ?? {};
+  const fixture = d.fixture && typeof d.fixture === "object" && !Array.isArray(d.fixture) ? text(d.fixture.id) : "";
+  return (
+    <section className="preview" aria-label="Preview untuk UAT" data-preview-status={p?.status ?? "none"}>
+      <div className="section-head">
+        <h4>Preview untuk UAT</h4>
+        {p && <Badge tone={p.status === "ready" ? "good" : p.status === "failed" ? "bad" : p.status === "stopped" ? "neutral" : "info"}>{PREVIEW_LABEL[p.status]}</Badge>}
+      </div>
+      {!p && <p className="muted">Belum dibuka. Preview dijalankan on-demand dari artefak build yang sudah diuji; tidak harus selalu hidup.</p>}
+      {p && (
+        <dl className="ids">
+          <dt>Target</dt><dd><code title={p.target_digest}>{short(p.target_digest, 16)}</code></dd>
+          <dt>Build</dt><dd><code title={text(d.build_digest)}>{short(text(d.build_digest), 16)}</code> · config <code>{short(text(d.config_digest), 10)}</code></dd>
+          <dt>Fixture</dt><dd>{fixture || "—"} <span className="muted">(stateless; reset sesuai manifest bukan target baru)</span></dd>
+          <dt>Bukti</dt><dd>{Array.isArray(d.evidence_ids) ? d.evidence_ids.length : 0} artefak terpin</dd>
+        </dl>
+      )}
+      {p?.status === "requested" && <p className="notice" role="status">Menunggu supervisor memulai preview. Worker harus berjalan.</p>}
+      {link && (
+        <p className="preview-link">
+          <a href={link} target="_blank" rel="noopener noreferrer">Buka preview di tab baru</a>{" "}
+          <span className="muted">({new URL(link).host}: origin terpisah dari kontrol, tanpa cookie sesi, tanpa jaringan keluar)</span>
+        </p>
+      )}
+      {p?.status === "failed" && <p className="notice notice--bad" role="alert">Preview gagal: {p.error || "tidak diketahui"}. Tidak ada proses yang tertinggal.</p>}
+      {p && ["stopped", "failed"].includes(p.status) && p.stop_reason && <p className="muted">Berhenti: {STOP_REASON[p.stop_reason] ?? p.stop_reason}.</p>}
+      <div className="actions">
+        {eligible && !running && p?.status !== "stopping" && (
+          <button type="button" className="primary" onClick={() => void command<"startPreview">(`/tickets/${ticket.id}/candidates/${candidate.id}/previews`, {})}>
+            {p ? "Buka ulang preview" : "Buka preview"}
+          </button>
+        )}
+        {p && running && (
+          <button type="button" onClick={() => void command<"stopPreview">(`/previews/${p.id}/stop`, {})}>Hentikan preview</button>
+        )}
+        <span className="muted">Persetujuan UAT mengacu pada target dan bukti di atas, bukan pada proses preview yang hidup.</span>
+      </div>
+    </section>
   );
 }
 

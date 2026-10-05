@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         runtimes["fake"] = FakeRuntime()
         print("PERINGATAN: runtime FAKE aktif; hasilnya bukan bukti provider/QA nyata.", flush=True)
     maintenance = []
+    previews = None
     if args.runtime in ("structured", "pipeline"):
         from app.agents.wiring import build_structured_runtime
         runtime, threads, notes = build_structured_runtime(db, store, workflow, queue)
@@ -54,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
             pipeline, scheduler = build_pipeline(runtime, store, workflow, queue)
             runtimes[pipeline.name] = pipeline
             maintenance.append(scheduler.tick)
+            from app.pipeline.wiring import build_preview
+            previews = build_preview(db, store)
+            maintenance.append(previews.tick)
     config = WorkerConfig(**({"worker_id": args.worker_id} if args.worker_id else {}),
                           heartbeat_s=max(0.5, args.lease_s / 3))
     supervisor = Supervisor(db, store, runtimes, queue=queue, limiter=ProviderLimiter(), config=config,
@@ -73,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         supervisor.run_forever(stopped)
     finally:
+        if previews is not None:
+            previews.shutdown()
         db.dispose()
     print("Worker berhenti dengan tertib.", flush=True)
     return 0

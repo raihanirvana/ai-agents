@@ -29,6 +29,7 @@ export type ValidationError = { "loc": (string | number)[]; "msg": string; "type
 export type Waiver = { "expected_revision": number; "ticket_id": string; "fingerprint_artifact_id": string; "reason": string; };
 export interface RequestBodies {
   "POST /auth/login": Login;
+  "POST /previews/{preview_id}/stop": Empty;
   "POST /projects": ProjectCreate;
   "POST /projects/{project_id}/baseline-waivers": Waiver;
   "POST /projects/{project_id}/brief": Brief;
@@ -45,6 +46,7 @@ export interface RequestBodies {
   "POST /runtime/tickets/{ticket_id}/candidates": CandidateSubmit;
   "POST /runtime/tools": Tool;
   "POST /tickets/{ticket_id}/cancel": Revision;
+  "POST /tickets/{ticket_id}/candidates/{candidate_id}/previews": Empty;
   "POST /tickets/{ticket_id}/priority": Priority;
   "POST /tickets/{ticket_id}/proposals/{proposal_id}/decisions": ProposalDecision;
   "POST /tickets/{ticket_id}/repair-authorizations": Repair;

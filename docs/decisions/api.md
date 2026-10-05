@@ -95,6 +95,7 @@ penyimpanan/public response; validation error tidak menyertakan input mentah.
 | Input | POST `/runs/{id}/input`; POST `/projects/{id}/inputs/{request}` untuk user escalation nonblocking |
 | Run | GET `/runs/{id}`, GET `/runs/{id}/logs?generation=N&after_seq=N`; POST `/stop`, `/budget-authorizations` |
 | Candidate/evidence | GET `/tickets/{id}/candidates/{candidate}`, GET `/artifacts/{id}` dan `/content` |
+| Preview | POST `/tickets/{id}/candidates/{candidate}/previews`, POST `/previews/{id}/stop`, GET `/previews/{id}` (kandidat memuat `live_preview`, board memuat `preview` aktif; lihat [preview](preview.md)) |
 | Approval | POST `/tickets/{id}/uat-decisions`, `/projects/{id}/baseline-waivers`, `/releases/{id}/decisions` |
 | Runtime | POST `/runtime/tools`, `/runtime/tickets/{id}/candidates`, `/runtime/candidates/{id}/reviews` |
 | Events | GET `/projects/{id}/events?cursor=N`, optional `follow=false` |

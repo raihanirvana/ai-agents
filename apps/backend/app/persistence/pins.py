@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .models import ACTIVE_JOB_STATUSES, PINNING_CANDIDATE_STATUSES
+from .models import ACTIVE_JOB_STATUSES, ACTIVE_PREVIEW_STATUSES, PINNING_CANDIDATE_STATUSES
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,11 @@ _SELECTS = [
     f"SELECT context_artifact_id, 'job', id FROM jobs WHERE status IN ({_quoted(ACTIVE_JOB_STATUSES)}) "
     "OR json_extract(runtime_ref, '$.cleanup') IS NOT NULL",
     "SELECT j.value, 'job_log', b.id FROM jobs b, json_each(b.result, '$.evidence_artifact_ids') j",
+    # A preview that is starting, running or being stopped is serving these exact bytes.
+    f"SELECT target_artifact_id, 'preview', id FROM previews WHERE status IN ({_quoted(ACTIVE_PREVIEW_STATUSES)})",
+    f"SELECT json_extract(details, '$.bundle_artifact_id'), 'preview', id FROM previews WHERE status IN ({_quoted(ACTIVE_PREVIEW_STATUSES)})",
+    f"SELECT json_extract(details, '$.build_artifact_id'), 'preview', id FROM previews WHERE status IN ({_quoted(ACTIVE_PREVIEW_STATUSES)})",
+    f"SELECT j.value, 'preview', p.id FROM previews p, json_each(p.details, '$.evidence_ids') j WHERE p.status IN ({_quoted(ACTIVE_PREVIEW_STATUSES)})",
 ]
 _PIN_QUERY = text("SELECT artifact_id, owner_kind, owner_id FROM (" + " UNION ALL ".join(_SELECTS)
                   + ") WHERE artifact_id IS NOT NULL")

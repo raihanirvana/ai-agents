@@ -24,3 +24,16 @@ def build_pipeline(structured, store, workflow, queue, *, env=None):
     workspace = ProductWorkspace(structured.db, store, workflow, root, harness, structured.redactor)
     runtime = PipelineRuntime(structured, workspace, driver)
     return runtime, PipelineScheduler(structured.db, queue, workflow, runtime=runtime.name)
+
+
+def build_preview(db, store, *, env=None):
+    """Preview supervisor for the same worker. Docker is required; owner is stable per host so a restart reconciles."""
+    env = os.environ if env is None else env
+    if os.name != 'posix':
+        raise ValueError('previews require Linux/macOS; use WSL on Windows')
+    from app.preview.service import PreviewService
+    root = Path(env.get('PIPELINE_WORKSPACE_ROOT', 'data/pipeline-workspaces')).resolve()
+    service = PreviewService(db, store, root)
+    if not service.sandbox.available():
+        raise ValueError('Docker engine is unavailable')
+    return service

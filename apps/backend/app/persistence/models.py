@@ -47,6 +47,9 @@ ARTIFACT_KINDS = ("build_record", "target_manifest", "evidence", "log", "screens
 ARTIFACT_STORAGE = ("file", "git")
 ARTIFACT_UNAVAILABLE_REASONS = ("missing", "corrupt", "size_mismatch", "unreadable", "cleaned")
 RELEASE_STATUSES = ("draft", "approved", "exported", "deployed", "failed")
+# Preview lifecycle (DEV-011). Only one row may be non-terminal at a time (the MVP has one local preview).
+PREVIEW_STATUSES = ("requested", "starting", "ready", "stopping", "stopped", "failed")
+ACTIVE_PREVIEW_STATUSES = ("requested", "starting", "ready", "stopping")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -533,4 +536,43 @@ class ApiCommand(Base):
     __table_args__ = (UniqueConstraint("actor_key", "idempotency_key"), _json("response", "object"))
 
 
-SYSTEM_TABLES = ("local_sessions", "runtime_credentials", "api_commands")
+class Preview(Base):
+    """On-demand preview of one verified target. Owned by the supervisor, never by a job.
+
+    The row is the request/lifecycle record; the container, socket and loopback proxy are lifecycle
+    metadata and can be recreated from the pinned artifacts. Approval never reads this table."""
+
+    __tablename__ = "previews"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.id"), nullable=False)
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("candidates.id"), nullable=False)
+    scope_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_artifact_id: Mapped[str] = mapped_column(String, nullable=False)
+    target_digest: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="requested")
+    port: Mapped[int | None] = mapped_column(Integer)
+    container_name: Mapped[str | None] = mapped_column(String)
+    owner: Mapped[str | None] = mapped_column(String)
+    stop_reason: Mapped[str | None] = mapped_column(String)
+    error: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[Any] = mapped_column(Json, nullable=False, default=dict)
+    requested_by: Mapped[str] = mapped_column(String, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow, onupdate=utcnow)
+    ready_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    stopped_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    __mapper_args__ = {"version_id_col": revision, "version_id_generator": lambda current: (current or 0) + 1}
+    __table_args__ = (
+        ForeignKeyConstraint(["target_artifact_id", "target_digest"], ["artifacts.id", "artifacts.checksum"]),
+        CheckConstraint(_in("status", PREVIEW_STATUSES), name="status"),
+        CheckConstraint("port IS NULL OR port BETWEEN 1 AND 65535", name="port"),
+        CheckConstraint("revision >= 1 AND scope_version >= 1", name="counters"),
+        _json("details", "object"),
+        Index("ix_previews_candidate", "candidate_id"),
+        Index("ix_previews_status", "status"),
+    )
+
+
+SYSTEM_TABLES = ("local_sessions", "runtime_credentials", "api_commands", "previews")

@@ -17,6 +17,10 @@ if not 1 <= API_PORT <= 65535:
     raise ValueError("API_PORT must be an integer between 1 and 65535")
 web_port = int(os.getenv("WEB_PORT", "5173"))
 preview_port = int(os.getenv("WEB_PREVIEW_PORT", "5174"))
+# Generated-app previews are served on localhost (never on the 127.0.0.1 control host), see ARCHITECTURE section 10.
+PREVIEW_PORT = int(os.getenv("PREVIEW_PORT", "5180"))
+if not 1024 <= PREVIEW_PORT <= 65535 or PREVIEW_PORT in (API_PORT, web_port, preview_port):
+    raise ValueError("PREVIEW_PORT must be an unprivileged port different from the API and web ports")
 CORS_ORIGINS = [
     origin.strip()
     for origin in os.getenv(

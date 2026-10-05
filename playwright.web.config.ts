@@ -6,6 +6,7 @@ const python = process.env.API_TEST_PYTHON || resolve("apps/backend/.venv/Script
 /** DEV-009 GUI tests: the real Vite app against the real API; the PO model is the labelled FakeProvider. */
 export default defineConfig({
   testDir: "./tests/web-browser",
+  testIgnore: /preview\.spec\.ts/,  // needs Docker: playwright.preview.config.ts
   workers: 1,
   timeout: 45000,
   expect: { timeout: 10000 },

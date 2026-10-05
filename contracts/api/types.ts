@@ -46,12 +46,21 @@ export interface Verification {
   id: string; status: string; target_digest: string; evidence_ids: string[];
   counts: { [key: string]: number }; results: { [key: string]: Json }; uac_coverage: { [key: string]: string[] };
 }
+export type PreviewStatus = "requested" | "starting" | "ready" | "stopping" | "stopped" | "failed";
+export interface Preview {
+  id: string; project_id: string; ticket_id: string; candidate_id: string; scope_version: number;
+  target_artifact_id: string; target_digest: string; status: PreviewStatus; revision: number;
+  /** Set only while ready. The preview origin is localhost, never the 127.0.0.1 control host. */
+  url: string | null; port: number | null; stop_reason: string | null; error: string | null;
+  details: { [key: string]: Json }; requested_at: string; ready_at: string | null; stopped_at: string | null;
+}
 export interface Candidate {
   id: string; ticket_id: string; scope_version: number; commit_sha: string; base_sha: string; status: string;
   target_artifact_id: string | null; target_digest: string | null; evidence_ids: string[]; preview: Json;
-  commit_artifact_id: string; build_artifact_id: string | null; verifications: Verification[];
+  commit_artifact_id: string; build_artifact_id: string | null; live_preview: Preview | null;
+  verifications: Verification[];
 }
-export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; cursor: number }
+export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; preview: Preview | null; cursor: number }
 export interface TicketDetail {
   ticket: Ticket; versions: { version: number; title: string; description: string; uac: Criterion[]; scope: Json }[];
   dependencies: { upstream_id: string; state: string; scope_version: number | null; candidate_id: string | null;
@@ -88,5 +97,7 @@ export interface Commands {
   input: { body: InputAnswer; response: { answer_id: string; resumed: boolean } };
   nonblockingInput: { body: { scope_version: number | null; generation: number; answer: string }; response: { answer_id: string; resumed: boolean } };
   stop: { body: Empty; response: { run: Run; cleanup: "supervisor_pending" } };
+  startPreview: { body: Empty; response: { preview: Preview } };
+  stopPreview: { body: Empty; response: { preview: Preview } };
   budget: { body: Revision & { additions: { [key: string]: number } }; response: { run: Run } };
 }

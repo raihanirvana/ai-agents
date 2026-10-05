@@ -40,7 +40,7 @@ export async function mockApi(page: Page, state: State) {
     }
     if (path === "/auth/session") return json({ csrf_token: "csrf" });
     if (path === "/projects") return json({ projects: [project] });
-    if (path === "/projects/p1/tickets") return json({ project, tickets: state.tickets, runs: state.runs, cursor: 5 } satisfies Board);
+    if (path === "/projects/p1/tickets") return json({ project, tickets: state.tickets, runs: state.runs, preview: null, cursor: 5 } satisfies Board);
     if (path === "/projects/p1/messages") return json({ messages: state.messages, cursor: 5 });
     if (path === "/projects/p1/events") return state.events === "abort" ? route.abort("failed") : route.fulfill({ status: 200, contentType: "text/event-stream", body: ": open\n\n", headers: CORS });
     if (/^\/tickets\/[^/]+$/.test(path)) return state.detail ? json(state.detail) : json({ error: { code: "not_found", message: "no", details: {} } }, 404);

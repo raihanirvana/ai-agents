@@ -61,7 +61,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-008 | API aplikasi, autentikasi lokal, dan SSE | DEV-003, DEV-004, DEV-007 | DONE |
 | DEV-009 | GUI board, chat PO, dan review scope | DEV-008 | DONE |
 | DEV-010 | Pipeline lead/developer/QA dengan bukti test | DEV-003, DEV-006, DEV-007 | DONE |
-| DEV-011 | Preview kandidat dan feedback UAT | DEV-008, DEV-009, DEV-010 | TODO |
+| DEV-011 | Preview kandidat dan feedback UAT | DEV-008, DEV-009, DEV-010 | DONE |
 | DEV-012 | Integrasi accepted, dependency, dan recovery Git/DB | DEV-005, DEV-010, DEV-011 | TODO |
 | DEV-013 | Onboarding repository existing | DEV-005, DEV-012 | TODO |
 | DEV-014 | Release yang dibekukan dan verifikasi gabungan | DEV-012, DEV-013 | TODO |
@@ -1367,6 +1367,47 @@ coverage/checksums), tanpa provider requests baru. Pengguna mengotorisasi commit
 setelah recheck; suite lengkap 722 tetap hasil run reviewer, bukan run ulang Codex.
 
 ## DEV-011 — Preview kandidat dan feedback UAT
+
+### Catatan pengerjaan
+Status: DONE. Pelaksana: Claude (Sonnet 5.5), 2026-10-05. Review Codex menemukan bug dan memperbaikinya;
+perbaikan menunggu re-review independen, R6 belum ditutup.
+Rencana: tabel `previews` (migrasi 0005) sebagai antrean/state lifecycle yang dimiliki supervisor, terpisah dari
+job execution; `PreviewService` di worker (start/stop/switch/reopen/reconcile, satu preview aktif) menjalankan
+bundle build teruji dari artifact (digest dicocokkan dengan target) dalam container `--network none` dengan
+`preview-server.cjs` pada unix socket, dan proxy TCP loopback `localhost:PREVIEW_PORT` milik supervisor
+(target tanpa jaringan sama sekali, tidak ada host gateway); smoke health sebelum `ready`; API start/stop/query +
+event `preview.*`; GUI di detail kandidat (status, target/build digest, fixture, link tab terpisah, checklist);
+pin cleanup untuk artifact yang dipakai preview aktif; preview kandidat yang di-supersede ditutup.
+File rencana: `apps/backend/app/preview/**`, `persistence/models.py` + `migrations/versions/0005_previews.py`,
+`http/{application,queries,schemas}.py`, `contracts/api/**`, `contracts/verification/preview-server.cjs`,
+`worker.py`, `apps/web/src/components/Ticket.tsx`, `tests/preview/**`, `tests/web-browser/**`,
+`docs/decisions/preview.md`, handoff. Tidak mulai DEV-012/013. Belum commit/push.
+
+Hasil: preview on-demand dari bundle build teruji (container `--network none`, server pada unix socket, proxy loopback
+`localhost:PREVIEW_PORT` milik supervisor), satu preview aktif, switch/stop/reopen/recovery, preview kandidat yang
+diganti ditutup, pin cleanup, API start/stop/get + event `preview.*`, panel GUI di detail kandidat. Pemetaan AC ke bukti,
+perintah, dan known issues: [DEV-011-handoff](docs/reviews/DEV-011-handoff.md). Keputusan:
+[preview](docs/decisions/preview.md).
+
+Verifikasi: WSL+Docker suite backend lengkap 742 passed (sebelum satu tes tambahan; `tests/preview` 15 passed sesudahnya);
+Windows 555 passed/14 skipped; GUI 30 passed; browser preview (API+PreviewService+Docker nyata) 4 passed; smoke 5 dan
+browser DEV-008 3 passed. Uji mutasi `--network bridge` menggagalkan tes isolasi; eksperimen kontrol membuktikan host
+`127.0.0.1` menerima cookie sedangkan `localhost` tidak. Keterbatasan: hanya stack statis stateless tanpa migrasi,
+satu worker per host, tanpa HTTPS/VPS (DEV-017), QA fixture adalah contract fixture, tidak ada model/provider nyata.
+Belum commit/push; DEV-012/013 tidak dikerjakan.
+
+Review Codex 2026-10-05: verdict awal NEEDS_FIX, empat temuan diperbaiki atas instruksi pengguna.
+R011-01 P1: proxy mentah menerima alias host kontrol dan credential; kini HTTP divalidasi sebelum socket target,
+Host persis localhost, credential ditolak, dan satu request per koneksi. R011-02 P2: cleanup gagal saat start/recovery
+meninggalkan starting tanpa retry; kini stopping dengan error, pin dipertahankan dan retry berjalan. R011-03 P2:
+switch tetap memulai preview baru walau cleanup lama belum selesai; kini requested menunggu. R011-04 P2: error
+transport inspect setelah remove dianggap container hilang; kini harus terbukti engine tersedia dan objek tidak ada.
+10 regresi baru semuanya gagal di modul asli dari index dan lulus setelah fix. Browser ditambah navigasi alias host
+dengan cookie kontrol nyata (403), dan hitungan container fixture dibatasi supervisor sendiri agar suite tidak saling
+mengganggu. Verifikasi terkait WSL+Docker 215 passed; Windows HTTP/persistence 184 passed/2 skipped; build lulus,
+GUI 30 passed, browser preview 4 passed. Suite backend lengkap WSL+Docker 753 passed tanpa skip (365.56 detik);
+regresi review + lifecycle setelah penyesuaian shutdown terakhir 20 passed. Tidak ada container preview tersisa.
+Laporan: [DEV-011-review](docs/reviews/DEV-011-review.md). Fix belum di-stage/commit/push; tidak ada panggilan model.
 
 **Tujuan:** pengguna langsung mencoba tiket setelah QA.
 

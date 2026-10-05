@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from app.persistence import NotFound, latest_cursor
 from app.persistence.models import (Project, Ticket, TicketVersion, Candidate, Verification, Artifact,
                                     Approval, Dependency, Job, Message)
+from app.preview import requests as previews
 
 
 def not_runtime_log():
@@ -83,6 +84,7 @@ def candidate(s, c):
             "base_sha": c.base_sha, "status": c.status, "target_artifact_id": c.target_artifact_id,
             "target_digest": c.target_digest, "evidence_ids": c.evidence_artifact_ids, "preview": c.preview,
             "commit_artifact_id": c.commit_artifact_id, "build_artifact_id": c.build_artifact_id,
+            "live_preview": (lambda p: previews.public(p) if p else None)(previews.latest_for(s, c.id)),
             "verifications": [{"id": v.id, "status": v.status, "target_digest": v.target_digest,
                 "evidence_ids": v.evidence_artifact_ids, "counts": v.counts, "results": v.results,
                 "uac_coverage": v.uac_coverage} for v in s.scalars(
@@ -94,6 +96,7 @@ def board(s, project_id):
     return {"project": project(p), "tickets": [ticket(t) for t in s.scalars(select(Ticket).where(
             Ticket.project_id == project_id).order_by(Ticket.priority.desc(), Ticket.number))],
             "runs": _runs(s, project_id),
+            "preview": (lambda rows: previews.public(rows[0]) if rows else None)(previews.active(s, project_id)),
             "cursor": latest_cursor(s, project_id=project_id)}
 
 

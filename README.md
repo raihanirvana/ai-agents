@@ -130,6 +130,22 @@ supervisor yang memakai FakeProvider berlabel (balasan PO diskrip lewat port kon
 `19852` khusus tes). `states.spec.ts` memakai respons API tiruan untuk state yang tidak
 bisa dipicu fixture (quota, evidence hilang, UAT). Tidak ada panggilan model nyata.
 
+## Preview kandidat untuk UAT (DEV-011)
+
+Tiket di UAT menampilkan panel "Preview untuk UAT": **Buka preview** meminta supervisor menjalankan bundle build yang
+sudah diuji dalam container tanpa jaringan; hasilnya dibuka di tab terpisah pada `http://localhost:5180/`
+(`PREVIEW_PORT`), origin berbeda dari kontrol `127.0.0.1`. Hanya satu preview aktif; membuka yang lain menutup yang
+lama. Butuh worker `python -m app.worker --runtime pipeline` (Linux/macOS/WSL dengan Docker dan image Node pin).
+Keputusan dan batas: [preview](docs/decisions/preview.md).
+
+```sh
+cd apps/backend
+.venv/bin/python -m pytest tests/preview tests/http/test_previews.py -q   # perlu Docker + image node:22.20.0-alpine
+cd ../..
+# Browser (Windows: backend fixture berjalan di WSL; Linux/macOS: PREVIEW_TEST_PYTHON=apps/backend/.venv/bin/python)
+npx playwright test --config playwright.preview.config.ts
+```
+
 ## Regression smoke tests
 
 ```sh

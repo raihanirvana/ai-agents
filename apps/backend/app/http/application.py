@@ -17,7 +17,8 @@ from app.persistence import (Database, ArtifactStore, migrate, NotFound, Revisio
     AlreadyAnswered, IdempotencyConflict, ArtifactUnavailable, EventSpec, append_event, append_message,
     latest_cursor)
 from app.persistence.columns import new_id, utcnow
-from app.persistence.models import Project, Ticket, Message, Job, Candidate, Artifact, Release, LocalSession
+from app.persistence.models import Project, Ticket, Message, Job, Candidate, Artifact, Release, LocalSession, Preview
+from app.preview import requests as previews
 from app.workers import JobQueue, ProviderLimiter
 from app.workers.queue import StaleLease, BudgetExhausted, QueueError
 from app.workers.runtime import RunContext, WaitingForInput
@@ -313,6 +314,28 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
             c = q.row(s, Candidate, candidate_id, t.project_id)
             if c.ticket_id != t.id: raise NotFound("candidate", candidate_id)
             return clean(request, {"candidate": q.candidate(s, c)})
+    @app.post("/tickets/{ticket_id}/candidates/{candidate_id}/previews")
+    def start_preview(request: Request, ticket_id: str, candidate_id: str, body: b.Empty):
+        """Open (or reopen) the single local preview of this verified target. The supervisor starts it; poll
+        the candidate/preview or follow `preview.*` events. Approval never depends on this process staying up."""
+        def action(s, svc, key, p):
+            ticket_actor(s, p, ticket_id)
+            preview = previews.request_preview(s, request.app.state.api.store, ticket_id=ticket_id,
+                candidate_id=candidate_id, user_id=p.user_id, port=request.app.state.api.settings.preview_port)
+            return {"preview": previews.public(preview)}
+        return command(request, body, action)
+    @app.post("/previews/{preview_id}/stop")
+    def stop_preview(request: Request, preview_id: str, body: b.Empty):
+        def action(s, svc, key, p):
+            row = q.row(s, Preview, preview_id)
+            user_actor(p, row.project_id)
+            return {"preview": previews.public(previews.request_stop(s, preview_id, p.user_id))}
+        return command(request, body, action)
+    @app.get("/previews/{preview_id}")
+    def preview(request: Request, preview_id: str):
+        auth(request)
+        with request.app.state.api.db.read() as s:
+            return clean(request, {"preview": previews.public(q.row(s, Preview, preview_id))})
     @app.get("/artifacts/{artifact_id}")
     def artifact(request: Request, artifact_id: str):
         auth(request)
