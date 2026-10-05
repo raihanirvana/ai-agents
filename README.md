@@ -146,6 +146,13 @@ cd ../..
 npx playwright test --config playwright.preview.config.ts
 ```
 
+## Kantor tim (DEV-016)
+
+Tab **Kantor** di panel kerja memuat scene React Three Fiber (lazy chunk) berisi empat peran. Status berasal dari run
+board dan pesan tersimpan yang sama dengan Aktivitas/Chat; kantor tidak menjalankan atau mengubah pekerjaan. Daftar
+peran HTML tersedia untuk keyboard/screen reader dan menjadi fallback bila WebGL tidak ada. Animasi dapat dimatikan
+(preferensi lokal, mengikuti `prefers-reduced-motion`). Run FAKE diberi label.
+
 ## Release (DEV-014)
 
 Tab **Release** membekukan accepted tip dan tiket Accepted yang belum masuk release (integrator menahan tip selama

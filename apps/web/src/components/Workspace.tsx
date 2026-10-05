@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ACTIVE_RUN } from "../format";
 import { useWorkspace } from "../workspace";
 import Activity from "./Activity";
@@ -7,9 +7,10 @@ import Releases from "./Releases";
 import Board from "./Board";
 import Chat from "./Chat";
 import TicketPanel from "./Ticket";
+const Office = lazy(() => import("../features/office/Office"));
 import { Badge, ErrorBanner, FakeBadge } from "./ui";
 
-type Tab = "chat" | "ticket" | "activity" | "release";
+type Tab = "chat" | "ticket" | "activity" | "release" | "office";
 
 export default function Workspace({ onProjects, onLogout }: { onProjects: () => void; onLogout: () => void }) {
   const { board, connection, error, dismissError, selectedTicket, command, busy } = useWorkspace();
@@ -61,7 +62,7 @@ export default function Workspace({ onProjects, onLogout }: { onProjects: () => 
         <Board />
         <aside className="side" aria-label="Panel kerja">
           <div className="tabs" role="tablist">
-            {([["chat", "Chat PO"], ["ticket", "Tiket"], ["activity", `Aktivitas${active ? ` (${active})` : ""}`], ["release", "Release"]] as [Tab, string][]).map(([id, label]) => (
+            {([["chat", "Chat PO"], ["ticket", "Tiket"], ["activity", `Aktivitas${active ? ` (${active})` : ""}`], ["release", "Release"], ["office", "Kantor"]] as [Tab, string][]).map(([id, label]) => (
               <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "tab tab--on" : "tab"}
                 onClick={() => { setTab(id); }}>{label}</button>
             ))}
@@ -71,6 +72,7 @@ export default function Workspace({ onProjects, onLogout }: { onProjects: () => 
             {tab === "ticket" && <TicketPanel />}
             {tab === "activity" && <Activity />}
             {tab === "release" && <Releases />}
+            {tab === "office" && <Suspense fallback={<p className="muted pad" role="status">Menyiapkan kantor…</p>}><Office /></Suspense>}
           </div>
         </aside>
       </div>

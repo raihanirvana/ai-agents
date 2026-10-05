@@ -168,3 +168,30 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
 .release { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
 .release h5 { font-size: 12px; margin: 4px 0 0; color: var(--muted); }
 .release .approve, .release .export { border-top: 1px dashed var(--line); padding-top: 8px; display: grid; gap: 6px; }
+
+.office { padding: 12px; display: grid; gap: 10px; align-content: start; }
+.office-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.office-head h2 { font-size: 18px; }
+.office-head .eyebrow { margin-bottom: 2px; font-size: 9px; }
+.office-connection { color: var(--muted); font-size: 11px; }
+.office-fake { margin: 0; border-radius: 7px; padding: 5px 8px; background: var(--fake-bg); color: var(--fake); font-size: 11px; }
+.office-scene { position: relative; height: clamp(180px, 28vh, 270px); min-height: 170px; overflow: hidden; border: 1px solid #d9e4df; border-radius: 10px; background: #edf4f1; }
+.office-scene canvas { display: block; width: 100%; height: 100%; touch-action: pan-y; }
+.office-roles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.office-role { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px; text-align: left; }
+.office-role--selected { border-color: var(--info); background: var(--info-bg); }
+.office-role__dot { flex: none; width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 3px #17212b10; }
+.office-role strong, .office-role small { display: block; }
+.office-role strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.office-role small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.office-context { border: 1px solid var(--line); border-radius: 9px; padding: 9px; }
+.office-context__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.office-context__head span { color: var(--muted); font-size: 11px; }
+.office-thread { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 7px; max-height: 190px; overflow: auto; }
+.office-thread li { border-top: 1px solid var(--line); padding-top: 6px; }
+.office-thread time { margin-left: 8px; color: var(--muted); font-size: 10px; }
+.office-thread p { margin: 3px 0; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.office-fallback { height: 100%; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 14px; text-align: center; color: var(--muted); }
+.office-fallback strong { color: var(--ink); }
+.office-fallback div { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.office-fallback button { font-size: 11px; }

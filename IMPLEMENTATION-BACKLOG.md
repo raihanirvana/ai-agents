@@ -66,7 +66,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-013 | Onboarding repository existing | DEV-005, DEV-012 | DONE |
 | DEV-014 | Release yang dibekukan dan verifikasi gabungan | DEV-012, DEV-013 | DONE |
 | DEV-015 | Pilot end-to-end dan panduan operasional | DEV-009, DEV-011, DEV-013, DEV-014 | DONE |
-| DEV-016 | Kantor Three.js dari aktivitas nyata | DEV-015 | TODO |
+| DEV-016 | Kantor Three.js dari aktivitas nyata | DEV-015 | DONE |
 | DEV-017 | Packaging satu VPS | DEV-015 | TODO |
 
 ## DEV-001 — Skeleton repository dan cara menjalankan lokal
@@ -1734,6 +1734,13 @@ pilot berbayar tidak diulang reviewer, UAT manual dan outage provider nyata belu
 
 ## DEV-016 — Kantor Three.js dari aktivitas nyata
 
+### Catatan pengerjaan
+
+Status: DONE. Pelaksana: Codex, 2026-10-05. Baseline `c94b027` (DEV-015 committed/pushed).
+Rencana: tambah kantor React Three Fiber yang memproyeksikan run, ticket dan message dari workspace snapshot/SSE yang ada; navigasi avatar ke konteks aktual, status reconnect, fallback WebGL, toggle animasi aksesibel; board tetap selalu tersedia. Tidak membuat lifecycle/status pekerjaan baru atau data simulasi.
+File: `apps/web/src/features/office/**`, `apps/web/src/components/Workspace.tsx`, style, dependencies/lockfile, browser checks, backlog dan handoff.
+
+
 **Tujuan:** empat soul terlihat bekerja dan berkomunikasi dalam kantor virtual.
 
 **Scope:** React Three Fiber/Three.js scene, empat role, visual status, interaksi
@@ -1747,6 +1754,25 @@ ke detail/chat/run; board tetap akses utama bila visual tidak tersedia.
 - Ada fallback UI dan pengaturan animasi sederhana; scene tidak menghambat board.
 
 **Verifikasi:** walkthrough run nyata, reconnect, dan browser tanpa WebGL.
+
+Hasil: tab Kantor lazy-load scene Three.js empat role; status diturunkan dari board runs (active/waiting/failed/terminal),
+aktivitas/thread dari messages nyata. SSE/reconnect dan snapshot tetap dikelola WorkspaceProvider authoritative yang sama;
+kantor tidak punya scheduler/status setter. Avatar atau daftar aksesibel memilih role; panel memuat run, tiket/message terkait;
+klik tiket membuka panel detail dan klik avatar memakai konteks pekerjaan. Board tetap di layar. Toggle animasi menghormati
+`prefers-reduced-motion` secara default dan preferensi lokal; WebGL gagal menampilkan daftar role/board tanpa menghambat GUI.
+Fake run diberi label. Stack: `@react-three/fiber` 8.18.0 untuk React 18, `three` + types dipin; tab dipecah sebagai async chunk.
+File: `apps/web/src/features/office/{Office,projection}.tsx`, Workspace, style, deps/lockfile, browser tests.
+Pemetaan AC dan cara review: [handoff DEV-016](docs/reviews/DEV-016-handoff.md). Build TypeScript/Vite lulus (initial bundle
+214,48 KB; lazy Office 891,60 KB minified/239,53 KB gzip, peringatan >500 KB; hanya diunduh saat tab dibuka).
+Browser `npx playwright test -c playwright.web.config.ts`: **39 passed** (termasuk API/worker FakeProvider nyata SSE/reload,
+klik avatar WebGL, perubahan event ke status baru, fallback saat WebGL dimatikan). Verifikasi ada fake/contract fixtures;
+tidak mengklaim provider/model nyata. Review kode Claude: **REVIEWED** setelah Codex memeriksa fix R016-A;
+checkpoint **R9 tetap OPEN** menunggu walkthrough provider nyata dan uji GPU/mobile. DEV-017 berikutnya.
+
+Review Claude 2026-10-05: AC terpenuhi; satu perbaikan efisiensi (R016-A, render on-demand saat semua role idle). Codex memeriksa fix dan
+mem-pin dependency baru serta memindahkan `@types/three` ke devDependencies. Verifikasi ulang dicatat di review; probe open/close tab tanpa leak.
+Walkthrough provider nyata dan uji GPU/mobile tidak dilakukan; R9 belum ditutup.
+Laporan: [DEV-016-review-claude](docs/reviews/DEV-016-review-claude.md).
 
 ## DEV-017 — Packaging satu VPS
 

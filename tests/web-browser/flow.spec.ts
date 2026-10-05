@@ -193,3 +193,32 @@ test("stop sends an empty body without expected_revision and the run shows as ca
   await expect(run.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
   await request.post(`${CONTROL}/gate/open`);
 });
+
+test("office follows a real persisted team run through SSE and keeps its message thread after reload", async ({ page, request }) => {
+  await script(request, ["HOLD"]);
+  await login(page);
+  await createProject(page, "Kantor langsung");
+  await send(page, "Mulai breakdown PO untuk proyek ini");
+  await page.getByRole("tab", { name: "Kantor" }).click();
+
+  await expect(page.getByRole("heading", { name: "Kantor tim" })).toBeVisible();
+  await expect(page.locator(".office-connection")).toContainText("Status mengikuti event langsung");
+  await expect(page.locator(".office-fake")).toContainText("run FAKE");
+  await expect(page.locator(".office-roles").getByRole("button", { name: /Product Owner/ })).toContainText("Menyusun rencana");
+  await expect(page.getByLabel("Konteks Product Owner")).toContainText("Mulai breakdown PO untuk proyek ini");
+
+  await page.getByRole("tab", { name: /Aktivitas/ }).click();
+  const active = page.locator(".run").first();
+  await expect(active).toHaveAttribute("data-status", /running|queued/);
+  await active.getByRole("button", { name: "Stop", exact: true }).click();
+  await active.getByRole("button", { name: "Ya, hentikan run" }).click();
+  await expect(active).toHaveAttribute("data-status", "cancelled");
+
+  await page.getByRole("tab", { name: "Kantor" }).click();
+  await expect(page.locator(".office-roles").getByRole("button", { name: /Product Owner/ })).toContainText("Siaga");
+  await expect(page.getByLabel("Konteks Product Owner")).toContainText("Mulai breakdown PO untuk proyek ini");
+  await page.reload();
+  await page.getByRole("tab", { name: "Kantor" }).click();
+  await expect(page.getByLabel("Konteks Product Owner")).toContainText("Mulai breakdown PO untuk proyek ini");
+  await request.post(`${CONTROL}/gate/open`);
+});

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { Artifact, Board, Candidate, Message, Preview, Project, Release, Run, Ticket, TicketDetail } from "../../contracts/api/types";
+import type { Artifact, Board, Candidate, Message, Preview, Project, Release, Run, StateEvent, Ticket, TicketDetail } from "../../contracts/api/types";
 
 /**
  * Display states that the fake-provider fixture cannot reach on demand (quota wait, user questions, evidence that
@@ -24,7 +24,7 @@ const run = (over: Partial<Run>): Run => ({
 interface State {
   tickets: Ticket[]; runs: Run[]; messages: Message[]; detail: TicketDetail | null;
   artifacts: { [id: string]: Artifact }; runInput: { [id: string]: Message | null };
-  posts: { path: string; body: unknown; key: string | undefined }[]; events: "open" | "abort"; releases?: Release[];
+  posts: { path: string; body: unknown; key: string | undefined }[]; events: "open" | "abort" | "office-update"; releases?: Release[];
 }
 const fresh = (): State => ({ tickets: [], runs: [], messages: [], detail: null, artifacts: {}, runInput: {}, posts: [], events: "abort" });
 
@@ -42,7 +42,17 @@ async function mockApi(page: Page, state: State) {
     if (path === "/projects") return json({ projects: [project] });
     if (path === "/projects/p1/tickets") return json({ project, tickets: state.tickets, runs: state.runs, preview: null, releases: state.releases ?? [], cursor: 5 } satisfies Board);
     if (path === "/projects/p1/messages") return json({ messages: state.messages, cursor: 5 });
-    if (path === "/projects/p1/events") return state.events === "abort" ? route.abort("failed") : route.fulfill({ status: 200, contentType: "text/event-stream", body: ": open\n\n", headers: CORS });
+    if (path === "/projects/p1/events") {
+      if (state.events === "abort") return route.abort("failed");
+      if (state.events === "office-update") {
+        state.events = "open";
+        state.runs = state.runs.map((item) => item.role === "qa" ? { ...item, status: "succeeded", revision: item.revision + 1 } : item);
+        const event: StateEvent = { cursor: 6, project_id: "p1", type: "job.completed", entity_type: "jobs", entity_id: "r-qa",
+          run_id: "r-qa", payload: { status: "succeeded" }, created_at: "2026-10-05T01:01:00Z" };
+        return route.fulfill({ status: 200, contentType: "text/event-stream", body: `id: 6\nevent: state\ndata: ${JSON.stringify(event)}\n\n`, headers: CORS });
+      }
+      return route.fulfill({ status: 200, contentType: "text/event-stream", body: ": open\n\n", headers: CORS });
+    }
     if (/^\/tickets\/[^/]+$/.test(path)) return state.detail ? json(state.detail) : json({ error: { code: "not_found", message: "no", details: {} } }, 404);
     const runMatch = /^\/runs\/([^/]+)(\/logs)?$/.exec(path);
     if (runMatch) {
@@ -356,4 +366,69 @@ test("a failed release shows no approval and an in-flight release job holds the 
   await expect(page.getByRole("button", { name: "Setujui release ini" })).toHaveCount(0);
   await expect(page.getByText("release gagal tidak dapat disetujui")).toBeVisible();
   await expect(page.getByRole("button", { name: /Bekukan dan verifikasi release/ })).toBeDisabled();
+});
+
+test("office projects persisted roles, run state and message thread, while the board stays available", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (contextId: string, ...args: unknown[]) {
+      if (["webgl", "webgl2", "experimental-webgl"].includes(contextId)) return null;
+      return Reflect.apply(getContext, this, [contextId, ...args]) as RenderingContext | null;
+    } as typeof HTMLCanvasElement.prototype.getContext;
+  });
+  const state = fresh();
+  state.tickets = [ticket({ id: "t1", number: 7, title: "Menu kopi" })];
+  state.detail = { ticket: state.tickets[0], versions: [], dependencies: [], approvals: [], candidates: [], messages: [], cursor: 5 };
+  state.runs = [
+    run({ id: "r-po", role: "po", ticket_id: null, stage: "chat", status: "running", fake: true, runtime: "structured:fake" }),
+    run({ id: "r-dev", role: "developer", status: "running", stage: "implement", ticket_id: "t1" }),
+    run({ id: "r-qa", role: "qa", status: "waiting_input", stage: "suite", ticket_id: "t1" }),
+  ];
+  state.messages = [{ id: "m-po", project_id: "p1", ticket_id: null, thread_id: "chat:p1", seq: 4,
+    sender: "agent:po", recipient: null, kind: "message", body: "Saya mengusulkan tiga tiket untuk brief ini.",
+    reply_to: null, metadata: {}, attachment_ids: [], created_at: "2026-10-05T01:00:00Z" }];
+  await mockApi(page, state);
+  await page.goto("/#/p/p1");
+  await page.getByRole("tab", { name: "Kantor" }).click();
+
+  await expect(page.getByRole("heading", { name: "Kantor tim" })).toBeVisible();
+  await expect(page.locator(".office-fallback")).toContainText("Scene 3D tidak tersedia");
+  await expect(page.locator(".office-fake")).toContainText("FAKE di proyek ini");
+  await expect(page.locator(".office-roles").getByRole("button", { name: /Product Owner/ })).toContainText("Menyusun rencana");
+  await expect(page.locator(".office-roles").getByRole("button", { name: /Developer/ })).toContainText("Mengembangkan");
+  await expect(page.locator(".office-roles").getByRole("button", { name: /QA/ })).toContainText("Menunggu input");
+  await expect(page.locator(".office-roles").getByRole("button")).toHaveCount(4);
+  await expect(page.getByLabel("Scene kantor tiga dimensi")).toBeVisible();
+  const motion = page.getByRole("button", { name: "Animasi nonaktif" });
+  await expect(motion).toHaveAttribute("aria-pressed", "false");
+  await motion.click();
+  await expect(page.getByRole("button", { name: "Animasi aktif" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.locator(".office-roles").getByRole("button", { name: /Product Owner/ }).click();
+  await expect(page.getByLabel("Konteks Product Owner")).toContainText("Saya mengusulkan tiga tiket untuk brief ini.");
+  await expect(page.locator(".column").first()).toBeVisible();
+  await page.locator(".office-roles").getByRole("button", { name: /Developer/ }).click();
+  await expect(page.getByRole("heading", { name: "Menu kopi", level: 2 })).toBeVisible();
+});
+
+test("a WebGL office avatar opens the same role conversation shown by the accessible list", async ({ page }) => {
+  const state = fresh();
+  state.events = "office-update";
+  state.runs = [run({ id: "r-qa", role: "qa", stage: "verify", status: "waiting_input" })];
+  state.messages = [{ id: "m-po", project_id: "p1", ticket_id: null, thread_id: "chat:p1", seq: 4,
+    sender: "agent:po", recipient: null, kind: "message", body: "Percakapan dari PO yang tersimpan.",
+    reply_to: null, metadata: {}, attachment_ids: [], created_at: "2026-10-05T01:00:00Z" }];
+  await mockApi(page, state);
+  await page.goto("/#/p/p1");
+  await page.getByRole("tab", { name: "Kantor" }).click();
+  await expect(page.getByRole("heading", { name: "Kantor tim" })).toBeVisible();
+  await expect(page.locator(".office-roles").getByRole("button", { name: /QA/ })).toContainText("Siaga");
+  const canvas = page.locator(".office-scene canvas");
+  if (await page.locator(".office-fallback").isVisible()) test.skip(true, "WebGL unavailable in this browser");
+  await expect(canvas).toBeVisible();
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  await canvas.click({ position: { x: box!.width * 0.28, y: box!.height * 0.48 } });
+  await expect(page.getByLabel("Konteks Product Owner")).toContainText("Percakapan dari PO yang tersimpan.");
 });
