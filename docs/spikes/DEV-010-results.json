@@ -1,0 +1,769 @@
+{
+  "ticket": "DEV-010",
+  "implementation_status": "DONE",
+  "checked_on": "2026-10-05",
+  "independent_review": "NOT_REVIEWED",
+  "scope": "Isolated product DB, bundled React/Vite fixture; reached UAT, no user UAT acceptance or release.",
+  "evidence_note": "Summary only. Authoritative reports and checksummed artifacts remain in private qualification DB/artifact stores.",
+  "total_reported_cost_usd": 0.12668808,
+  "verification_checks": {
+    "wsl_backend": {"passed": 718, "skipped": 0, "docker": "actual", "duration_s": 330.6},
+    "pipeline_cases_in_full_suite": 54,
+    "windows_portable": {"passed": 551, "skipped": 9, "duration_s": 70.19},
+    "windows_exclusions": ["tests/workspace", "tests/runtime_spike", "tests/pipeline/test_product_loop.py", "tests/pipeline/test_product_regressions.py"],
+    "public_runner_dockerfile_build": "passed",
+    "frontend": "not rerun; no frontend or HTTP contract changes"
+  },
+  "runs": [
+    {
+      "case": "feature",
+      "model": "qwen/qwen3-coder-30b-a3b-instruct",
+      "provider": "openrouter",
+      "phase": "ready",
+      "usage": {
+        "totals": {
+          "model_calls": 1,
+          "active_s": 127.02462061800907,
+          "output_tokens": 518,
+          "total_tokens": 1692,
+          "cost_usd": 0.00022722,
+          "prompt_tokens": 1174,
+          "cached_tokens": 0,
+          "input_tokens": 1174,
+          "tool_calls": 6
+        },
+        "unknown": [],
+        "jobs": 3
+      },
+      "fixture_base_sha": "0721a579b2ae3d5cd82409d4a9691fa464f4fce3",
+      "run": "feature-01",
+      "real_provider": true,
+      "user_uat_approval": false,
+      "verification": []
+    },
+    {
+      "case": "feature",
+      "model": "qwen/qwen3-coder-30b-a3b-instruct",
+      "provider": "openrouter",
+      "phase": "ready",
+      "usage": {
+        "totals": {
+          "model_calls": 5,
+          "active_s": 106.57260496699746,
+          "output_tokens": 710,
+          "total_tokens": 23498,
+          "cost_usd": 0.0017868600000000001,
+          "prompt_tokens": 1168,
+          "cached_tokens": 0,
+          "input_tokens": 22788,
+          "tool_calls": 3
+        },
+        "unknown": [],
+        "jobs": 2
+      },
+      "fixture_base_sha": "56bee444a9719357d5f0e9c8c9dbb100cea5df18",
+      "run": "feature-02",
+      "real_provider": true,
+      "user_uat_approval": false,
+      "verification": []
+    },
+    {
+      "case": "feature",
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openrouter",
+      "phase": "ready",
+      "usage": {
+        "totals": {
+          "model_calls": 4,
+          "active_s": 78.8925753309959,
+          "output_tokens": 4703,
+          "total_tokens": 20574,
+          "cost_usd": 0.0110316,
+          "prompt_tokens": 1127,
+          "cached_tokens": 0,
+          "input_tokens": 15871,
+          "tool_calls": 5
+        },
+        "unknown": [],
+        "jobs": 2
+      },
+      "fixture_base_sha": "cb84134120de7095a25728b71f0252c8f7a6374d",
+      "run": "feature-03",
+      "real_provider": true,
+      "user_uat_approval": false,
+      "verification": []
+    },
+    {
+      "case": "feature",
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openrouter",
+      "phase": "development",
+      "usage": {
+        "totals": {
+          "model_calls": 13,
+          "active_s": 106.25844010199944,
+          "output_tokens": 1604,
+          "total_tokens": 65044,
+          "cost_usd": 0.012889600000000001,
+          "prompt_tokens": 1128,
+          "cached_tokens": 0,
+          "input_tokens": 63440,
+          "tool_calls": 17
+        },
+        "unknown": [],
+        "jobs": 3
+      },
+      "fixture_base_sha": "372d90a8912dc41c6cd577a6d9aa1b6bf64c1f11",
+      "run": "feature-04",
+      "real_provider": true,
+      "user_uat_approval": false,
+      "verification": []
+    },
+    {
+      "case": "feature",
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openrouter",
+      "phase": "uat",
+      "usage": {
+        "totals": {
+          "model_calls": 24,
+          "active_s": 285.5946189959868,
+          "output_tokens": 3933,
+          "total_tokens": 150247,
+          "cost_usd": 0.0322168,
+          "prompt_tokens": 8538,
+          "cached_tokens": 0,
+          "input_tokens": 146314,
+          "tool_calls": 43
+        },
+        "unknown": [],
+        "jobs": 7
+      },
+      "fixture_base_sha": "167364fdea0c0b6d339c7f03c97eff98f050898d",
+      "run": "feature-05",
+      "real_provider": true,
+      "user_uat_approval": false,
+      "verification": [
+        {
+          "id": "f13f4fcd06e34216a0aa26930bc7977e",
+          "candidate_id": "afd0b5d0027f47b792cc583ace194c3f",
+          "commit_sha": "7a98e11127adea05ab73fdde54036f70cab62631",
+          "target_digest": "453ee08e9b894c00a7fca61272e1f9d199614b625081ea372cee8bc32d550739",
+          "target_artifact_id": "35f81142ab534c85b4f14ebfc16a20bb",
+          "build_digest": "422acc813a4be44201684a527cee1bc9b8cf9894db958e652d597225361fb83e",
+          "suite_digest": "401117c672dbf61007adf1933177b29022e50ca94ec973a8fe875fe35496eecf",
+          "config_digest": "d1a7f4951ad54fe6fe89acf73ace8073850aa2a1664dfab47d394a2c4d538185",
+          "fixture_digest": "2b580b68e23a01c1fb8198b7deb7ff1f837acf5d43edc119745bd2674e2e92d3",
+          "migration_digest": "d32acf592f7f63460ff06711e1a9d41fbf6327a03303ae840e83fa9ef278d8f1",
+          "runner": {
+            "runner_code_digest": "12e7718a38d896772fa915882283c5c58eeefa35dedf361dc684895edb5419f9",
+            "runner_image_id": "sha256:2552c1438bea9263fd98df053341071d09d98e6230ab0e7217119260d8b59212"
+          },
+          "node_image_id": "sha256:dbcedd8aeab47fbc0f4dd4bffa55b7c3c729a707875968d467aaaea42d6225af",
+          "invocation_id": "e2e-63a56eb3b4d747eb87f192ebe2e57623",
+          "status": "passed",
+          "fake_provider": false,
+          "counts": {
+            "discovered": 2,
+            "executed": 2,
+            "passed": 2,
+            "failed": 0,
+            "skipped": 0
+          },
+          "coverage": {
+            "UAC-discount": [
+              "feature-discount-toggle"
+            ],
+            "UAC-restore": [
+              "feature-discount-restore"
+            ]
+          },
+          "suite": {
+            "kind": "qa_plan",
+            "summary": "Verify the discount toggle functionality on the sample cart with two lattes priced at 8.00: click toggle once results in 7.20 total, click toggle twice restores 8.00 total.",
+            "tests": [
+              {
+                "id": "feature-discount-toggle",
+                "purpose": "feature",
+                "steps": [
+                  {
+                    "action": "click",
+                    "selector": "[data-testid=\"discount-toggle\"]",
+                    "value": null
+                  },
+                  {
+                    "action": "assert_text",
+                    "selector": "[data-testid=\"cart-total\"]",
+                    "value": "7.20"
+                  }
+                ],
+                "uac": [
+                  "UAC-discount"
+                ]
+              },
+              {
+                "id": "feature-discount-restore",
+                "purpose": "feature",
+                "steps": [
+                  {
+                    "action": "click",
+                    "selector": "[data-testid=\"discount-toggle\"]",
+                    "value": null
+                  },
+                  {
+                    "action": "click",
+                    "selector": "[data-testid=\"discount-toggle\"]",
+                    "value": null
+                  },
+                  {
+                    "action": "assert_text",
+                    "selector": "[data-testid=\"cart-total\"]",
+                    "value": "8.00"
+                  }
+                ],
+                "uac": [
+                  "UAC-restore"
+                ]
+              }
+            ]
+          },
+          "required_checks": {
+            "status": "passed",
+            "waiver_ids": []
+          },
+          "repo_gate_status": "passed",
+          "repo_gate_counts": {
+            "discovered": 2,
+            "executed": 2,
+            "failed": 0,
+            "passed": 2,
+            "skipped": 0
+          },
+          "commands": [
+            {
+              "argv": [
+                "isolated-browser-runner",
+                "e2e-63a56eb3b4d747eb87f192ebe2e57623"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "baseline_counts": {
+            "discovered": 2,
+            "executed": 2,
+            "failed": 2,
+            "passed": 0,
+            "skipped": 0
+          },
+          "baseline_target_digest": "a7f46095a66aa3e90730f2bcc56e6b9c8e845437eb511abb15927d4fd53e4e7c",
+          "baseline_tests": [
+            {
+              "id": "feature-discount-toggle",
+              "uac": [
+                "UAC-discount"
+              ],
+              "status": "failed"
+            },
+            {
+              "id": "feature-discount-restore",
+              "uac": [
+                "UAC-restore"
+              ],
+              "status": "failed"
+            }
+          ],
+          "artifacts": [
+            {
+              "id": "19c53422ad10443d966bc2d0c09a365c",
+              "kind": "screenshot",
+              "sha256": "987f3cb5050f924cc4322ab6a895e386e55b825aa0b1998302434600d946febb",
+              "bytes": 16046,
+              "producer": "verification"
+            },
+            {
+              "id": "35f81142ab534c85b4f14ebfc16a20bb",
+              "kind": "target_manifest",
+              "sha256": "453ee08e9b894c00a7fca61272e1f9d199614b625081ea372cee8bc32d550739",
+              "bytes": 1966,
+              "producer": "builder"
+            },
+            {
+              "id": "6a215ae7e1164ff88c9ec89e5a78da6c",
+              "kind": "report",
+              "sha256": "401117c672dbf61007adf1933177b29022e50ca94ec973a8fe875fe35496eecf",
+              "bytes": 786,
+              "producer": "qa-plan"
+            },
+            {
+              "id": "80d63ca0fba344ddbcdb8a2fb96f154f",
+              "kind": "report",
+              "sha256": "b637635b9a95ef3bda6cba074612e5af96f1298c119e0d7c0e4e9372e946f531",
+              "bytes": 4927,
+              "producer": "verification"
+            },
+            {
+              "id": "ac399c49eff14b1ab83989aba8144bf1",
+              "kind": "screenshot",
+              "sha256": "88ffd52f555eb15e0d4c2b988cceb24494d7ba96558956201ddc9dce07c1f612",
+              "bytes": 15997,
+              "producer": "verification"
+            },
+            {
+              "id": "b235e95c2c174d488da6ba7583cd566a",
+              "kind": "build_record",
+              "sha256": "8e67114e3cd5a99e5b435f93379dc24c85838a4fea541462e734d25fd0ffb4e8",
+              "bytes": 1413,
+              "producer": "builder"
+            },
+            {
+              "id": "bf73365c779540b28e04500631e5ce15",
+              "kind": "trace",
+              "sha256": "c23c9e1fbb3e8123a73202273dac136e1950bff1146b225cc57060fe20e9830d",
+              "bytes": 26971,
+              "producer": "verification"
+            },
+            {
+              "id": "d791238082a14ade8c574a9d6d3a5ecf",
+              "kind": "trace",
+              "sha256": "85e5c1025172200fec2e02002638ea1159db6745cea95ec621abdef8ededbb5d",
+              "bytes": 34521,
+              "producer": "verification"
+            }
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "id": "aca57b48cffa4a74a95ffb722e085137",
+          "stage": "technical_plan",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 32,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 200000,
+            "budget_key": "ticket:e139af1b8fb24c279c381a154c7ca5fc:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "88d2e4a5d4e646f8841f532e7f65715b",
+          "stage": "qa_plan",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 32,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 200000,
+            "budget_key": "ticket:e139af1b8fb24c279c381a154c7ca5fc:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "b21eb1143bf3406ba162105ac0e068a6",
+          "stage": "development",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 32,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 200000,
+            "budget_key": "ticket:e139af1b8fb24c279c381a154c7ca5fc:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "f21cd89085b845c7afe8279a77115c19",
+          "stage": "technical_review",
+          "status": "cancelled",
+          "generation": 2,
+          "model_history": [],
+          "limits": {
+            "model_calls": 32,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 200000,
+            "budget_key": "ticket:e139af1b8fb24c279c381a154c7ca5fc:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "a81a3aad1f884e31b4b2f2ae2b54e716",
+          "stage": "development",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 32,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 200000,
+            "budget_key": "ticket:e139af1b8fb24c279c381a154c7ca5fc:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "b6dc7dbe25174aeea6eb59016f55fcad",
+          "stage": "technical_review",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 32,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 200000,
+            "budget_key": "ticket:e139af1b8fb24c279c381a154c7ca5fc:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "a85a29ba12ff496db35a33259f8abf9f",
+          "stage": "qa",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 32,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 200000,
+            "budget_key": "ticket:e139af1b8fb24c279c381a154c7ca5fc:v1"
+          },
+          "hermes": null
+        }
+      ],
+      "input_requests": 0,
+      "approval_types": [
+        "scope"
+      ]
+    },
+    {
+      "case": "bug",
+      "model": "openai/gpt-4.1",
+      "provider": "openrouter",
+      "phase": "uat",
+      "usage": {
+        "totals": {
+          "model_calls": 37,
+          "active_s": 443.2738003530103,
+          "output_tokens": 2222,
+          "total_tokens": 194530,
+          "cost_usd": 0.06853599999999999,
+          "prompt_tokens": 10073,
+          "cached_tokens": 0,
+          "input_tokens": 192308,
+          "tool_calls": 68
+        },
+        "unknown": [],
+        "jobs": 8
+      },
+      "fixture_base_sha": "46f1c99cf32c4d609c4c1fa23402aaaa2308cfb8",
+      "run": "bug-01",
+      "real_provider": true,
+      "user_uat_approval": false,
+      "verification": [
+        {
+          "id": "2a7dbb57582544bbb1ee3e8ec9b7b9c0",
+          "candidate_id": "4f484d62ef964bf587e1a098d943584d",
+          "commit_sha": "f831e220a1b692fd6b07f08221ded84c622acde4",
+          "target_digest": "e483f628de76439ff35db488431967b4fcfe2cdbe696866fd3feccc37b4a8921",
+          "target_artifact_id": "fbd1a54a204b48268c868726ee6aa611",
+          "build_digest": "568e5bc051b6b17a1dcd5cf1b920011017f6f75383bdf559ec97cf4a9f95689b",
+          "suite_digest": "f00bbc71890533758ef84c0880bbcffa750c69332f7a428406b3498c39638d09",
+          "config_digest": "d1a7f4951ad54fe6fe89acf73ace8073850aa2a1664dfab47d394a2c4d538185",
+          "fixture_digest": "2b580b68e23a01c1fb8198b7deb7ff1f837acf5d43edc119745bd2674e2e92d3",
+          "migration_digest": "d32acf592f7f63460ff06711e1a9d41fbf6327a03303ae840e83fa9ef278d8f1",
+          "runner": {
+            "runner_code_digest": "12e7718a38d896772fa915882283c5c58eeefa35dedf361dc684895edb5419f9",
+            "runner_image_id": "sha256:2552c1438bea9263fd98df053341071d09d98e6230ab0e7217119260d8b59212"
+          },
+          "node_image_id": "sha256:dbcedd8aeab47fbc0f4dd4bffa55b7c3c729a707875968d467aaaea42d6225af",
+          "invocation_id": "e2e-561837a3190946cc92d562498808e02d",
+          "status": "passed",
+          "fake_provider": false,
+          "counts": {
+            "discovered": 1,
+            "executed": 1,
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0
+          },
+          "coverage": {
+            "UAC-price": [
+              "browser:UAC-price"
+            ]
+          },
+          "suite": {
+            "kind": "qa_plan",
+            "summary": "Verify the fix for the seeded coffee price calculation bug and UI display of cart total",
+            "tests": [
+              {
+                "id": "browser:UAC-price",
+                "purpose": "feature",
+                "steps": [
+                  {
+                    "action": "assert_text",
+                    "selector": "main > p",
+                    "value": "Sample cart total: 8.00"
+                  }
+                ],
+                "uac": [
+                  "UAC-price"
+                ]
+              }
+            ]
+          },
+          "required_checks": {
+            "status": "passed",
+            "waiver_ids": []
+          },
+          "repo_gate_status": "passed",
+          "repo_gate_counts": {
+            "discovered": 2,
+            "executed": 2,
+            "failed": 0,
+            "passed": 2,
+            "skipped": 0
+          },
+          "commands": [
+            {
+              "argv": [
+                "isolated-browser-runner",
+                "e2e-561837a3190946cc92d562498808e02d"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "baseline_counts": {
+            "discovered": 1,
+            "executed": 1,
+            "failed": 1,
+            "passed": 0,
+            "skipped": 0
+          },
+          "baseline_target_digest": "23fa1806fc7fc0847dba2da92a741927cdc76675b1384dd3966bafa5b29f1ee8",
+          "baseline_tests": [
+            {
+              "id": "browser:UAC-price",
+              "uac": [
+                "UAC-price"
+              ],
+              "status": "failed"
+            }
+          ],
+          "artifacts": [
+            {
+              "id": "087d22ddcef147e68bd1d4d04f96009b",
+              "kind": "screenshot",
+              "sha256": "1b59ce9b8d59e77f073482a330355461f0a0297a5dd2ea482bd84dadfd695032",
+              "bytes": 14818,
+              "producer": "verification"
+            },
+            {
+              "id": "08ba94584a36445eaa9c1f970a7cc576",
+              "kind": "report",
+              "sha256": "097df2a91a74ea1c21fa4df163d8889204fd9001b7ad049cc394db5a29b4d850",
+              "bytes": 4836,
+              "producer": "verification"
+            },
+            {
+              "id": "32cb9dd545d241af8a8ddcec32d024a8",
+              "kind": "trace",
+              "sha256": "1213c36b531f92abbb14d6b619cd9545b50dfe33503e8d4c4422792bb46247e5",
+              "bytes": 17989,
+              "producer": "verification"
+            },
+            {
+              "id": "8432db3794fd4cd4ba71fbb2683c27db",
+              "kind": "build_record",
+              "sha256": "6b6a9de1f13465a479f01a1b9d4b692031b93fa2807b85c19bb35541f015fec2",
+              "bytes": 1413,
+              "producer": "builder"
+            },
+            {
+              "id": "8ab6b8dd07414ea0a0d68674e51372d5",
+              "kind": "report",
+              "sha256": "f00bbc71890533758ef84c0880bbcffa750c69332f7a428406b3498c39638d09",
+              "bytes": 286,
+              "producer": "qa-plan"
+            },
+            {
+              "id": "fbd1a54a204b48268c868726ee6aa611",
+              "kind": "target_manifest",
+              "sha256": "e483f628de76439ff35db488431967b4fcfe2cdbe696866fd3feccc37b4a8921",
+              "bytes": 1966,
+              "producer": "builder"
+            }
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "id": "32781896f5c94e33b6abba7b05ff4797",
+          "stage": "technical_plan",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 48,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 392000,
+            "budget_key": "ticket:5ba85043440747d2a54ed9715d6373a0:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "f84ddb204d8e4e1e87923f4f0d28d518",
+          "stage": "qa_plan",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 48,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 392000,
+            "budget_key": "ticket:5ba85043440747d2a54ed9715d6373a0:v1"
+          },
+          "hermes": {
+            "python": "3.13.16",
+            "package_version": "0.21.5",
+            "commit": "f97608f178d1ffeca59860195ab7da295f7c8e5f"
+          }
+        },
+        {
+          "id": "636fa2f961024d1fae264871fb412a3a",
+          "stage": "development",
+          "status": "stopped",
+          "generation": 4,
+          "model_history": [],
+          "limits": {
+            "model_calls": 48,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 392000,
+            "budget_key": "ticket:5ba85043440747d2a54ed9715d6373a0:v1"
+          },
+          "hermes": {
+            "python": "3.13.16",
+            "package_version": "0.21.5",
+            "commit": "f97608f178d1ffeca59860195ab7da295f7c8e5f"
+          }
+        },
+        {
+          "id": "3ebf20d618684bed83985e582d28ce45",
+          "stage": "reply",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 48,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 392000,
+            "budget_key": "ticket:5ba85043440747d2a54ed9715d6373a0:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "5613584c84d14126b8ea2f8d7cd08fae",
+          "stage": "reply",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 48,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 392000,
+            "budget_key": "ticket:5ba85043440747d2a54ed9715d6373a0:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "d1c92418d58d47d0bb8208e5a0b0bff5",
+          "stage": "development",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [
+            {
+              "generation": 1,
+              "provider": "openrouter",
+              "model": "openai/gpt-4.1",
+              "context_artifact_id": "d53db10b00e042c585ee71c33e63e519"
+            }
+          ],
+          "limits": {
+            "model_calls": 48,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 392000,
+            "budget_key": "ticket:5ba85043440747d2a54ed9715d6373a0:v1"
+          },
+          "hermes": {
+            "python": "3.13.16",
+            "package_version": "0.21.5",
+            "commit": "f97608f178d1ffeca59860195ab7da295f7c8e5f"
+          }
+        },
+        {
+          "id": "51c436e3de524c1aaaad8c2a2aa98e2b",
+          "stage": "technical_review",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 48,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 392000,
+            "budget_key": "ticket:5ba85043440747d2a54ed9715d6373a0:v1"
+          },
+          "hermes": null
+        },
+        {
+          "id": "fd7cc81f36db43a08c0b387ceeddddc5",
+          "stage": "qa",
+          "status": "succeeded",
+          "generation": 1,
+          "model_history": [],
+          "limits": {
+            "model_calls": 48,
+            "tool_calls": 120,
+            "active_s": 900,
+            "output_tokens": 4096,
+            "total_tokens": 392000,
+            "budget_key": "ticket:5ba85043440747d2a54ed9715d6373a0:v1"
+          },
+          "hermes": null
+        }
+      ],
+      "input_requests": 2,
+      "approval_types": [
+        "scope"
+      ]
+    }
+  ]
+}

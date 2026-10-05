@@ -25,7 +25,7 @@ TOOL_POLICY: dict[str, frozenset[str]] = {
     "developer": frozenset({"read_file", "patch_file", "run_command", "inspect_diff", "submit_candidate",
                             "send_message", "request_decision"}),
     "qa": frozenset({"read_criteria", "propose_tests", "request_test_run", "inspect_app", "report_bug",
-                     "send_message"}),
+                     "send_message", "request_input"}),
 }
 # Allowed by policy but implemented by later tickets (workspace/Hermes/QA harness, DEV-010): they fail explicitly.
 NOT_WIRED = frozenset({"read_repo", "review_candidate", "read_file", "patch_file", "run_command", "inspect_diff",
@@ -65,7 +65,7 @@ class ToolFacade:
             raise Invalid("tool arguments must be an object")
         if FORBIDDEN_ARGS & set(args):
             raise Invalid("identity and permissions come from the run, not from tool arguments")
-        if name in NOT_WIRED:
+        if name in NOT_WIRED and name not in self._handlers:
             raise NotWired(f"{name} is wired in DEV-010 (workspace/QA harness)")
         args = self.threads.redactor.redact_value(args)
         return self.threads.redactor.redact_value(self._handlers[name](ctx, identity, args))

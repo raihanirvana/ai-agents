@@ -60,7 +60,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-007 | Soul, context, model client, dan pesan antar-agent | DEV-002, DEV-004 | DONE |
 | DEV-008 | API aplikasi, autentikasi lokal, dan SSE | DEV-003, DEV-004, DEV-007 | DONE |
 | DEV-009 | GUI board, chat PO, dan review scope | DEV-008 | DONE |
-| DEV-010 | Pipeline lead/developer/QA dengan bukti test | DEV-003, DEV-006, DEV-007 | TODO |
+| DEV-010 | Pipeline lead/developer/QA dengan bukti test | DEV-003, DEV-006, DEV-007 | DONE |
 | DEV-011 | Preview kandidat dan feedback UAT | DEV-008, DEV-009, DEV-010 | TODO |
 | DEV-012 | Integrasi accepted, dependency, dan recovery Git/DB | DEV-005, DEV-010, DEV-011 | TODO |
 | DEV-013 | Onboarding repository existing | DEV-005, DEV-012 | TODO |
@@ -1236,6 +1236,18 @@ uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
 
+### Catatan pengerjaan
+Status: DONE. Pelaksana: Codex, 2026-10-05. Review: NOT_REVIEWED.
+Rencana: scheduler pipeline berbasis ticket/job DB; lead plan/review dan QA plan terstruktur;
+adapter Hermes dengan relay/reservation/input/resource ownership produk; workspace broker
+terfence oleh lease DB; build/target/evidence immutable dan acceptance runner terpisah.
+Uji fitur/seeded bug nyata, report kosong/skipped/palsu, stale scope/generation, recovery,
+repair/budget caps serta waiver fingerprint spesifik. Tidak mulai DEV-011/012/013.
+File rencana: `apps/backend/app/pipeline/**`, worker/agent hooks, `contracts/verification/**`,
+`tests/pipeline/**`, konfigurasi contoh, keputusan pipeline dan handoff review.
+Provider testing memakai izin model murah hingga total USD 10 dari sesi sebelumnya;
+limit request/token tetap finite dan biaya dicatat. Belum commit/push.
+
 **Tujuan:** tiket approved menghasilkan kandidat yang diuji, bukan klaim agent.
 
 **Scope:** technical plan, developer execution, technical review, QA planning,
@@ -1269,6 +1281,90 @@ verification harness, evidence mapping ke UAC, serta loop repair.
 **Verifikasi:** fitur nyata, seeded bug, script test kosong, skipped tests,
 report palsu, regression, harness failure, scope revision, dan repair/run caps.
 Uji baseline failure berubah serta production wiring; label fake tetap jelas.
+
+### Hasil implementasi dan handoff
+
+Implementasi: `apps/backend/app/pipeline/**`, `contracts/verification/**`,
+`apps/backend/tests/pipeline/**`, `examples/dev010/**`, adapter transaksi persistence,
+serta hook worker/ToolFacade/Hermes/workspace/supervisor. Konfigurasi contoh dan
+instruksi ada di `docs/decisions/pipeline.md`; diff/file baru, mapping AC, cara
+menjalankan, dan batas review ada di `docs/reviews/DEV-010-handoff.md`.
+
+Pemetaan AC:
+
+1. Scheduler job DB: technical plan → QA plan → developer → lead review → verification;
+   `test_scheduler.py`, penolakan lead dan broken-browser loop membuktikan bounded
+   repair/needs_human dengan cumulative usage.
+2. Admission/lease/generation/input berasal dari product queue/domain; `test_admission.py`,
+   checkpoint→reply→resume, revoked credential dan expired-owner recovery regressions.
+3. Logs command/stdout/stderr/exit/env/checksums serta browser screenshot/trace disimpan
+   sebagai artifact. Target/build/suite/fixture/migration/image identities immutable dan dipin.
+4. QA DSL/suite supervisor tidak ter-mount ke developer; lead melihat repo-test diff;
+   candidate gate menolak mandatory baseline test yang hilang.
+5. Runner browser terpisah, network-none target, plan readonly runner-only, report
+   stdout runner dengan exact nonce/target/suite/IDs; forgery/multiple frames ditolak.
+6. Empty/skipped/missing/invalid counts dan missing automated coverage incomplete;
+   repo test memakai flat Node TAP dan tidak menggantikan browser acceptance.
+7. Dua UAC fitur/satu UAC bug terpetakan ke bukti nyata; manual UAC tetap checklist
+   pengguna di domain/API/GUI yang sudah ada, tanpa approval model.
+8. Feature/bug qualified: passed kandidat, failed base. Dua baseline-green regression
+   cases membuktikan green base diperbolehkan untuk regression, ditolak untuk feature.
+9. Broken candidate, stop/scope revision sesudah harness, revoked workspace, crash
+   sesudah atomic publication serta recovery tidak menghasilkan stale UAT.
+10. Exact user fingerprint waiver terlihat `waived`; same-count changed failure,
+    test ID berbeda, incomplete dan infrastructure failure tetap ditolak.
+
+Kualifikasi nyata OpenRouter + Hermes pinned dengan DB/domain/job produk:
+`feature-05` mencapai UAT (24 model calls, 43 tools, 150.247 tokens, $0,0322168,
+1 repair, 2 browser tests passed kandidat/failed base). `bug-01` mencapai UAT
+(37 calls, 68 tools, 194.530 tokens, $0,068536, browser 1/1 dan repo tests 2/2).
+Bug run melewati restart/checkpoint/input dan explicit extension +16 calls, memakai
+32 calls GPT-4.1 mini dan 5 GPT-4.1; penggunaan lama tidak direset. Total enam
+percobaan termasuk empat awal yang gagal **$0,12668808**, unknown kosong pada summary.
+Evidence IDs/checksums/counts/suite/baseline ada di `docs/spikes/DEV-010-results.json`;
+report authoritative/DB/artifact besar tetap private. Dua run berakhir UAT, tidak ada
+approval UAT pengguna, release, export atau deployment. Fixture bootstrap bukan
+onboarding repo existing/integrator produk.
+
+Verifikasi final: WSL full suite `cd apps/backend; python -m pytest -q` **718 passed**,
+Docker nyata, tanpa skip, 330,60 detik (termasuk seluruh **54** pipeline cases).
+Pipeline standalone sebelumnya **53 passed** sebelum tambahan Stop; product regressions
+**9 passed**, lalu seluruhnya tercakup run final. Dockerfile runner publik berhasil
+dibangun dan dipakai test. Windows portable **551 passed, 9 skipped**, 70,19 detik
+(workspace/runtime_spike/dua file product Docker-POSIX di-ignore, POSIX/symlink skip);
+pipeline standalone **38 passed, 3 skipped**. Satu warning upstream Starlette/httpx.
+`git diff --check`, compileall pipeline/adapter/contoh, `node --check` server serta
+JSON/evidence-summary/secret-pattern checks lulus. Frontend tidak dijalankan ulang
+karena tidak ada perubahan frontend/HTTP contract.
+Container pipeline tersisa 0; sisa dari run test cleanup awal yang gagal dibersihkan
+berdasarkan owner/mount run yang tepat, tanpa menyentuh container lain.
+
+Batas: static React/Vite + flat Node TAP, stateless fixture/migrations none; trusted
+internal static server 4173 `/`, belum lifecycle preview DEV-011. Cap request/tool/time/
+token finite, belum USD cap otomatis. Qwen final belum qualified; percakapan PO/pilot
+nyata tetap DEV-015. Rebuild image/config membutuhkan target/QA baru. Reviewer R6
+independen belum dilakukan, status **NOT_REVIEWED**. Implementasi sudah staged;
+catatan final backlog/handoff masih di working tree. Belum commit/push dan tidak
+memulai DEV-011/012/013.
+
+Review DEV-010 oleh Claude (Opus 5.5, 2026-10-05): **NEEDS_FIX** pada review awal, bukan penutupan R6. Pemisahan
+runner/target, report authoritative, publikasi atomik, dan pemeriksaan ulang domain tidak ditemukan celah. Temuan,
+direproduksi lalu diperbaiki reviewer atas instruksi pengguna: (P1) job pipeline berbagi budget key dengan chat PO
+`revise`, sehingga pipeline mewarisi caps chat (8 call/120 detik) atau chat selama development ditolak `QueueError`.
+Kini ada budget pool `pipeline` terpisah; reply lead mewarisi pool pengirim. (P3) penolakan lead/QA membatalkan job
+yang mempublikasikannya; kini job diselesaikan atomik dengan marker completion. Regresi: 4 baru. Sesudah fix: WSL+Docker
+722 passed, Windows 554 passed/12 skipped. Observasi O1–O6 (purpose QA menentukan diskriminasi base, tiket macet sesudah
+QA incomplete, waiver signature sangat ketat, dll.):
+[docs/reviews/DEV-010-review.md](./docs/reviews/DEV-010-review.md).
+
+Recheck perbaikan Claude oleh Codex (2026-10-05): R010-01/02 diterima, tidak ada
+blocker tambahan pada diff fix; O1–O6 tetap terdokumentasi dan R6 belum tertutup.
+WSL/Docker pipeline+domain+workers+agents **394 passed**; review regressions dengan
+tambahan pengaman extension **5 passed WSL**, **4 passed/1 skipped Windows**.
+Extension mempertahankan spending pipeline tanpa menaikkan cap chat. Dua hasil
+kualifikasi nyata dicocokkan dengan DB/artifact privat (usage, target/suite/counts/
+coverage/checksums), tanpa provider requests baru. Pengguna mengotorisasi commit/push
+setelah recheck; suite lengkap 722 tetap hasil run reviewer, bukan run ulang Codex.
 
 ## DEV-011 — Preview kandidat dan feedback UAT
 

@@ -165,7 +165,8 @@ def test_a_crashing_runtime_is_retried_once_and_usage_accumulates(env):
     job = env.enqueue([{"tool": "t1"}, {"crash": "segfault-like failure"}])
     env.run_until(sup, lambda: env.job(job.id).status == "failed" and (env.job(job.id).result or {}).get("retry_job_id"))
     retry_id = env.job(job.id).result["retry_job_id"]
-    env.run_until(sup, lambda: env.job(retry_id).status == "failed")
+    env.run_until(sup, lambda: env.job(retry_id).status == "failed" and
+                  (env.job(retry_id).result or {}).get("needs_human") is True)
     retry = env.job(retry_id)
     assert retry.attempt == 2 and retry.result["needs_human"] is True  # bounded
     assert env.job(job.id).usage["tool_calls"] + retry.usage["tool_calls"] == 2

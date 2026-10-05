@@ -35,6 +35,7 @@ def main():
             print("DEV006_EVENT " + raw, flush=True)
 
     agent = None
+    submitted = [False]
 
     def handler(name):
         def call(args, **kwargs):
@@ -50,19 +51,26 @@ def main():
                     agent.interrupt(tool_reason="supervisor_admission_denied")
             if len(raw) > 65536:
                 raise RuntimeError("tool response too large")
-            if name == "request_input" and not json.loads(raw).get("error"):
+            result = json.loads(raw)
+            if (name == "request_input" and not result.get("error")) or result.get("status") == "waiting_input":
                 agent.interrupt(tool_reason="supervisor_waiting_input")
+            if result.get("submitted") is True:
+                if name == config.get("completion_tool"):
+                    submitted[0] = True
+                agent.interrupt(tool_reason="supervisor_candidate_submitted")
             return raw.decode()
         return call
 
-    selected = {name: params for name, params in TOOL_PARAMETERS.items() if name in config["tool_names"]}
+    parameters = config.get("tool_parameters", TOOL_PARAMETERS)
+    prefix, toolset = config.get("tool_prefix", "spike_"), config.get("toolset", "dev006_supervisor")
+    selected = {name: params for name, params in parameters.items() if name in config["tool_names"]}
     for name, params in selected.items():
-        registry.register(name="spike_" + name, toolset="dev006_supervisor", handler=handler(name),
+        registry.register(name=prefix + name, toolset=toolset, handler=handler(name),
             schema={"description": "Supervisor-scoped " + name + "; no host shell or filesystem access.",
                     "parameters": {"type": "object", "properties": params, "required": list(params), "additionalProperties": False}})
     agent = AIAgent(model=config["model"], provider="custom", api_mode="chat_completions",
         base_url=config["relay_url"] + "/v1", api_key=config["relay_token"],
-        enabled_toolsets=["dev006_supervisor"], max_iterations=32, max_tokens=config["output_tokens"],
+        enabled_toolsets=[toolset], max_iterations=config.get("max_iterations", 32), max_tokens=config["output_tokens"],
         quiet_mode=True, save_trajectories=False, session_id=config["session_id"],
         ephemeral_system_prompt=config["system"], cwd=os.getcwd(),
         skip_memory=True, skip_background_review=True, skip_context_files=True,
@@ -70,7 +78,7 @@ def main():
         reasoning_config={"enabled": False},
         stream_delta_callback=lambda *args: emit("assistant.delta", list(args)),
         event_callback=lambda name, payload: emit("runtime." + name, payload))
-    expected = {"spike_" + name for name in selected}
+    expected = {prefix + name for name in selected}
     actual = {t["function"]["name"] for t in agent.tools}
     if expected != actual:
         raise RuntimeError("Hermes exposed unexpected tool surface: " + repr(actual))
@@ -82,6 +90,12 @@ def main():
                            "compression_disabled": not agent.compression_enabled,
                            "background_disabled": agent.skip_background_review})
     result = agent.run_conversation(config["prompt"])
+    if config.get("completion_tool") and not submitted[0] and not result.get("interrupted") and not result.get("error"):
+        # One correction turn, still subject to the same product reservation/time/token caps.
+        required = config["tool_prefix"] + config["completion_tool"]
+        result = agent.run_conversation("The supervisor did not receive the required completion tool: " + required +
+            ". A prose claim does not finish this job. Inspect the actual files, complete the requested work, and call " +
+            required + ". Do not claim file changes that no write tool performed.", conversation_history=result.get("messages"))
     # Persist messages privately for diagnosis, never treat this as a candidate.
     Path("conversation-result.json").write_text(json.dumps(result, default=str, indent=2))
     emit("runtime.result", {k: result.get(k) for k in ("completed", "interrupted", "error", "final_response", "exit_reason")})

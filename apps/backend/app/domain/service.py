@@ -143,8 +143,10 @@ class Workflow:
         for tid in graph:
             visit(tid)
 
-    def _invalidate(self, s, actor, t, reason):
+    def _invalidate(self, s, actor, t, reason, *, keep_job_id=None):
         for job in s.scalars(select(Job).where(Job.ticket_id == t.id, Job.status.in_(ACTIVE_JOB_STATUSES))):
+            if job.id == keep_job_id:
+                continue  # the attempt publishing this decision finishes itself; it is not cancelled by it
             job.status = "cancelled"
             job.lease_generation += 1
             job.lease_owner = None
@@ -574,7 +576,7 @@ class Workflow:
             if not isinstance(reason, str) or not reason.strip():
                 raise Invalid("feedback reason required")
             cycles = t.workflow.get("repair_cycles", 0) + 1
-            self._invalidate(s, actor, t, "request_changes")
+            self._invalidate(s, actor, t, "request_changes", keep_job_id=attempt.job_id if actor.role != "user" else None)
             return self._change(s, actor, t, "changes_requested", phase="development",
                 workflow={**t.workflow, "repair_cycles": cycles, "candidate_id": None, "attempts": {}, "feedback": reason},
                 blocker={"reason": "needs_human", "resolution": "user must authorize a bounded repair extension"} if cycles >= t.workflow.get("repair_limit", 3) else None)

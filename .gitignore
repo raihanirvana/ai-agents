@@ -22,6 +22,8 @@ dist/
 data/
 workspaces/
 verification/
+!contracts/verification/
+!contracts/verification/**
 artifacts/
 *.sqlite
 *.sqlite3

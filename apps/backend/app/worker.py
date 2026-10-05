@@ -1,9 +1,10 @@
 """Worker process: the persistent job supervisor (DEV-004).
 
-    python -m app.worker [--runtime none|fake|structured] [--db PATH] [--worker-id ID]
+    python -m app.worker [--runtime none|fake|structured|pipeline] [--db PATH] [--worker-id ID]
 
 With --runtime none (default) the worker reconciles leases and quota waits but claims no
-work: the real Hermes adapter is wired in DEV-010. --runtime fake runs the LABELLED fake
+work. --runtime pipeline wires structured PO/lead plus pinned Hermes developer/QA.
+--runtime fake runs the LABELLED fake
 runtime for local dry runs; its results are never real provider or QA evidence.
 """
 import argparse
@@ -17,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.worker", description=__doc__)
     parser.add_argument("--db", type=Path)
     parser.add_argument("--artifacts", type=Path)
-    parser.add_argument("--runtime", choices=("none", "fake", "structured"), default=os.getenv("WORKER_RUNTIME", "none"))
+    parser.add_argument("--runtime", choices=("none", "fake", "structured", "pipeline"), default=os.getenv("WORKER_RUNTIME", "none"))
     parser.add_argument("--worker-id")
     parser.add_argument("--lease-s", type=float, default=float(os.getenv("WORKER_LEASE_S", "30")))
     args = parser.parse_args(argv)
@@ -41,13 +42,18 @@ def main(argv: list[str] | None = None) -> int:
         runtimes["fake"] = FakeRuntime()
         print("PERINGATAN: runtime FAKE aktif; hasilnya bukan bukti provider/QA nyata.", flush=True)
     maintenance = []
-    if args.runtime == "structured":
+    if args.runtime in ("structured", "pipeline"):
         from app.agents.wiring import build_structured_runtime
         runtime, threads, notes = build_structured_runtime(db, store, workflow, queue)
         runtimes["structured"] = runtime
         maintenance.append(threads.ensure_reply_jobs)
         for note in notes:
             print(f"PERINGATAN: {note}.", flush=True)
+        if args.runtime == "pipeline":
+            from app.pipeline.wiring import build_pipeline
+            pipeline, scheduler = build_pipeline(runtime, store, workflow, queue)
+            runtimes[pipeline.name] = pipeline
+            maintenance.append(scheduler.tick)
     config = WorkerConfig(**({"worker_id": args.worker_id} if args.worker_id else {}),
                           heartbeat_s=max(0.5, args.lease_s / 3))
     supervisor = Supervisor(db, store, runtimes, queue=queue, limiter=ProviderLimiter(), config=config,

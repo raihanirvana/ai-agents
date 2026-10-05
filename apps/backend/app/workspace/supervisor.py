@@ -115,7 +115,8 @@ class WorkspaceSupervisor:
     # -- attempts ------------------------------------------------------------
     def start_attempt(self, project_id: str, *, ticket_id: str, scope_version: int, role: str, attempt: int,
                       generation: int, lease_id: str, manifest: RunnerManifest, limits: ResourceLimits | None = None,
-                      allow_install_egress: bool = False, provenance: dict[str, Any] | None = None) -> StartedRun:
+                      allow_install_egress: bool = False, provenance: dict[str, Any] | None = None,
+                      run_id: str | None = None) -> StartedRun:
         if role not in ROLES:
             raise WorkspaceError(f"unknown role {role!r}")
         limits = limits or ResourceLimits()
@@ -127,7 +128,7 @@ class WorkspaceSupervisor:
             raise WorkspaceError("ticket_id and lease_id are required")
         broker = self.broker(project_id)
         base_sha = broker.accepted_sha()
-        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
         ref = RunRef(project_id, run_id)
         run_dir = self._project_dir(project_id) / "runs" / run_id
         run_dir.mkdir(mode=0o700)

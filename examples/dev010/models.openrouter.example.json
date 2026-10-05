@@ -1,0 +1,8 @@
+{
+  "comment": "Explicit paid-model configuration used for qualification. Copy locally and choose models per role; no automatic fallback or key in this file.",
+  "providers": {
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY"}
+  },
+  "default": {"provider": "openrouter", "model": "openai/gpt-4.1-mini", "timeout_s": 60, "max_output_tokens": 4096, "temperature": 0.1},
+  "roles": {"po": {}, "technical-lead": {}, "developer": {}, "qa": {}}
+}

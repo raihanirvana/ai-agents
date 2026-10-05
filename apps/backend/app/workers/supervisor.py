@@ -174,7 +174,7 @@ class Supervisor:
         except BudgetExhausted:
             handle.end_state = "budget_exhausted"
         except (Cancelled, StaleLease):
-            handle.end_state = "revoked"
+            handle.end_state = "succeeded" if self._durable_completion(handle) else "revoked"
         except Exception as exc:  # a crashing runtime is a transient failure: one bounded retry
             ctx.log(f"runtime crashed: {exc!r}")
             self._guard(handle, lambda: self.queue.fail(lease, f"runtime crashed: {exc!r}"[:500], retryable=True),
@@ -203,7 +203,7 @@ class Supervisor:
         if status != "ok":  # final active time; may exhaust the budget
             if status == "revoked":
                 self.queue.finalize_usage(lease.job_id, lease.generation, {"active_s": delta})
-            handle.end_state = "revoked"
+            handle.end_state = "succeeded" if self._durable_completion(handle) else "revoked"
             return
         if outcome.status == "succeeded":
             self._guard(handle, lambda: self.queue.complete(lease, outcome.result), "succeeded")
@@ -217,8 +217,16 @@ class Supervisor:
             handle.end_state = state
         except StaleLease:
             # The attempt was revoked meanwhile: its result is rejected, nothing changes.
-            handle.end_state = "stale_result_rejected"
+            handle.end_state = "succeeded" if self._durable_completion(handle) else "stale_result_rejected"
             handle.ctx.log("result rejected: attempt no longer holds the lease")
+
+    def _durable_completion(self, handle: _Handle) -> bool:
+        """Pipeline publication and job completion commit together, before the child can crash."""
+        with self.db.read() as s:
+            job = s.get(Job, handle.lease.job_id)
+            return (job is not None and job.status == "succeeded" and job.lease_generation == handle.lease.generation and
+                (job.result or {}).get("pipeline_completion") == {
+                    "job_id": handle.lease.job_id, "generation": handle.lease.generation})
 
     def _archive(self, handle: _Handle) -> bool:
         """Keep the run log as evidence, whatever way the run ended."""

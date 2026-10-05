@@ -1,0 +1,20 @@
+{
+  "revision": 1,
+  "runner": "react-vite",
+  "image": "node:22.20.0-alpine",
+  "toolchain": {"node": "22.20.0", "npm": "10.9.3"},
+  "commands": {
+    "install": {"argv": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "network": "egress", "timeout_s": 300},
+    "build": {"argv": ["npm", "run", "build"], "network": "none", "timeout_s": 300},
+    "test": {"argv": ["npm", "test"], "network": "none", "timeout_s": 300},
+    "start": {"argv": ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "4173", "--strictPort"], "network": "none", "timeout_s": 300}
+  },
+  "port": 4173,
+  "health_path": "/",
+  "fixture": {"id": "coffee-menu-v1"},
+  "migrations": {"id": "none"},
+  "env": {"CI": "1"},
+  "exclude_from_sync": ["node_modules", "dist"],
+  "build_output": "dist",
+  "dependency_files": ["package-lock.json"]
+}

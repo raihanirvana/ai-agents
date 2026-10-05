@@ -2,8 +2,9 @@
 
 Platform AI Software Development Team dengan frontend React, API lokal
 berautentikasi (DEV-008), domain workflow/approval, dan worker dengan antrean
-persisten. PO/lead terstruktur tersedia (DEV-007); pipeline developer/QA nyata
-menunggu DEV-010. GUI board/chat PO/review scope tersedia (DEV-009).
+persisten. PO/lead terstruktur tersedia (DEV-007); pipeline developer/QA nyata dengan
+Hermes dan acceptance runner terpisah tersedia (DEV-010). GUI board/chat PO/review
+scope tersedia (DEV-009).
 
 ## Toolchain yang digunakan
 
@@ -147,7 +148,7 @@ Paket `apps/backend/app/workspace/` adalah harness standalone: managed repo
 Git, worktree per attempt, snapshot sumber tanpa `.git`, Git broker, sandbox
 Docker, dan tool broker dengan otorisasi per run. Ini bukan scheduler produk;
 run spec, generation, dan lease disuplai pemanggil dan dipersist di
-`workspaces/` (gitignored). Wiring ke DB/job produk ada di DEV-010.
+`workspaces/` (gitignored). Wiring ke DB/job produk tersedia melalui pipeline DEV-010.
 
 Prasyarat tes sandbox: Git tersedia pada PATH (toolchain diuji: 2.56.0), Docker berjalan dan image
 terpin ada secara lokal (image tidak pernah ditarik otomatis oleh kode).
@@ -189,7 +190,7 @@ direkonsiliasi. Harness ini belum merupakan scheduler produk.
 DEV-006 **DONE**, R3 **REVIEWED** (Claude, dikonfirmasi pengguna).
 Catatan review: [DEV-006-R3](docs/reviews/DEV-006-R3.md). Runtime pilihan: Hermes embed
 `AIAgent` subprocess dengan broker/relay supervisor dan journal scoped. Integrasi
-DB/job produksi menunggu DEV-010. Eksperimen Qwen/OpenRouter menghasilkan fitur
+DB/job produksi tersedia melalui pipeline DEV-010. Eksperimen Qwen/OpenRouter menghasilkan fitur
 keranjang dengan 12/12 target tests, 4/4 browser acceptance, seeded total bug
 tertangkap, dan walkthrough operator pada artefak teruji. Preflight
 standalone membaca pin Hermes, konfigurasi provider/model, host POSIX, engine
@@ -270,7 +271,7 @@ cd apps/backend
 ```
 
 Supervisi proses memerlukan host POSIX; di Windows jalankan worker di WSL. Runtime Hermes nyata
-di-wire pada DEV-010. Rancangan dan batasnya:
+tersedia lewat `--runtime pipeline` (DEV-010). Rancangan dan batasnya:
 [docs/decisions/workers.md](docs/decisions/workers.md).
 
 ## Agen, konteks, dan model (DEV-007)
@@ -283,9 +284,33 @@ antar-agent dengan input request yang idempotent, serta runtime terstruktur PO/l
 ```sh
 cd apps/backend
 ./.venv/bin/python -m pytest tests/agents -q          # provider FAKE berlabel, bukan model nyata
-./.venv/bin/python -m app.worker --runtime structured  # PO/lead lewat agents/models.json (belum diverifikasi nyata)
+./.venv/bin/python -m app.worker --runtime structured  # PO/lead; percakapan PO nyata tetap DEV-015
 ```
 
 Model per role: salin `agents/models.example.json` ke `agents/models.json` (gitignored). Key hanya dari
 environment variable yang disebut berkas itu. Rancangan dan batasnya:
 [docs/decisions/agents.md](docs/decisions/agents.md).
+
+## Pipeline dan QA (DEV-010)
+
+Worker `--runtime pipeline` menjalankan technical plan, suite QA, developer Hermes,
+review lead, dan acceptance browser terpisah pada build immutable. Scope/job/lease,
+input, budget, repair, serta approval memakai DB/domain produk. Required repo tests
+dan automated UAC harus terpenuhi sebelum UAT; approval UAT tetap oleh pengguna.
+
+Setup memerlukan Docker dan Hermes pinned di Linux/macOS (WSL pada Windows), model
+per role, serta konfigurasi eksplisit proyek baru. Contoh manifest/model dan cara
+menjalankan: [pipeline.md](docs/decisions/pipeline.md). UI preview/lifecycle pengguna
+menunggu DEV-011; minimum runner mendukung static React/Vite dan flat Node TAP.
+
+```sh
+docker build -t aiagent-verification:1.63.0 contracts/verification
+cd apps/backend
+./.venv/bin/python -m pytest tests/pipeline -q
+```
+
+Fitur dan seeded bug telah mencapai UAT dengan OpenRouter/Hermes nyata; browser tests
+lulus kandidat dan gagal base. Total enam percobaan tercatat $0,12668808, termasuk
+percobaan awal yang gagal. Ini bukan approval UAT/release atau pilot PO DEV-015.
+Evidence summary: [DEV-010-results.json](docs/spikes/DEV-010-results.json).
+Handoff dan status review R6: [DEV-010-handoff.md](docs/reviews/DEV-010-handoff.md).

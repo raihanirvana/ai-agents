@@ -1,5 +1,4 @@
 """Atomically commit HTTP receipts with the existing domain/queue transactions."""
-from contextlib import nullcontext
 from dataclasses import dataclass
 import hashlib
 
@@ -10,20 +9,9 @@ from app.agents import Threads, ToolFacade
 from app.domain import Actor, Workflow
 from app.persistence.artifacts import canonical_json
 from app.persistence.models import ApiCommand
+from app.persistence.transactions import TransactionDatabase
 from app.workers import JobQueue
 from .security import ApiError
-
-
-class TransactionDatabase:
-    """Services keep their transaction API; the outer command owns commit/rollback."""
-    def __init__(self, session):
-        self.session = session
-
-    def read(self):
-        return nullcontext(self.session)
-
-    def write(self):
-        return nullcontext(self.session)
 
 
 @dataclass

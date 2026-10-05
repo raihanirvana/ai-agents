@@ -134,7 +134,8 @@ class Threads:
                 runtime=self.structured_runtime(sender["fake"]), ticket_id=sender["ticket_id"],
                 payload={"task": "answer_message", "message_id": message_id, "request_id": request_id,
                          "from_job": sender["job_id"], "from_generation": sender["generation"]},
-                actor=f"agent:{sender['role']}", session=s, expected_scope=origin.scope_version)
+                actor=f"agent:{sender['role']}", session=s, expected_scope=origin.scope_version,
+                budget_pool=origin.runtime_ref.get("budget_pool"))
         return job.id
 
     def reply(self, identity: dict[str, Any], to_message_id: str, *, body: str, key: str,

@@ -12,6 +12,7 @@ resetting it. Waiting does not consume active time.
 from __future__ import annotations
 
 import math
+import re
 import uuid
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -226,11 +227,16 @@ class JobQueue:
     def enqueue(self, *, project_id: str, lane: str, stage: str, role: str, idempotency_key: str,
                 limits: dict[str, Any], runtime: str, ticket_id: str | None = None,
                 payload: dict[str, Any] | None = None, actor: str = "system:scheduler",
-                session=None, expected_scope: int | None = None) -> Job:
-        """Queue work once per idempotency key. runtime='fake' labels the job and its events."""
+                session=None, expected_scope: int | None = None, budget_pool: str | None = None) -> Job:
+        """Queue work once per idempotency key. runtime='fake' labels the job and its events.
+
+        A ticket scope has one budget per pool. Interactive PO/lead chat uses the default pool; the
+        execution pipeline has its own pool, so neither inherits nor refuses the other's caps."""
         limits = _validate_limits(limits)
         if "budget_key" in limits:
             raise QueueError("budget identity is assigned by the scheduler, never by the caller")
+        if budget_pool is not None and (not isinstance(budget_pool, str) or re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", budget_pool) is None):
+            raise QueueError("budget pool must be a short lowercase name")
         if not runtime:
             raise ValueError("runtime label is required")
         with (nullcontext(session) if session is not None else self.db.write()) as s:
@@ -244,7 +250,11 @@ class JobQueue:
                     raise StaleLease("reply source scope is no longer current")
             existing = s.scalar(select(Job).where(Job.project_id == project_id, Job.idempotency_key == idempotency_key))
             ref = {"role": role, "runtime": runtime, "fake": is_fake_runtime(runtime), "payload": dict(payload or {})}
+            if budget_pool is not None:
+                ref["budget_pool"] = budget_pool
             budget_key = f"ticket:{ticket_id}:v{scope_version}" if ticket_id else f"job:{idempotency_key}"
+            if budget_pool is not None:
+                budget_key += ":" + budget_pool
             if existing is not None:
                 if ((existing.lane, existing.stage, existing.ticket_id, existing.scope_version) !=
                         (lane, stage, ticket_id, scope_version)
