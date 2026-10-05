@@ -49,7 +49,7 @@ Catatan: [recovery.md](../decisions/recovery.md) diperbarui.
 | --- | --- |
 | `tests/recovery` (WSL), sesudah fix | 7 passed |
 | Windows `pytest tests -q --ignore=tests/workspace --ignore=tests/runtime_spike` | 578 passed, 22 skipped |
-| WSL full backend suite | lihat catatan backlog / laporan akhir |
+| WSL full backend suite (`pytest -q`, Docker) | 855 passed, 804,15s (test flaky DEV-004 lulus pada run ini) |
 | GUI `npx playwright test -c playwright.web.config.ts` | 36 passed |
 | `npm run build` | lulus |
 | `git diff --check` | bersih (hanya peringatan LF→CRLF) |
