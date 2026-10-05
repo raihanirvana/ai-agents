@@ -31,6 +31,12 @@ BIND_STAGES = ("development", "technical_review", "qa")
 TERMINAL_STATUSES = ("stopped", "failed", "cancelled", "succeeded")
 
 
+def is_fake_runtime(name: str) -> bool:
+    """Runtimes named 'fake' or '<runtime>:fake' (a real runtime driven by a fake provider) are labelled
+    fake in job events, logs and results, and never produce real QA evidence."""
+    return name == "fake" or name.endswith(":fake")
+
+
 class QueueError(RuntimeError):
     pass
 
@@ -131,7 +137,10 @@ class JobQueue:
 
     @staticmethod
     def _retry_ref(job):
-        return {k: v for k, v in job.runtime_ref.items() if k not in ("processes", "resources", "cleanup")}
+        ref = {k: v for k, v in job.runtime_ref.items() if k not in ("processes", "resources", "cleanup")}
+        if job.waiting_request_id:
+            ref["resume_request_id"] = job.waiting_request_id
+        return ref
 
     def begin_run(self, lease: Lease, host: dict) -> None:
         """Persist ownership before executing. A released lease alone never frees this slot."""
@@ -216,22 +225,25 @@ class JobQueue:
     # -- enqueue / claim ------------------------------------------------------------------
     def enqueue(self, *, project_id: str, lane: str, stage: str, role: str, idempotency_key: str,
                 limits: dict[str, Any], runtime: str, ticket_id: str | None = None,
-                payload: dict[str, Any] | None = None, actor: str = "system:scheduler") -> Job:
+                payload: dict[str, Any] | None = None, actor: str = "system:scheduler",
+                session=None, expected_scope: int | None = None) -> Job:
         """Queue work once per idempotency key. runtime='fake' labels the job and its events."""
         limits = _validate_limits(limits)
         if "budget_key" in limits:
             raise QueueError("budget identity is assigned by the scheduler, never by the caller")
         if not runtime:
             raise ValueError("runtime label is required")
-        with self.db.write() as s:
+        with (nullcontext(session) if session is not None else self.db.write()) as s:
             scope_version = None
             if ticket_id is not None:
                 ticket = s.get(Ticket, ticket_id)
                 if ticket is None or ticket.project_id != project_id or ticket.current_version is None:
                     raise QueueError("ticket must exist in this project and have a scope version")
                 scope_version = ticket.current_version
+                if expected_scope is not None and scope_version != expected_scope:
+                    raise StaleLease("reply source scope is no longer current")
             existing = s.scalar(select(Job).where(Job.project_id == project_id, Job.idempotency_key == idempotency_key))
-            ref = {"role": role, "runtime": runtime, "fake": runtime == "fake", "payload": dict(payload or {})}
+            ref = {"role": role, "runtime": runtime, "fake": is_fake_runtime(runtime), "payload": dict(payload or {})}
             budget_key = f"ticket:{ticket_id}:v{scope_version}" if ticket_id else f"job:{idempotency_key}"
             if existing is not None:
                 if ((existing.lane, existing.stage, existing.ticket_id, existing.scope_version) !=
@@ -368,6 +380,8 @@ class JobQueue:
         were spent). Budget enforcement can stop current scope work, never accept an old
         domain result. None means the provider did not report that amount."""
         usage = dict(usage)
+        if "prompt_tokens" in usage and "input_tokens" not in usage:
+            usage["input_tokens"] = usage["prompt_tokens"]
         partial_tokens = False
         for value in usage.values():
             if value is not None and (isinstance(value, bool) or not isinstance(value, (float, int))
@@ -393,6 +407,41 @@ class JobQueue:
                 limit = self._budget_limit(s, active, self.budget_usage(s, active))
                 if limit:
                     self._stop_for_budget(s, active, limit, "system:usage")
+
+    def verify(self, lease: Lease) -> dict[str, Any]:
+        """Read-only fence check: the attempt still owns an unexpired lease. Returns the identity facts a
+        tool or service may rely on (never taken from model arguments)."""
+        with self.db.read() as s:
+            return self.identity(s, lease)
+
+    def identity(self, s, lease: Lease) -> dict[str, Any]:
+        """Fence in the same transaction as the effect; retry roots come from persisted ancestry."""
+        job = self._fenced(s, lease)
+        if job.ticket_id and s.get(Ticket, job.ticket_id).current_version != job.scope_version:
+            raise StaleLease("attempt scope is no longer current")
+        root = job
+        while root.parent_job_id:
+            root = s.get(Job, root.parent_job_id)
+        return {"job_id": job.id, "project_id": job.project_id, "ticket_id": job.ticket_id,
+                    "scope_version": job.scope_version, "role": job.runtime_ref["role"], "stage": job.stage,
+                    "lane": job.lane, "generation": lease.generation, "runtime": job.runtime_ref["runtime"],
+                    "fake": bool(job.runtime_ref.get("fake")), "attempt": job.attempt,
+                    "idempotency_key": job.idempotency_key, "root_job_id": root.id,
+                    "lease_owner": lease.owner}
+
+    def verify_identity(self, s, identity: dict[str, Any]) -> None:
+        if not {"job_id", "lease_owner", "generation"}.issubset(identity):
+            raise StaleLease("responder requires a bound run identity")
+        current = self.identity(s, Lease(identity["job_id"], identity["lease_owner"], identity["generation"]))
+        if current != identity:
+            raise StaleLease("attempt identity changed")
+
+    def set_context(self, lease: Lease, artifact_id: str, *, session=None) -> None:
+        """Record this attempt's context snapshot (an artifact) on the job."""
+        with (nullcontext(session) if session is not None else self.db.write()) as s:
+            job = self._fenced(s, lease)
+            job.context_artifact_id = artifact_id
+            job.revision += 1
 
     def register_process(self, lease: Lease, pgid: int, tag: str) -> None:
         """Record a process group owned by this attempt, so recovery can verify and stop it."""
@@ -458,6 +507,7 @@ class JobQueue:
                         lane=job.lane, stage=job.stage, parent_job_id=job.id, attempt=job.attempt + 1,
                         idempotency_key=f"{job.idempotency_key}#attempt-{job.attempt + 1}",
                         runtime_ref=self._retry_ref(job),
+                        context_artifact_id=job.context_artifact_id,
                         limits=dict(job.limits),
                         available_at=self.clock() + timedelta(seconds=self.retry_backoff_s))
             s.add(retry)
@@ -471,7 +521,8 @@ class JobQueue:
         return None
 
     # -- waiting states ----------------------------------------------------------------------
-    def request_input(self, lease: Lease, *, question: str, checkpoint: dict[str, Any], request_key: str) -> str:
+    def request_input(self, lease: Lease, *, question: str, checkpoint: dict[str, Any], request_key: str,
+                      recipient: str = "user") -> str:
         """Persist the question and checkpoint, then release the slot: all in one transaction."""
         if not isinstance(question, str) or not question.strip():
             raise ValueError("question required")
@@ -479,7 +530,7 @@ class JobQueue:
             job = self._fenced(s, lease)
             message, _ = append_message(
                 s, project_id=job.project_id, thread_id=f"job:{job.id}", ticket_id=job.ticket_id,
-                sender=f"agent:{job.runtime_ref['role']}", recipient="user", kind="input_request", body=question,
+                sender=f"agent:{job.runtime_ref['role']}", recipient=recipient, kind="input_request", body=question,
                 idempotency_key=f"input:{job.id}:{request_key}",
                 meta={"job_id": job.id, "generation": lease.generation, "scope_version": job.scope_version,
                       "checkpoint": checkpoint})
@@ -489,10 +540,10 @@ class JobQueue:
             self._event(s, job, "waiting_input", lease.owner, request_id=message.id)
             return message.id
 
-    def answer(self, request_id: str, *, body: str, answer_key: str, user: str) -> tuple[str, bool]:
+    def answer(self, request_id: str, *, body: str, answer_key: str, user: str, session=None) -> tuple[str, bool]:
         """Persist a user answer once. Only the first answer re-queues the job (resumed as a new
         generation by the next claim); retries are no-ops. A changed scope cancels instead."""
-        with self.db.write() as s:
+        with (nullcontext(session) if session is not None else self.db.write()) as s:
             message, created = answer_input_request(s, request_id=request_id, sender=user, body=body,
                                                     answer_key=answer_key)
             job = s.scalar(select(Job).where(Job.waiting_request_id == request_id))
@@ -626,6 +677,7 @@ class JobQueue:
             retry = Job(project_id=job.project_id, ticket_id=job.ticket_id, scope_version=job.scope_version,
                         lane=job.lane, stage=job.stage, parent_job_id=job.id, attempt=job.attempt + 1,
                         idempotency_key=key, limits=limits,
+                        context_artifact_id=job.context_artifact_id,
                         runtime_ref={**self._retry_ref(job), "budget_authorization": {
                             "user": user, "additions": additions, "id": authorization_id}})
             # The scope policy is shared, including concurrently queued stages.

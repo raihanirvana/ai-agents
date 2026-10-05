@@ -162,17 +162,29 @@ class Workflow:
                 "resolution": "required checks must pass for current scope/base"} if pending else None,
             workflow={"repair_cycles": 0, "attempts": {}})
 
-    def create_ticket(self, actor, document):
+    def create_ticket(self, actor, document, *, idempotency_key=None):
+        """Create a ticket proposal. With an idempotency key a retried command returns the ticket the first
+        call created (the key is stored on the ticket in the same transaction), never a duplicate."""
         with self.db.write() as s:
             self._permit(s, actor, "user", "po")
             if not isinstance(document, dict):
                 raise Invalid("scope document must be an object")
+            if idempotency_key is not None:
+                if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+                    raise Invalid("idempotency key must be a non-empty string")
+                for known in s.scalars(select(Ticket).where(Ticket.project_id == actor.project_id)):
+                    if known.workflow.get("creation_key") == idempotency_key:
+                        return known
             # A new PO proposal starts unapproved; existing scope can only change with user confirmation.
             number = max(s.scalars(select(Ticket.number).where(Ticket.project_id == actor.project_id)), default=0) + 1
             t = Ticket(project_id=actor.project_id, number=number, title="Untitled")
             s.add(t)
             s.flush()
-            return self._install_scope(s, actor, t, document)
+            t = self._install_scope(s, actor, t, document)
+            if idempotency_key is not None:
+                t = self._change(s, actor, t, "creation_recorded",
+                                 workflow={**t.workflow, "creation_key": idempotency_key})
+            return t
 
     def edit_scope(self, actor, ticket_id, expected_revision, document):
         with self.db.write() as s:
@@ -180,7 +192,8 @@ class Workflow:
             t = self._ticket(s, actor, ticket_id, expected_revision)
             return self._install_scope(s, actor, t, document)
 
-    def propose_scope(self, actor, ticket_id, expected_revision, document):
+    def propose_scope(self, actor, ticket_id, expected_revision, document, *, idempotency_key=None):
+        """PO revision proposal. A retried call with the same key returns the stored proposal unchanged."""
         with self.db.write() as s:
             self._permit(s, actor, "po")
             t = self._ticket(s, actor, ticket_id, expected_revision,
@@ -190,10 +203,12 @@ class Workflow:
                 raise Conflict("proposal belongs to stale scope")
             doc = self._scope(s, actor, t, document)
             self._dag(s, actor, (t.id, doc["dependencies"]))
-            message, _ = append_message(s, project_id=t.project_id, ticket_id=t.id,
+            message, created = append_message(s, project_id=t.project_id, ticket_id=t.id,
                 thread_id="scope:" + t.id, sender=actor.id, recipient="user", body="Scope revision proposal",
+                idempotency_key=idempotency_key,
                 meta={"intent": "scope_proposal", "base_version": t.current_version, "document": doc})
-            self._change(s, actor, t, "scope_proposed")
+            if created:
+                self._change(s, actor, t, "scope_proposed")
             return message.id
 
     def decide_proposal(self, actor, ticket_id, expected_revision, proposal_id, accept):

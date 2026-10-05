@@ -36,3 +36,6 @@ playwright-report/
 test-results/
 *.log
 .DS_Store
+
+# Per-role model overrides (agents/models.example.json is the tracked template)
+agents/models.json

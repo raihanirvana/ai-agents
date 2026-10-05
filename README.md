@@ -219,3 +219,20 @@ cd apps/backend
 Supervisi proses memerlukan host POSIX; di Windows jalankan worker di WSL. Runtime Hermes nyata
 di-wire pada DEV-010. Rancangan dan batasnya:
 [docs/decisions/workers.md](docs/decisions/workers.md).
+
+## Agen, konteks, dan model (DEV-007)
+
+Empat peran (PO, technical lead, developer, QA) punya `agents/<role>/SOUL.md` dan `instructions.md`.
+`app/agents/` menyediakan tool per peran dengan otorisasi dari identitas run, model client per role
+(timeout, usage/cost, redaction secret), context builder dengan batas token dan snapshot/hash, thread
+antar-agent dengan input request yang idempotent, serta runtime terstruktur PO/lead di atas worker.
+
+```sh
+cd apps/backend
+./.venv/bin/python -m pytest tests/agents -q          # provider FAKE berlabel, bukan model nyata
+./.venv/bin/python -m app.worker --runtime structured  # PO/lead lewat agents/models.json (belum diverifikasi nyata)
+```
+
+Model per role: salin `agents/models.example.json` ke `agents/models.json` (gitignored). Key hanya dari
+environment variable yang disebut berkas itu. Rancangan dan batasnya:
+[docs/decisions/agents.md](docs/decisions/agents.md).

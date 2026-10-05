@@ -57,7 +57,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-002 | Persistence, migrasi, dan event | DEV-001 | DONE |
 | DEV-003 | Domain tiket, versi scope, dan approval | DEV-002 | DONE |
 | DEV-004 | Worker persisten, dua lane, dan recovery | DEV-003 | DONE |
-| DEV-007 | Soul, context, model client, dan pesan antar-agent | DEV-002, DEV-004 | TODO |
+| DEV-007 | Soul, context, model client, dan pesan antar-agent | DEV-002, DEV-004 | DONE |
 | DEV-008 | API aplikasi, autentikasi lokal, dan SSE | DEV-003, DEV-004, DEV-007 | TODO |
 | DEV-009 | GUI board, chat PO, dan review scope | DEV-008 | TODO |
 | DEV-010 | Pipeline lead/developer/QA dengan bukti test | DEV-003, DEV-006, DEV-007 | TODO |
@@ -924,6 +924,141 @@ input; jangan mengklaim seluruh workflow produk sudah terimplementasi.
 dan hasil recovery. Jangan memasukkan key atau kredensial ke dokumentasi.
 
 ## DEV-007 — Soul, context, model client, dan pesan antar-agent
+
+### Catatan pengerjaan
+Status: DONE (fake/contract checks; F1–F7 review diperbaiki Codex, 2026-10-05)
+Pelaksana/sesi: Claude (Sonnet 5.5), sesi Windows + WSL 2026-10-05
+Rencana: SOUL + instruksi per peran, tools per peran dengan otorisasi dari identitas run, model client per
+role (fake berlabel + adapter chat-completions), kontrak output terstruktur PO/lead, context builder berlapis
+dengan batas token dan snapshot/hash, thread dan input request antar-agent, runtime terstruktur di atas
+Supervisor DEV-004. Dependency DEV-002 dan DEV-004 DONE/REVIEWED.
+
+File hasil: `agents/{po,technical-lead,developer,qa}/{SOUL,instructions}.md`, `agents/models.example.json`,
+`apps/backend/app/agents/{__init__,redaction,souls,outputs,models,threads,tools,context,runtime,wiring}.py`,
+`apps/backend/tests/agents/{__init__,conftest,test_souls_outputs,test_models,test_tools,test_context,
+test_threads,test_runtime,test_wiring}.py`; perubahan kecil kompatibel: `app/workers/queue.py` (label `:fake`,
+`recipient` pada `request_input`, `verify`, `set_context`), `app/workers/supervisor.py` (`maintenance` hook),
+`app/domain/service.py` (`idempotency_key` pada `create_ticket`/`propose_scope`), `app/worker.py`
+(`--runtime structured`), `.env.example`, `.gitignore` (`agents/models.json`), `README.md`,
+`docs/decisions/agents.md`.
+
+Pemetaan AC ke bukti (`apps/backend/tests/agents/`):
+- AC1 konteks berlapis + batas token + snapshot/hash per run: `test_context` (urutan layer, snapshot artifact
+  ber-hash di job dan dipin, pemangkasan pesan terlama + gaps, ContextTooLarge, isolasi proyek, secret, rebuild
+  setelah restart, stabilitas prefix, referensi repo/pesan panjang); `test_runtime` (konteks == yang dilihat model).
+- AC2 ringkasan tidak menghapus histori, proposal bukan keputusan, transkrip tidak diduplikasi:
+  `test_a_valid_summary_stands_in_for_trimmed_messages_without_a_gap`, `test_a_summary_that_no_longer_matches...`,
+  `test_only_accepted_decisions_enter_project_knowledge`, `test_proposals_in_the_ticket_thread_are_labelled...`,
+  gap `runtime_transcript` pada manifest.
+- AC3 proposal PO tervalidasi, keluaran lead terstruktur, tools sesuai role: `test_souls_outputs` (kontrak,
+  siklus, duplikat, extra field), `test_runtime` (breakdown, revisi, rencana lead), `test_tools` (matriks role,
+  tanpa tool approval, NotWired eksplisit).
+- AC4 pesan dev->lead tersimpan, jawaban terarah kembali ke attempt valid, broadcast/log tidak memicu:
+  `test_a_directed_question_is_persisted_before_its_reply_job_exists`, `test_notes_logs_and_broadcasts_never_wake_a_soul`,
+  `test_developer_waits_lead_answers_and_only_the_valid_attempt_resumes`, `test_a_reply_cannot_trigger_further_work`.
+- AC5 input request ber-ID/scope/penerima/attempt/generation/status, jawaban idempotent, duplicate/setelah
+  cancel/setelah revisi scope: `test_the_persisted_request_shows...`, `test_duplicate_answers_resume_exactly_once`,
+  `test_an_answer_after_cancel_stays_history...`, `test_scope_revision_cancels_the_waiting_attempt...`,
+  `test_waiting_survives_a_worker_restart`, `test_a_crash_between_the_question_and_its_reply_job_is_reconciled`,
+  `test_clarification_waits_for_the_user_then_resumes_with_the_answer`.
+- AC6 model per role, timeout, output invalid, usage/cost, redaction, klarifikasi terlihat: `test_models`
+  (konfigurasi per role, usage unknown bukan nol, panggilan gagal tetap terhitung, adapter HTTP terhadap stub),
+  `test_runtime` (timeout retry satu kali, request ditolak, quota -> waiting_quota, output invalid -> repair
+  lalu gagal terlihat, secret tidak ke pesan/artifact/hasil, budget menghentikan repair call).
+- AC7 fake berlabel, tanpa key tidak memblokir, resume dari persistence: `test_a_fake_provider_under_a_real_label...`,
+  `test_wiring`, `test_resume_rebuilds_from_persistence_after_a_restart`; semua event/hasil job membawa `fake=true`.
+
+Verifikasi aktual (dari `apps/backend`):
+- WSL suite backend lengkap `/root/aiagent-dev002-venv/bin/python -m pytest -q`: **583 passed**, 222 detik (Docker
+  nyata, tanpa skip). Windows `.venv/Scripts/python.exe -m pytest tests/agents tests/domain tests/persistence
+  tests/workers -q`: **432 passed, 8 skipped** (symlink + test process group POSIX). Domain baru: **130 tests**
+  (context 18, models 24, runtime 21, souls/outputs 23, threads 20, tools 20, wiring 4).
+- Stabilitas: suite agents dijalankan berulang (15x berturut-turut, 15/15 lulus) setelah memperbaiki lima
+  sumber flaky: empat race di test (reply job yang jalan lebih cepat dari asersi) dan satu bug produk (urutan pesan,
+  lihat Temuan).
+- Mutation check (11 mutasi, dipulihkan setelahnya), semuanya tertangkap: policy tool tidak ditegakkan, identitas dari
+  argumen, scope belum disetujui diterima, semua proposal keputusan dianggap accepted, tanpa verifikasi lease
+  sebelum menyimpan hasil, pembuatan tiket tidak idempotent, output provider tidak diredaksi, siapa pun boleh
+  menjawab request peran, reply memicu kerja lagi, label fake tidak dicek, urutan pesan mengabaikan seq.
+- CLI di WSL: `python -m app.worker --runtime structured` start, mencetak peringatan UNVERIFIED, berhenti tertib
+  (SIGTERM, exit 0). Catatan: `app.config` memuat `.env.local`, jadi key di sana ikut terbaca.
+
+Temuan saat pengerjaan (diperbaiki): urutan pesan memakai `created_at` lalu ID acak sehingga timestamp kembar
+(resolusi jam Windows) bisa mengacak percakapan di konteks, kini `created_at`, thread, `seq` dengan regresi
+deterministik; hasil model disimpan tanpa memeriksa lease lagi sehingga hasil attempt yang dicabut saat model
+berpikir masih tersimpan, kini lease diverifikasi ulang sebelum efek apa pun; `hash()` Python (acak per proses)
+sempat dipakai untuk kunci klarifikasi, diganti sha256 stabil; mode fake memakai konfigurasi model nyata.
+
+Keterbatasan: hanya fake/contract checks, adapter chat-completions diuji terhadap server stub dan **belum
+diverifikasi** terhadap provider nyata (DEV-010/015); developer/QA lewat Hermes (DEV-010), tool workspace/harness
+`NotWired`; keputusan accepted disimpan sebagai pesan (penulisan ke `docs/decisions` di clone managed menunggu
+integrasi); belum ada peringkas otomatis; estimasi token = karakter/4. Detail: `docs/decisions/agents.md`.
+Known issue yang sudah ada (bukan dari tiket ini): `tests/workers/test_processes.py::test_dead_worker_recovery_revokes_workspace_keeps_logs_and_preserves_other_run`
+(DEV-004) flaky sekitar 1 dari 14 run di WSL: asersi isi log run yang crash kadang berjalan sebelum baris log tertulis.
+Laju yang sama diukur pada kode HEAD murni (1/14) dan pada working tree ini (1/14); tidak diubah karena di luar scope DEV-007.
+Handoff R5: diff = file tracked yang berubah + file baru di atas (belum di-stage; lihat `git status`). Cara
+menjalankan ada di README bagian "Agen, konteks, dan model (DEV-007)".
+Review: NOT_REVIEWED, self-check implementer; R5 (DEV-007/008/009) menunggu independent review.
+Tiket berikutnya sesuai dependency: DEV-008 (DEV-003/004/007 selesai).
+
+Review independen Codex (2026-10-05): **NEEDS_FIX**, tidak menutup R5.
+Snapshot staged aktual: `25bce5a2e406afa43490b641bea0ca84508ab01d`, baseline HEAD `a4ea386`.
+Laporan lengkap: `docs/reviews/DEV-007-review.md`. AC4/5/6 belum terpenuhi, maka DEV-007
+kembali IN_PROGRESS dan DEV-008 menunggu fix/recheck.
+- P1: fence run tidak atomik dengan penulisan; responder yang dicancel setelah facade verify
+  tetap me-resume developer, dan lead plan bisa ditulis setelah pencabutan.
+- P1: output lead `needs_user` menjawab/me-resume developer, tanpa pertanyaan ke user.
+- P2: key tool memakai job ID baru saat retry, sehingga propose_ticket menggandakan tiket.
+- P2: key pesan hasil stabil tetapi generation/context attachment berubah; retry setelah message
+  ditulis gagal dengan IdempotencyConflict.
+- P2: tools menyimpan secret dummy tanpa redaksi; manifest snapshot juga menyimpan secret dalam path ref.
+- P2: counter prompt_tokens tidak dijumlahkan queue ke total saat total provider missing.
+- P2: crash sesudah directed message commit kehilangan reply job; reconciler hanya menangani input_request.
+Verifikasi reviewer: Windows suite tracked **432 passed, 8 skipped**; WSL agents **130 passed**;
+9 probe expected behavior gagal di Windows dan WSL, dengan DB/artifact nyata dan fake berlabel.
+Probe/output di gitignored `data/dev007/`; implementasi, tests tracked, dan staging tidak diubah.
+Suite WSL lengkap/Docker/provider nyata dan laju flaky DEV-004 tidak dijalankan ulang pada review awal ini.
+
+Perbaikan review oleh Codex (2026-10-05), sesuai instruksi pengguna:
+- Fence identity/lease/scope di transaksi yang menyimpan efek; responder harus memiliki capability run.
+  Pemeriksaan izin dan answer/resume atomik. Tidak memberi tool approval atau setter status.
+- `needs_user` membuat request/event pengguna; developer tetap waiting dan hanya user answer valid
+  membuka resume. Eskalasi pesan nonblocking juga terlihat sebagai pertanyaan pengguna.
+- Root job berasal dari parent chain DB, bukan pemotongan key. Output tervalidasi disimpan sebelum
+  efek dan direplay saat retry, tanpa mengganti proposal/snapshot asal atau menambah model call.
+  Payload pesan tetap exact-match; provenance penulisan pertama dipertahankan.
+- Jawaban pengguna diwariskan ke retry, context reference tetap dipin selama cleanup dan retry queued.
+- Redaksi meliputi args/result tools, Threads, checkpoint/metadata, manifest snapshot, provider/model hasil.
+- Normalisasi prompt/input token menegakkan cap total dari lower bound yang diketahui; unknown tetap terlihat.
+- Outbox reconciler mencakup seluruh pertanyaan directed, dengan lane/scope asal dan cancellation guard.
+File fix: `app/agents/{effects,context,models,redaction,runtime,threads,tools,wiring}.py`,
+`app/workers/{queue,supervisor}.py`, `app/persistence/pins.py`; regresi permanen
+`tests/agents/test_review_regressions.py` (25 kasus), penyesuaian fixture identitas di `test_threads.py`.
+AC1/3/4/5/6 dilengkapi regresi F1–F7; AC2/7 tetap tercakup suite agents lama.
+Verifikasi aktual dari `apps/backend`:
+- Snapshot index awal `25bce5a2…`: 9 kasus utama kembali **9 failed** dengan sebab bug asli;
+  isolasi via git archive di gitignored `data/dev007/staged-baseline`, tanpa mengubah index.
+- Suite backend lengkap WSL `python -m pytest -q --tb=short`: **606 passed**, 206.35 detik, Docker nyata.
+  Run ini mendahului dua kasus final (eskalasi nonblocking dan pin cleanup).
+- Verifikasi final Windows `.venv/Scripts/python.exe -m pytest tests/agents tests/domain tests/persistence
+  tests/workers -q --tb=short`: **457 passed, 8 skipped**, 56.17 detik; skip symlink/POSIX.
+- Verifikasi final WSL `python -m pytest tests/agents tests/persistence tests/workers -q --tb=short`:
+  **362 passed**, 44.68 detik, termasuk seluruh 155 kasus agents dan perubahan pin/queue/supervisor.
+- `git diff --check` dan `git diff --cached --check` bersih. Provider nyata tidak dipanggil.
+Status implementasi kembali DONE. Review awal tetap NEEDS_FIX historis; perbaikan ini self-check,
+**menunggu re-review independen**, bukan penutupan R5. Handoff: `git diff` + file baru dari `git status`,
+laporan `docs/reviews/DEV-007-review.md`. Implementasi awal staged tetap dipertahankan; fix belum
+di-stage, commit, atau push. Tiket berikutnya secara dependency: DEV-008; tidak dikerjakan dalam scope ini.
+
+Verifikasi developer sesudah fix (laporan pengguna, 2026-10-05): F1–F7 benar/layak;
+25 regresi lulus, 23 gagal pada kode index sebelum fix dan dua kasus pengaman lulus.
+WSL agents/domain/persistence/workers **465 passed**. Windows **456 passed, 8 skipped,
+1 failed** pada flaky DEV-004 `test_a_crashing_runtime_is_retried_once_and_usage_accumulates`;
+developer mengukur 2/30 gagal pada HEAD dan 4/30 pada tree sekarang. Tidak ada perubahan kode.
+Nonblocker: snapshot checkpoint menduplikasi artifact di runtime_ref (optimasi berikutnya);
+DEV-008 perlu mengenali request `orphaned` asal sebagai sudah dieskalasi melalui relasi request/event.
+Detail di laporan review. Pengguna mengizinkan commit/push DEV-007; ini tidak menutup R5
+atau mengubah self-check menjadi independent review.
 
 **Tujuan:** empat peran memiliki konteks persisten dan komunikasi yang bermakna.
 

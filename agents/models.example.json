@@ -1,0 +1,14 @@
+{
+  "comment": "Copy to agents/models.json (gitignored) to change models. Keys come only from the environment variables named below, never from this file.",
+  "providers": {
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY"},
+    "deepseek": {"base_url": "https://api.deepseek.com/v1", "api_key_env": "DEEPSEEK_API_KEY"}
+  },
+  "default": {"provider": "openrouter", "model": "qwen/qwen3.8-27b:free", "timeout_s": 60, "max_output_tokens": 2048},
+  "roles": {
+    "po": {},
+    "technical-lead": {},
+    "developer": {},
+    "qa": {}
+  }
+}

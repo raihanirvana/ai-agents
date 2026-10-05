@@ -1,0 +1,123 @@
+# SOUL, context, model client, dan pesan antar-agent — DEV-007
+
+Tanggal: 5 Oktober 2026. Implementasi: Claude (Sonnet 5.5); perbaikan review: Codex.
+Status implementasi: DONE dengan fake/contract checks. Review awal Codex: **NEEDS_FIX**;
+F1–F7 diperbaiki dan diverifikasi melalui self-check, menunggu re-review independen.
+Temuan, perbaikan, dan bukti: `docs/reviews/DEV-007-review.md`. Checkpoint R5 masih terbuka.
+Kode: `apps/backend/app/agents/`, berkas peran `agents/<role>/{SOUL,instructions}.md`,
+`agents/models.example.json`. Bukti nyata percakapan PO dan handoff adalah kewajiban DEV-015.
+
+## Komponen
+
+| Modul | Tanggung jawab |
+| --- | --- |
+| `souls.py` | Memuat empat `SOUL.md` + `instructions.md`, divalidasi (ada, tidak kosong, <= 16 KiB, UTF-8, tanpa pola secret) dan diberi digest konten yang dicatat di setiap snapshot. SOUL hanya mengatur identitas/perilaku; ia tidak memberi izin. |
+| `tools.py` | Matriks tool per peran (ARCHITECTURE §6) dan `ToolFacade`. Otorisasi dari identitas run yang diverifikasi queue; argumen yang membawa identitas ditolak. Tidak ada tool approval atau status setter. |
+| `models.py` | Konfigurasi provider/model per role, `FakeProvider` berlabel, adapter chat-completions (OpenRouter/DeepSeek), normalisasi usage/cost, klasifikasi error, redaction. |
+| `outputs.py` | Kontrak output terstruktur (pydantic, `extra=forbid`, batas ukuran): proposal tiket, revisi, klarifikasi, rencana teknis, jawaban lead. |
+| `context.py` | Context builder berlapis, batas token, snapshot + hash per run, selalu dibangun dari database. |
+| `threads.py` | Pesan terarah, input request antar-peran, keputusan, ringkasan; reply job; rekonsiliasi. |
+| `effects.py` | Retry pesan mempertahankan provenance penulisan pertama, dengan payload semantik tetap diperiksa persis. |
+| `runtime.py` | `StructuredAgentRuntime` untuk PO/lead di atas Supervisor DEV-004 (`structured` / `structured:fake`). |
+| `wiring.py` | Merakit runtime dari konfigurasi (dipakai `python -m app.worker --runtime structured`). |
+
+## Aturan yang ditegakkan
+
+- **Otorisasi dari identitas run.** `queue.verify(lease)` mengembalikan project/ticket/scope/job/generation/role
+  hanya bila lease masih milik attempt itu. Penulisan efek memeriksa identitas lagi dalam transaksi yang sama;
+  pemeriksaan responder dan penyimpanan jawaban/resume atomik. Nama role tanpa capability run ditolak.
+  Tool tidak membaca identitas dari argumen. Setiap panggilan tool
+  direservasi terhadap budget **sebelum** otorisasi, sehingga model yang terus memanggil tool terlarang tetap
+  berhenti di cap. Tool yang masuk kebijakan tetapi baru ada di DEV-010 (workspace, QA harness) gagal eksplisit
+  `NotWired`, bukan diam-diam.
+- **PO/lead hanya mengusulkan.** PO membuat tiket `scope_review` tanpa approval (`create_ticket`, kini dengan
+  `idempotency_key`) atau proposal revisi (`propose_scope`, idempotent). Lead menyimpan rencana teknis sebagai
+  pesan `authoritative=false` dan keputusan sebagai `decision_proposal`; hanya yang di-accept pengguna
+  (`Threads.decide`) masuk konteks sebagai keputusan. Dependency plan lead hanya dicatat, tidak diterapkan.
+- **Output tervalidasi.** Jawaban model di-parse ke kontrak; graf dependency antar-tiket dicek acyclic dan
+  referensi tiket yang ada dicek **sebelum** tiket apa pun dibuat. Output tidak valid mendapat **satu** panggilan
+  perbaikan yang menampilkan galat validasi; bila masih tidak valid, job gagal terlihat (`needs_human`,
+  kedua panggilan tetap terhitung) dan tidak ada efek. Kebutuhan klarifikasi adalah output sah yang menjadi
+  input request ke pengguna (`waiting_input`), bukan tebakan.
+- **Efek stabil terhadap retry.** Job akar ditelusuri melalui `parent_job_id`, tanpa memotong key pengguna.
+  Output tervalidasi, metadata usage, dan snapshot asal disimpan sebelum efek diterapkan. Retry membaca
+  checkpoint persisten untuk task/jawaban yang sama; tidak memanggil model lagi atau mengganti proposal.
+  Ticket, pesan hasil, keputusan, dan reply memakai kunci stabil; provenance efek pertama dipertahankan.
+  Payload berbeda dengan key yang sama tetap ditolak. Jawaban pengguna tetap tersedia pada retry setelah
+  resume. Model yang selesai setelah pencabutan ditolak oleh fence transaksi tulis.
+- **Konteks (ARCHITECTURE §8).** Urutan: instruksi peran, scope, brief + keputusan **accepted**, dependency pin,
+  referensi repo (potongan, bukan seluruh repo), lalu ekor volatil: pesan terbaru, ringkasan, task, identitas
+  run. Prefix stabil di depan (hash prefix dicatat). Technical lead/developer/QA menolak mulai pada scope yang
+  belum disetujui pengguna; PO melihat draft berlabel "NOT approved". Batas token adalah **estimasi**
+  (karakter/4): lapisan dipangkas dengan prioritas pesan terlama, referensi repo, keputusan terlama; peran,
+  scope, dependency, dan task tidak pernah dibuang (terlalu besar -> `ContextTooLarge`). Yang terpotong tanpa
+  ringkasan valid muncul sebagai `gaps` di manifest. Pesan panjang dipotong per pesan. Urutan pesan mengikuti
+  `created_at` lalu `seq` thread (timestamp kembar tidak mengacak percakapan).
+- **Ringkasan tidak menghapus histori.** `record_summary` menyimpan ringkasan sebagai pesan baru yang merujuk ID
+  pesan yang dicakup + digest sumbernya; ringkasan hanya dipakai bila digest masih cocok, selain itu dilaporkan
+  sebagai gap. Transkrip runtime tidak diduplikasi: manifest menandai `runtime_transcript` sebagai gap eksplisit.
+- **Snapshot per run.** JSON kanonik (`kind=context`, meta producer/job/generation/sha256) disimpan sebagai
+  artifact, dirujuk `jobs.context_artifact_id`, dipin selama job aktif, dan dilampirkan ke pesan hasil
+  (sehingga tetap terpin). Hash tercatat di hasil job. Replay proposal memakai snapshot asal, bukan
+  mengklaim konteks baru dilihat model; referensinya diwariskan ke job retry dan dipin juga selama cleanup.
+- **Pesan terarah dan input request.** Pesan disimpan sebelum ada yang dijadwalkan. Hanya clarification/
+  handoff/bug terarah dengan `needs_reply` yang membuat **satu** reply job (kunci `reply:<message_id>`);
+  note, log, dan broadcast tidak pernah memicu soul, reply tidak bisa memicu pekerjaan lagi, dan peran tidak
+  bisa bertanya ke dirinya sendiri (tidak ada loop). Developer yang bertanya ke lead memakai input request
+  beralamat peran (`recipient=role:technical-lead`): job menunggu (slot execution dilepas), lead menjawab
+  di lane interaktif, dan reply job memakai budget scope yang sama dengan penanya. Jawaban hanya boleh dari
+  peran yang dituju dengan lease aktif atau pengguna. Jawaban selalu menjadi histori; attempt hanya di-resume bila masih valid
+  (duplikat no-op, setelah cancel/revisi scope tidak menghidupkan attempt). Reply job melewati panggilan model
+  bila penanyanya sudah tidak menunggu. `Threads.input_request` menampilkan ID, scope, penerima,
+  attempt/generation, status (`open/answered/stale_scope/cancelled/orphaned`), dan jawaban. Rekonsiliator
+  (`ensure_reply_jobs`, hook `Supervisor.maintenance`) membuat reply job yang hilang karena crash di antara
+  dua transaksi, untuk input request maupun clarification/handoff/bug biasa; lane dan scope asal dijaga.
+  Origin yang dicancel atau scope-nya berubah tidak dijadwalkan. `needs_user` membuat permintaan pengguna
+  yang persisten dan event `input.escalated`, bukan jawaban lead yang membuka resume. Developer tetap
+  menunggu pada request baru; hanya jawaban pengguna valid yang membukanya. Pesan nonblocking juga bisa
+  menghasilkan pertanyaan pengguna yang terlihat, tanpa me-resume job asal.
+- **Model per role dan akuntansi.** `ModelRegistry` (default + override per role; timeout 0-600 s dan
+  `max_output_tokens` finite wajib). Setiap panggilan lewat `RunContext.model_call`: direservasi sebelum
+  dipanggil, dibatasi limiter dan cap token job, lalu usage difinalisasi. Usage/cost yang tidak dilaporkan
+  provider adalah **unknown**, bukan nol; lower bound input/output yang diketahui tetap menegakkan cap total.
+  `prompt_tokens` dinormalisasi ke alias input queue tanpa menggandakan total. Panggilan yang gagal tetap terhitung. Timeout dan provider
+  tidak tersedia = retryable (satu retry), ditolak = tidak, quota (HTTP 429) = `waiting_quota` bersama.
+- **Redaction.** Nilai key dari environment dan pola umum (sk-, Bearer, key=value, token VCS, private key)
+  disamarkan pada prompt, output, error, seluruh manifest snapshot, argumen/hasil tool, metadata/checkpoint,
+  pesan/proposal, dan identitas provider/model hasil sebelum disimpan atau dikirim.
+- **Label fake.** `structured:fake` (atau `fake`) berarti fake di event/log/hasil job; provider fake di bawah
+  label nyata, atau sebaliknya, ditolak. Ketiadaan API key tidak memblokir worker: job role terkait gagal
+  dengan pesan jelas.
+
+## Perubahan kecil pada kode tiket lain (kompatibel)
+
+DEV-004: `is_fake_runtime` (label `:fake`), `recipient` pada `request_input`, `JobQueue.verify`/`set_context`,
+`Supervisor.maintenance`, kolom `idempotency_key` pada `verify`. DEV-003: `idempotency_key` opsional pada
+`create_ticket` dan `propose_scope`. Test suite kedua tiket tetap lulus.
+
+## Konfigurasi dan cara menjalankan
+
+```sh
+cd apps/backend
+./.venv/bin/python -m pytest tests/agents -q
+# Model per role: salin agents/models.example.json ke agents/models.json (gitignored) atau set AGENT_MODELS_FILE.
+# Key hanya dari environment variable yang disebut berkas itu, mis. OPENROUTER_API_KEY.
+./.venv/bin/python -m app.worker --runtime structured   # PO/lead lewat konfigurasi itu (BELUM TERVERIFIKASI nyata)
+```
+
+Catatan: `app.config` memuat `.env.local`, sehingga key di berkas itu ikut terbaca worker.
+
+## Batas dan known issues
+
+- Hanya fake/contract checks; adapter chat-completions diuji terhadap server stub lokal dan **belum
+  diverifikasi** terhadap provider nyata. Kualitas PO/lead dengan model nyata dibuktikan DEV-010/015.
+- Developer dan QA berjalan lewat Hermes (DEV-010); di sini hanya kebijakan tool, SOUL/instruksi, dan jalur
+  tanya-jawab mereka yang ada. Tool workspace/harness belum di-wire (`NotWired`).
+- Keputusan accepted disimpan sebagai pesan. Menuliskannya ke `docs/decisions` di clone managed sebagai
+  kandidat yang direview (ARCHITECTURE §7) menunggu integrasi (DEV-010/012).
+- Belum ada peringkas otomatis: `record_summary` menerima ringkasan dari pemanggil tepercaya. Estimasi token
+  kasar (karakter/4) dan tidak sama dengan tokenizer provider.
+- Satu panggilan perbaikan per jawaban tidak valid; PO tidak bisa memanggil tool bebas di dalam run
+  terstruktur (tool facade tersedia untuk runtime yang akan memakainya, termasuk Hermes pada DEV-010).
+- Reply job berbagi budget scope dengan penanya: budget kecil bisa habis oleh percakapan; perpanjangan
+  tetap keputusan pengguna (DEV-004).

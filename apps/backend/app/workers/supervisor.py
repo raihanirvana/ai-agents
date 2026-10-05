@@ -70,6 +70,9 @@ class Supervisor:
         self._handles: dict[str, _Handle] = {}
         self._last_heartbeat = 0.0
         self._recovering: dict[str, threading.Thread] = {}
+        # Callables run every tick (reconcilers such as Threads.ensure_reply_jobs). A failing hook is
+        # reported but never stops scheduling.
+        self.maintenance: list = []
 
     @property
     def owner(self) -> str:
@@ -80,6 +83,11 @@ class Supervisor:
         """One scheduling round. Safe to call repeatedly; never blocks on a running job."""
         self.recover(background=True)
         self.queue.promote_quota_waiters()
+        for hook in self.maintenance:
+            try:
+                hook()
+            except Exception as exc:
+                print(f"maintenance hook failed: {type(exc).__name__}", flush=True)
         if time.monotonic() - self._last_heartbeat >= self.config.heartbeat_s:
             self.heartbeat()
         self._reap_finished()
@@ -105,8 +113,9 @@ class Supervisor:
         with self.db.read() as s:
             job = s.get(Job, job_id)
             answer = None
-            if job.waiting_request_id:
-                reply = s.scalar(select(Message).where(Message.reply_to == job.waiting_request_id,
+            request_id = job.waiting_request_id or job.runtime_ref.get("resume_request_id")
+            if request_id:
+                reply = s.scalar(select(Message).where(Message.reply_to == request_id,
                                                        Message.kind == "input_answer"))
                 answer = reply.body if reply else None
             snapshot = {"id": job.id, "project_id": job.project_id, "ticket_id": job.ticket_id,
