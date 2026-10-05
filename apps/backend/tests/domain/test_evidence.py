@@ -73,9 +73,17 @@ def test_manual_uac_confirmation_is_explicit(world):
     assert world.ticket(t.id).phase == "integrating"
 
 
+def another_integration_finished(world, tip):
+    """Contract double: another ticket's integration was finalised first, so the DB knows this tip."""
+    with world.db.write() as s:
+        p = s.get(Project, world.project.id)
+        p.workflow = {**p.workflow, "accepted_tip": tip}
+
+
 def test_same_sha_rebuild_old_evidence_and_approval_do_not_transfer(world):
     t, c, old_target, v, ids = world.uat()
     op = world.w.accept_uat(world.user, t.id, t.revision, c.id, 1, old_target.id, old_target.checksum, v.id, ids)
+    another_integration_finished(world, f.SHA_C)
     world.w.integration_diverged(world.actor("integrator"), t.id, world.ticket(t.id).revision,
         c.id, op["operation_id"], f.SHA_C)
     t, new_candidate = world.submitted(world.ticket(t.id))
@@ -113,6 +121,9 @@ def test_base_movement_prevents_uat_and_requires_reconciled_new_attempt(world):
 
 def test_divergent_integration_receipt_never_accepts_old_candidate(world):
     t, c, op = world.integrating()
+    with pytest.raises(Conflict, match="not the accepted tip"):  # an unknown ref is never adopted (DEV-012)
+        world.w.integration_diverged(world.actor("integrator"), t.id, t.revision, c.id, op["operation_id"], f.SHA_C)
+    another_integration_finished(world, f.SHA_C)
     world.w.integration_diverged(world.actor("integrator"), t.id, t.revision, c.id, op["operation_id"], f.SHA_C)
     current = world.ticket(t.id)
     assert current.phase == "development" and world.w.eligible(world.user, t.id)

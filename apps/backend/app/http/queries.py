@@ -85,10 +85,19 @@ def candidate(s, c):
             "target_digest": c.target_digest, "evidence_ids": c.evidence_artifact_ids, "preview": c.preview,
             "commit_artifact_id": c.commit_artifact_id, "build_artifact_id": c.build_artifact_id,
             "live_preview": (lambda p: previews.public(p) if p else None)(previews.latest_for(s, c.id)),
+            "integrated_sha": c.integrated_sha, "integration": integration(c.integration),
             "verifications": [{"id": v.id, "status": v.status, "target_digest": v.target_digest,
                 "evidence_ids": v.evidence_artifact_ids, "counts": v.counts, "results": v.results,
                 "uac_coverage": v.uac_coverage} for v in s.scalars(
                 select(Verification).where(Verification.candidate_id == c.id))]}
+
+
+def integration(op):
+    """Public view of the integration operation (no internal approval/artifact plumbing beyond IDs)."""
+    if not op or not op.get("operation_id"):
+        return None
+    return {k: op.get(k) for k in ("operation_id", "status", "expected_base", "target_sha", "observed_tip", "reason",
+                                   "evidence_artifact_id")}
 
 
 def board(s, project_id):

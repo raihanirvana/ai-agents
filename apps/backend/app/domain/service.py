@@ -535,11 +535,87 @@ class Workflow:
             apply_change(s, Project, p.id, expected_revision=p.revision,
                 values={"workflow": {**p.workflow, "accepted_tip": observed_tip}},
                 event=EventSpec("project.accepted_tip_changed", actor.id, {"accepted_tip": observed_tip}))
-            self._change(s, actor, t, "integrated", phase="accepted",
+            t = self._change(s, actor, t, "integrated", phase="accepted",
                 workflow={**t.workflow, "accepted_candidate_id": c.id})
+            # The accepted base moved: work built on the old base cannot carry its review/QA/UAT forward.
+            self._base_advanced(s, actor, t.project_id, observed_tip, exclude=t.id)
+            version = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id,
+                                                           TicketVersion.version == t.current_version))
+            reverted = (version.scope or {}).get("reverts_candidate_id") if version else None
+            if reverted:  # a revert changes the upstream contract: downstream must revalidate
+                rc = s.get(Candidate, reverted)
+                up = s.get(Ticket, rc.ticket_id) if rc else None
+                if up is not None and up.phase == "accepted":
+                    self._contract_change(s, actor, up, f"accepted candidate reverted by ticket #{t.number}",
+                                          allow_integrating=True)
             for downstream in s.scalars(select(Ticket).where(Ticket.project_id == t.project_id)):
                 self._refresh_dependencies(s, actor, downstream)
             return c
+
+    def _base_advanced(self, s, actor, project_id, tip, *, exclude=None):
+        """Candidates in review/QA/UAT built on an older base go back to development for a rebase.
+
+        Their earlier review/QA/UAT stay history; the rebased candidate needs its own. Not a repair cycle."""
+        for other in list(s.scalars(select(Ticket).where(Ticket.project_id == project_id,
+                Ticket.phase.in_(("technical_review", "qa", "uat"))))):
+            cid = other.workflow.get("candidate_id")
+            c = s.get(Candidate, cid) if cid else None
+            if other.id == exclude or c is None or c.base_sha == tip:
+                continue
+            self._invalidate(s, actor, other, "base_changed")
+            append_message(s, project_id=project_id, ticket_id=other.id, thread_id="ticket:" + other.id,
+                sender=actor.id, kind="system",
+                body="Accepted base changed; the candidate must be rebased and pass technical review, QA and UAT again.",
+                meta={"intent": "rebase_request", "scope_version": other.current_version, "candidate_id": c.id,
+                      "old_base": c.base_sha, "new_base": tip})
+            self._change(s, actor, other, "base_changed", phase="development",
+                         workflow={**other.workflow, "candidate_id": None, "attempts": {}})
+
+    def integration_plan(self, actor, ticket_id):
+        """Re-validate an accepted UAT before Git is touched: exact approval, target, evidence and base."""
+        with self.db.read() as s:
+            self._permit(s, actor, "integrator")
+            t = self._row(s, Ticket, ticket_id, actor)
+            if t.phase != "integrating":
+                raise Conflict("ticket is not integrating")
+            c = self._candidate(s, actor, t, t.workflow.get("candidate_id"))
+            op = dict(c.integration or {})
+            if op.get("status") != "pending":
+                raise Conflict("no pending integration operation")
+            approval = s.get(Approval, op.get("approval_id"))
+            if (approval is None or approval.type != "uat" or approval.ticket_id != t.id or approval.candidate_id != c.id
+                    or approval.scope_version != t.current_version or approval.target_artifact_id != c.target_artifact_id
+                    or approval.target_digest != c.target_digest
+                    or set(approval.evidence_artifact_ids) != set(c.evidence_artifact_ids)):
+                raise Conflict("UAT approval does not pin the candidate/target/evidence being integrated")
+            evidence.verification(s, self.store, c, (approval.details or {}).get("verification_id"))
+            for aid in approval.evidence_artifact_ids:
+                evidence.artifact(s, self.store, t.project_id, aid)
+            if (op.get("target_sha") != c.commit_sha or op.get("expected_base") != c.base_sha
+                    or op.get("target_artifact_id") != c.target_artifact_id):
+                raise Conflict("integration operation does not match the approved candidate")
+            return {"ticket_id": t.id, "revision": t.revision, "candidate_id": c.id, "operation_id": op["operation_id"],
+                    "expected_base": op["expected_base"], "target_sha": op["target_sha"], "approval_id": approval.id,
+                    "db_tip": s.get(Project, t.project_id).workflow.get("accepted_tip")}
+
+    def integration_blocked(self, actor, ticket_id, expected_revision, candidate_id, operation_id, *, reason,
+                            observed_tip=None, evidence_artifact_id=None):
+        """Git/DB disagree in a way no automatic step may resolve: keep the evidence, block, never reset."""
+        with self.db.write() as s:
+            self._permit(s, actor, "integrator")
+            t = self._ticket(s, actor, ticket_id, expected_revision, ("integrating",))
+            c = self._candidate(s, actor, t, candidate_id)
+            op = dict(c.integration or {})
+            if op.get("operation_id") != operation_id or op.get("status") != "pending":
+                raise Conflict("not the pending integration operation")
+            if evidence_artifact_id:
+                evidence.artifact(s, self.store, t.project_id, evidence_artifact_id, "report")
+            c.integration = {**op, "status": "blocked", "reason": str(reason)[:500], "observed_tip": observed_tip,
+                             "evidence_artifact_id": evidence_artifact_id}
+            s.flush()
+            return self._change(s, actor, t, "integration_blocked", blocker={"reason": "integration_blocked",
+                "resolution": "operator must inspect the Git/DB evidence; nothing was reset automatically",
+                "detail": str(reason)[:500], "evidence_artifact_id": evidence_artifact_id})
 
     def integration_diverged(self, actor, ticket_id, expected_revision, candidate_id, operation_id, observed_tip):
         with self.db.write() as s:
@@ -550,15 +626,18 @@ class Workflow:
             if op.get("operation_id") != operation_id or op.get("status") != "pending" or observed_tip in (op.get("target_sha"), op.get("expected_base")):
                 raise Conflict("not a reconciled divergent operation")
             evidence.digest(observed_tip, (40, 64))
+            p = s.get(Project, t.project_id)
+            # Only a tip the product itself finalised may be adopted. An unknown ref is integration_blocked.
+            if p.workflow.get("accepted_tip") != observed_tip:
+                raise Conflict("observed tip is not the accepted tip recorded by a finished integration")
             c.integration = {**op, "status": "diverged", "observed_tip": observed_tip}
             s.flush()
-            p = s.get(Project, t.project_id)
-            if p.workflow.get("accepted_tip") not in (op["expected_base"], observed_tip):
-                raise Conflict("project base moved again; reconcile latest Git state")
-            apply_change(s, Project, p.id, expected_revision=p.revision,
-                values={"workflow": {**p.workflow, "accepted_tip": observed_tip}},
-                event=EventSpec("project.base_reconciled", actor.id, {"accepted_tip": observed_tip}))
             self._invalidate(s, actor, t, "integration_base_changed")
+            append_message(s, project_id=t.project_id, ticket_id=t.id, thread_id="ticket:" + t.id,
+                sender=actor.id, kind="system",
+                body="Another integration moved the accepted base first; rebase, then review, QA and UAT again.",
+                meta={"intent": "rebase_request", "scope_version": t.current_version, "candidate_id": c.id,
+                      "old_base": c.base_sha, "new_base": observed_tip})
             return self._change(s, actor, t, "integration_diverged", phase="development",
                 workflow={**t.workflow, "candidate_id": None, "attempts": {}},
                 blocker=None)
@@ -606,38 +685,43 @@ class Workflow:
             up = self._ticket(s, actor, upstream_id, expected_revision, ("accepted",))
             if not isinstance(reason, str) or not reason.strip():
                 raise Invalid("contract change reason required")
-            change = {"id": new_id(), "reason": reason, "reported_by": actor.id,
-                "base_sha": s.get(Project, up.project_id).workflow.get("accepted_tip")}
-            pending, visited, edges = [up.id], {up.id}, {}
-            while pending:
-                tid = pending.pop()
-                for d in s.scalars(select(Dependency).where(Dependency.depends_on_ticket_id == tid)):
-                    edges[d.id] = d
-                    if d.ticket_id not in visited:
-                        visited.add(d.ticket_id)
-                        pending.append(d.ticket_id)
-            for tid in sorted(visited - {up.id}):
-                down = self._row(s, Ticket, tid, actor)
-                if down.phase == "integrating":
-                    raise Conflict("reconcile downstream integration first")
-                for d in edges.values():
-                    if d.ticket_id != tid:
-                        continue
-                    self._dep_change(s, actor, d, state="needs_revalidation",
-                        revalidation={"reason": reason, "trigger_ticket_id": up.id, "reported_by": actor.id,
-                            "contract_change_id": change["id"], "request_id": new_id()})
-                if down.phase in ("accepted", "cancelled"):
-                    # Acceptance is historical. Code changes need a new ticket,
-                    # not a blocker that no command can resolve on this ticket.
-                    self._change(s, actor, down, "dependency_followup_required")
+            return self._contract_change(s, actor, up, reason)
+
+    def _contract_change(self, s, actor, up, reason, *, allow_integrating=False):
+        change = {"id": new_id(), "reason": reason, "reported_by": actor.id,
+            "base_sha": s.get(Project, up.project_id).workflow.get("accepted_tip")}
+        pending, visited, edges = [up.id], {up.id}, {}
+        while pending:
+            tid = pending.pop()
+            for d in s.scalars(select(Dependency).where(Dependency.depends_on_ticket_id == tid)):
+                edges[d.id] = d
+                if d.ticket_id not in visited:
+                    visited.add(d.ticket_id)
+                    pending.append(d.ticket_id)
+        for tid in sorted(visited - {up.id}):
+            down = self._row(s, Ticket, tid, actor)
+            if down.phase == "integrating" and not allow_integrating:
+                raise Conflict("reconcile downstream integration first")
+            for d in edges.values():
+                if d.ticket_id != tid:
                     continue
-                self._invalidate(s, actor, down, "dependency_contract_changed")
-                self._change(s, actor, down, "dependency_invalidated",
-                    phase="development" if down.phase in ("development", "technical_review", "qa", "uat") else down.phase,
-                    workflow={**down.workflow, "candidate_id": None, "attempts": {}},
-                    blocker=self._work_blocker(down, True))
-            return self._change(s, actor, up, "contract_change_recorded",
-                workflow={**up.workflow, "contract_change": change})
+                self._dep_change(s, actor, d, state="needs_revalidation",
+                    revalidation={"reason": reason, "trigger_ticket_id": up.id, "reported_by": actor.id,
+                        "contract_change_id": change["id"], "request_id": new_id()})
+            if down.phase == "integrating":
+                continue  # its pending operation is built on the old base and will diverge when reconciled
+            if down.phase in ("accepted", "cancelled"):
+                # Acceptance is historical. Code changes need a new ticket,
+                # not a blocker that no command can resolve on this ticket.
+                self._change(s, actor, down, "dependency_followup_required")
+                continue
+            self._invalidate(s, actor, down, "dependency_contract_changed")
+            self._change(s, actor, down, "dependency_invalidated",
+                phase="development" if down.phase in ("development", "technical_review", "qa", "uat") else down.phase,
+                workflow={**down.workflow, "candidate_id": None, "attempts": {}},
+                blocker=self._work_blocker(down, True))
+        return self._change(s, actor, up, "contract_change_recorded",
+            workflow={**up.workflow, "contract_change": change})
 
     def revalidate_dependency(self, actor, ticket_id, expected_revision, upstream_id, report_artifact_id):
         with self.db.write() as s:

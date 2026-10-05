@@ -54,10 +54,15 @@ export interface Preview {
   url: string | null; port: number | null; stop_reason: string | null; error: string | null;
   details: { [key: string]: Json }; requested_at: string; ready_at: string | null; stopped_at: string | null;
 }
+export interface Integration {
+  operation_id: string; status: "pending" | "done" | "diverged" | "blocked"; expected_base: string; target_sha: string;
+  observed_tip: string | null; reason: string | null; evidence_artifact_id: string | null;
+}
 export interface Candidate {
   id: string; ticket_id: string; scope_version: number; commit_sha: string; base_sha: string; status: string;
   target_artifact_id: string | null; target_digest: string | null; evidence_ids: string[]; preview: Json;
   commit_artifact_id: string; build_artifact_id: string | null; live_preview: Preview | null;
+  integrated_sha: string | null; integration: Integration | null;
   verifications: Verification[];
 }
 export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; preview: Preview | null; cursor: number }

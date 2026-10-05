@@ -146,6 +146,14 @@ cd ../..
 npx playwright test --config playwright.preview.config.ts
 ```
 
+## Integrasi accepted (DEV-012)
+
+Menerima UAT hanya mencatat operasi integrasi `pending`. Worker `--runtime pipeline` menjalankan integrator yang
+mem-fast-forward `refs/heads/accepted` di repo terkelola dengan compare-and-swap, lalu mencatat Accepted dan membuka
+dependency. Restart merekonsiliasi dari ref aktual; ref yang bergeser di luar integrator diblokir dengan bukti, tanpa
+reset. Kandidat lain yang dibangun di base lama kembali ke development untuk rebase dan QA/UAT baru. Detail:
+[integrasi](docs/decisions/integration.md). Tes: `cd apps/backend && python -m pytest tests/integration -q` (POSIX).
+
 ## Regression smoke tests
 
 ```sh

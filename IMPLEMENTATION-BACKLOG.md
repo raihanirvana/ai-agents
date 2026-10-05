@@ -62,7 +62,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-009 | GUI board, chat PO, dan review scope | DEV-008 | DONE |
 | DEV-010 | Pipeline lead/developer/QA dengan bukti test | DEV-003, DEV-006, DEV-007 | DONE |
 | DEV-011 | Preview kandidat dan feedback UAT | DEV-008, DEV-009, DEV-010 | DONE |
-| DEV-012 | Integrasi accepted, dependency, dan recovery Git/DB | DEV-005, DEV-010, DEV-011 | TODO |
+| DEV-012 | Integrasi accepted, dependency, dan recovery Git/DB | DEV-005, DEV-010, DEV-011 | DONE |
 | DEV-013 | Onboarding repository existing | DEV-005, DEV-012 | TODO |
 | DEV-014 | Release yang dibekukan dan verifikasi gabungan | DEV-012, DEV-013 | TODO |
 | DEV-015 | Pilot end-to-end dan panduan operasional | DEV-009, DEV-011, DEV-013, DEV-014 | TODO |
@@ -1441,6 +1441,44 @@ Uji rebuild SHA sama dengan dependency/config berubah, unavailable artifact,
 pin cleanup, cookie header, dan request jaringan/mutation kontrol terlarang.
 
 ## DEV-012 — Integrasi accepted, dependency, dan recovery Git/DB
+
+Review Codex selesai: verdict awal NEEDS_FIX, tiket sempat dibuka kembali IN_PROGRESS lalu DONE setelah fix.
+R012-01: finalisasi/report/pin kini satu transaksi dengan evidence ID pada operasi. R012-02: urutan recovery memakai
+approval immutable dan menunggu operasi pending pemilik ref. R012-03: ref accepted hilang menjadi blocker dengan
+bukti. R012-04: recovery memeriksa base DB serta ancestry fast-forward. R012-05: provenance sebelum UAT tidak lagi
+menjadi DTO operasi kosong. Sembilan regresi baru semuanya gagal sebelum fix masing-masing dan lulus setelahnya.
+Verifikasi reviewer: integration/domain awal 118 passed, sesudah tujuh fix-regression 125 passed; integrasi final
+24 passed (termasuk sembilan regresi). Suite terkait integration/domain/persistence/http/pipeline/workers WSL+Docker:
+450 passed, 1 gagal pada flaky DEV-004 `test_dead_worker_recovery_revokes_workspace_keeps_logs_and_preserves_other_run`
+(baris log spawn belum tertulis saat worker dibunuh); rerun terpisah 1 passed. GUI 31 passed, build lulus.
+Suite backend lengkap dan Windows tidak diulang. Laporan [DEV-012-review](docs/reviews/DEV-012-review.md).
+Patch reviewer menunggu re-review independen; R7 belum ditutup. Belum stage/commit/push patch reviewer.
+
+### Catatan pengerjaan
+Status: DONE. Pelaksana: Claude (Opus 5.5), 2026-10-05. Review Codex selesai, patch menunggu re-review independen.
+Rencana: integrator milik supervisor (hook worker, bukan job execution) memproses operasi integrasi `pending` hasil
+`accept_uat` di bawah lock proyek + lock ref broker: validasi ulang approval/target/evidence/base di domain, lalu
+fast-forward `refs/heads/accepted` dengan compare-and-swap; finalisasi Accepted/event/dependency di DB sesudahnya.
+Rekonsiliasi dari ref aktual: masih expected -> update; sudah target -> finalisasi saja; tip integrasi lain yang
+diketahui DB -> kandidat basi kembali ke development; tip tak dikenal -> diblokir dengan bukti, tanpa reset/adopsi.
+Base maju membuat kandidat tiket lain (technical review/QA/UAT) di-supersede dan developer me-rebase diff kandidat ke
+tip baru (kandidat, review, QA, UAT baru). Revert kandidat upstream mencatat perubahan kontrak sehingga downstream
+diblokir sampai revalidasi. Fault injection sebelum/sesudah update ref, accept ganda/bersamaan, ref divergence,
+UAT base basi, penulisan ref tak berizin.
+File rencana: `app/integration/**`, `domain/service.py`, `pipeline/{scheduler,workspace,wiring}.py`, `worker.py`,
+`http/queries.py`, `contracts/api/types.ts`, GUI tiket, `tests/integration/**`, `docs/decisions/integration.md`,
+handoff. Tidak mulai DEV-013/014. Belum commit/push.
+
+Hasil: integrator supervisor (`app/integration/integrator.py`) dengan preflight domain, CAS fast-forward, rekonsiliasi
+dari ref aktual (resume, recovered, stale base, blocked dengan bukti tanpa reset/adopsi), finalisasi yang men-supersede
+kandidat base lama dan memproses revert, rebase diff kandidat oleh developer, job development per base, status
+integrasi di API/GUI. Pemetaan AC, perintah, dan known issues: [DEV-012-handoff](docs/reviews/DEV-012-handoff.md).
+Keputusan: [integrasi](docs/decisions/integration.md).
+
+Verifikasi: WSL+Docker suite backend lengkap 768 passed; Windows 555 passed/15 skipped; GUI 31, preview browser 4,
+smoke 5, browser DEV-008 3 passed; build lulus. Uji mutasi `_base_advanced` dan adopsi ref asing menggagalkan tes.
+Keterbatasan: operasi blocked butuh operator, revalidasi dependency otomatis belum ada, kontrak otomatis hanya revert,
+rebase via `git apply`, satu integrator per host. Belum commit/push; DEV-013/014 tidak dikerjakan.
 
 **Tujuan:** fitur yang diterima menjadi base pekerjaan berikutnya secara konsisten.
 

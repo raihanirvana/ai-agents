@@ -288,6 +288,7 @@ function CandidateCard({ candidate: c, detail }: { candidate: Candidate; detail:
       {c.verifications.map((v) => <VerificationRow key={v.id} v={v} />)}
       <div className="evidence">{c.evidence_ids.filter((id) => !c.verifications.some((v) => v.evidence_ids.includes(id)))
         .map((id) => <ArtifactChip key={id} id={id} label="bukti kandidat / preview" />)}</div>
+      <IntegrationRow candidate={c} />
       <PreviewPanel candidate={c} detail={detail} />
     </article>
   );
@@ -353,6 +354,29 @@ function PreviewPanel({ candidate, detail }: { candidate: Candidate; detail: Tic
         <span className="muted">Persetujuan UAT mengacu pada target dan bukti di atas, bukan pada proses preview yang hidup.</span>
       </div>
     </section>
+  );
+}
+
+const INTEGRATION_LABEL: Record<NonNullable<Candidate["integration"]>["status"], string> = {
+  pending: "Menunggu integrator", done: "Terintegrasi ke accepted", diverged: "Base berubah: perlu rebase dan QA/UAT baru",
+  blocked: "Diblokir: perlu pemeriksaan operator",
+};
+
+/** Accepted is recorded only after the accepted ref really moved; this shows where that operation stands. */
+function IntegrationRow({ candidate: c }: { candidate: Candidate }) {
+  const op = c.integration;
+  if (!op) return null;
+  return (
+    <div className="integration" data-integration-status={op.status}>
+      <Badge tone={op.status === "done" ? "good" : op.status === "pending" ? "info" : op.status === "blocked" ? "bad" : "warn"}>
+        {INTEGRATION_LABEL[op.status]}
+      </Badge>{" "}
+      <span className="muted">base <code>{short(op.expected_base, 10)}</code> → <code>{short(op.target_sha, 10)}</code>
+        {op.observed_tip && <> · ref teramati <code>{short(op.observed_tip, 10)}</code></>}
+        {c.integrated_sha && <> · accepted <code>{short(c.integrated_sha, 10)}</code></>}</span>
+      {op.reason && <p className="notice notice--bad">{op.reason}</p>}
+      {op.evidence_artifact_id && <ArtifactChip id={op.evidence_artifact_id} label="bukti integrasi" />}
+    </div>
   );
 }
 

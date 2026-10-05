@@ -64,6 +64,25 @@ class FencedWorkspace(WorkspaceSupervisor):
             return True
 
 
+def rebase_onto(broker, candidate, base, dest):
+    """Export the new base and re-apply the candidate's own diff (all or nothing). False means a conflict: the
+    workspace is the clean new base. Never a merge: the rebased result is a NEW candidate with new review/QA/UAT."""
+    import subprocess
+    broker.export_commit(base, dest)
+    patch = broker._bare('diff', '--no-ext-diff', '--no-textconv', '--no-color', '--binary', '--full-index',
+                         candidate.base_sha, candidate.commit_sha)
+    if not patch.strip():
+        return True
+    if len(patch) > 16 * 1024 * 1024:
+        return False
+    applied = subprocess.run([broker.git, 'apply', '--binary', '--whitespace=nowarn', '-'], cwd=dest, input=patch,
+                             env=broker._env(), capture_output=True, timeout=120).returncode == 0
+    if not applied:  # git apply is atomic, but start from a pristine base anyway
+        fsutil.clear_dir(dest)
+        broker.export_commit(base, dest)
+    return applied
+
+
 def pack_tree(root):
     entries = fsutil.scan_tree(Path(root), limits=fsutil.TreeLimits(max_bytes=64 * 1024 * 1024))
     if any(e.kind == 'symlink' for e in entries):
@@ -125,6 +144,7 @@ class ProductWorkspace:
             generation=identity['generation'], lease_id=identity['lease_owner'], manifest=manifest,
             run_id=run_id, allow_install_egress=True,
             provenance={'created_by': 'product-job-lease', 'job_id': identity['job_id']})
+        candidate, rebased = None, False
         with self.db.read() as s:
             checkpoint = s.get(Job, identity['job_id']).runtime_ref.get('pipeline_checkpoint')
             if checkpoint:
@@ -135,17 +155,29 @@ class ProductWorkspace:
                 fsutil.clear_dir(sup.src_dir(ref))
                 unpack_tree(saved['files'], sup.src_dir(ref))
             elif identity['role'] == 'developer':
-                # Repair starts from the last rejected immutable candidate; the accepted ref stays untouched.
+                # Repair/rebase starts from the last superseded immutable candidate; the accepted ref stays untouched.
                 feedback = next((m for m in s.scalars(select(Message).where(Message.ticket_id == identity['ticket_id'])
-                    .order_by(Message.seq.desc())) if m.meta.get('intent') == 'repair_feedback' and
+                    .order_by(Message.created_at.desc(), Message.seq.desc()))
+                    if m.meta.get('intent') in ('repair_feedback', 'rebase_request') and
                     m.meta.get('scope_version') == identity['scope_version']), None)
                 candidate = s.get(Candidate, feedback.meta.get('candidate_id')) if feedback else None
                 if candidate is not None:
-                    if candidate.status != 'superseded' or candidate.base_sha != base or candidate.scope_version != identity['scope_version']:
+                    if candidate.status != 'superseded' or candidate.scope_version != identity['scope_version']:
                         raise ValueError('repair candidate is obsolete')
                     fsutil.clear_dir(sup.src_dir(ref))
-                    sup.broker(ref.project_id).export_commit(candidate.commit_sha, sup.src_dir(ref))
+                    broker = sup.broker(ref.project_id)
+                    if candidate.base_sha == base:
+                        broker.export_commit(candidate.commit_sha, sup.src_dir(ref))
+                    else:
+                        rebased = rebase_onto(broker, candidate, base, sup.src_dir(ref))
                     sup._chmod_for_sandbox(sup.src_dir(ref))
+        if candidate is not None and candidate.base_sha != base and identity['role'] == 'developer' and not checkpoint:
+            with self.db.write() as s:
+                self._post(s, identity, 'rebase:' + identity['job_id'] + ':' + str(identity['generation']),
+                    ('Candidate changes were re-applied cleanly on the new accepted base; verify and resubmit.' if rebased else
+                     'Candidate changes conflict with the new accepted base; the workspace starts from the new base. '
+                     'Re-implement the approved scope; the previous diff is in the candidate history.'),
+                    [], 'rebase_result', candidate_id=candidate.id, old_base=candidate.base_sha, new_base=base, applied=rebased)
         return sup, started, manifest
 
     def save_checkpoint(self, ctx, sup, started):

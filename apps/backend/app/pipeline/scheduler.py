@@ -43,6 +43,8 @@ class PipelineScheduler:
                 cycle = t.workflow.get("repair_cycles", 0) if stage == "development" else 0
                 candidate = t.workflow.get("candidate_id") if stage in ("technical_review", "qa") else None
                 key = f"pipeline:{t.id}:v{t.current_version}:{stage}:{cycle}:{candidate or '-'}"
+                if stage == "development":  # work on an older accepted base must be redone on the new one
+                    key += "@" + p.workflow["accepted_tip"][:12]
                 existing = [j for j in jobs if j.idempotency_key == key]
                 # A permanent failure/budget stop is visible; never spin a new automatic job around it.
                 if existing:

@@ -54,6 +54,7 @@ export function blockerLabel(blocker: Json): string | null {
   const labels: Record<string, string> = {
     needs_human: "Perlu keputusan Anda: batas perbaikan tercapai",
     dependency_revalidation: "Dependency perlu divalidasi ulang",
+    integration_blocked: "Integrasi diblokir: Git/DB perlu diperiksa operator",
   };
   return typeof reason === "string" ? labels[reason] ?? reason : "Terblokir";
 }

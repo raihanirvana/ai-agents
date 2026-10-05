@@ -26,6 +26,16 @@ def build_pipeline(structured, store, workflow, queue, *, env=None):
     return runtime, PipelineScheduler(structured.db, queue, workflow, runtime=runtime.name)
 
 
+def build_integrator(db, store, workflow, *, env=None):
+    """Accepted-ref integrator over the same managed repositories as the pipeline workspaces."""
+    env = os.environ if env is None else env
+    if os.name != 'posix':
+        raise ValueError('integration requires Linux/macOS; use WSL on Windows')
+    from app.integration.integrator import Integrator
+    root = Path(env.get('PIPELINE_WORKSPACE_ROOT', 'data/pipeline-workspaces')).resolve()
+    return Integrator(db, store, workflow, root)
+
+
 def build_preview(db, store, *, env=None):
     """Preview supervisor for the same worker. Docker is required; owner is stable per host so a restart reconciles."""
     env = os.environ if env is None else env

@@ -116,7 +116,7 @@ test("ticket evidence shows target identity, missing artifacts, manual UAC and s
   const candidate: Candidate = {
     id: "c1", ticket_id: "t1", scope_version: 2, commit_sha: "a".repeat(40), base_sha: "b".repeat(40), status: "verified",
     target_artifact_id: "art-target", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok", "ev-gone"], preview: null,
-    commit_artifact_id: "art-commit", build_artifact_id: "art-build", live_preview: null,
+    commit_artifact_id: "art-commit", build_artifact_id: "art-build", live_preview: null, integrated_sha: null, integration: null,
     verifications: [{ id: "v1", status: "passed", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok", "ev-gone"],
       counts: { executed: 4, passed: 4, failed: 0 }, results: {}, uac_coverage: { "UAC-1": ["test_menu"], "UAC-2": [] } }] };
   state.tickets = [t];
@@ -207,7 +207,7 @@ test("a failed preview shows why and leaves nothing running; a non-localhost URL
   const candidate: Candidate = {
     id: "c1", ticket_id: "t1", scope_version: 2, commit_sha: "a".repeat(40), base_sha: "b".repeat(40), status: "verified",
     target_artifact_id: "art-target", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok"], preview: null,
-    commit_artifact_id: "art-commit", build_artifact_id: "art-build", live_preview: preview({}), verifications: [] };
+    commit_artifact_id: "art-commit", build_artifact_id: "art-build", live_preview: preview({}), integrated_sha: null, integration: null, verifications: [] };
   state.tickets = [t];
   state.artifacts = { "art-target": artifact("art-target"), "art-commit": artifact("art-commit"), "art-build": artifact("art-build"), "ev-ok": artifact("ev-ok") };
   state.detail = { ticket: t, cursor: 5, candidates: [candidate], messages: [], dependencies: [], approvals: [],
@@ -231,4 +231,32 @@ test("a failed preview shows why and leaves nothing running; a non-localhost URL
   candidate.live_preview = preview({ status: "ready", url: "http://localhost:5180/", error: null, stopped_at: null, ready_at: "2026-10-05T01:00:06Z" });
   await page.reload();
   await expect(panel.getByRole("link", { name: "Buka preview di tab baru" })).toHaveAttribute("href", "http://localhost:5180/");
+});
+
+test("an integrating ticket shows the pending/blocked operation, the refs involved and the integration evidence", async ({ page }) => {
+  const state = fresh();
+  const t = ticket({ phase: "integrating", revision: 14, scope_version: 2,
+    blocker: { reason: "integration_blocked", resolution: "operator must inspect", detail: "accepted ref diverged" } });
+  const c: Candidate = {
+    id: "c1", ticket_id: "t1", scope_version: 2, commit_sha: "a".repeat(40), base_sha: "b".repeat(40), status: "verified",
+    target_artifact_id: "art-target", target_digest: "sha256:" + "d".repeat(64), evidence_ids: [], preview: null,
+    commit_artifact_id: "art-commit", build_artifact_id: "art-build", live_preview: null, integrated_sha: null,
+    integration: { operation_id: "op1", status: "blocked", expected_base: "b".repeat(40), target_sha: "a".repeat(40),
+      observed_tip: "f".repeat(40), reason: "accepted ref diverged from both the expected base and the target", evidence_artifact_id: "ev-int" },
+    verifications: [] };
+  state.tickets = [t];
+  state.artifacts = { "art-target": artifact("art-target"), "art-commit": artifact("art-commit"), "art-build": artifact("art-build"),
+    "ev-int": artifact("ev-int", { kind: "report" }) };
+  state.detail = { ticket: t, cursor: 5, candidates: [c], messages: [], dependencies: [], approvals: [],
+    versions: [{ version: 2, title: "Menu kopi", description: "", uac: [{ id: "UAC-1", text: "Menu tampil" }], scope: null }] };
+  await mockApi(page, state);
+  await page.goto("/#/p/p1/t/t1");
+  const row = page.locator(".integration");
+  await expect(row).toHaveAttribute("data-integration-status", "blocked");
+  await expect(row).toContainText("Diblokir");
+  await expect(row).toContainText("bbbbbbbbbb");
+  await expect(row).toContainText("ffffffffff");
+  await expect(row.locator('[data-artifact="ev-int"]')).toContainText("bukti integrasi");
+  await expect(page.locator(".ticket-head .blocker")).toContainText("Integrasi diblokir");
+  await expect(page.locator('section[aria-label="Preview untuk UAT"]')).toHaveCount(0);  // not in UAT any more
 });
