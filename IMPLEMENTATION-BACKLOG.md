@@ -1265,6 +1265,134 @@ uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
 
+### Perbaikan reload acceptance — 2026-10-06
+Status: DONE (scope fix), assignment monitoring platform. Suite baru #4
+mengklaim UAC-10 restore localStorage, tetapi hanya add/assert tanpa reload.
+DSL lama tidak punya reload. Rencana: aksi reload tanpa selector/value, guidance
+QA untuk persistence, actual browser fixture yang membedakan state persisten
+dari memory-only. Suite/runner/target baru wajib; jangan relabel evidence lama.
+Scope developer baru #1/#4 sudah selesai tetapi ditolak (placeholder tests /
+selector mismatch); cycles #1 5/5, #4 4/4, tidak diperpanjang lagi. Budget #1
+naik satu kali +200.000 menjadi 1.400.000, #4 tidak memakai tambahan budget.
+File: pipeline contracts/runtime, runner, QA instructions, tests/docs;
+independent review NOT_REVIEWED.
+Hasil: reload tanpa selector/value; elemen lain tetap wajib selector. Runner
+memakai page.reload(networkidle), response health 200, storage dalam context
+test tetap dipertahankan. QA guidance mewajibkan assertion sesudah reload.
+- `pytest tests/pipeline/test_contracts.py tests/pipeline/test_keyboard_acceptance.py
+  tests/pipeline/test_review_context.py -q`: **47 passed**, 29,89 detik, Mac.
+  Actual browser fixture: fill literal newline failed; press Enter + reload
+  passed, memory-only yang kehilangan data sesudah reload failed. Eksekusi
+  mandatory tetap dihitung, nonce/suite/target berbeda, runner mismatch ditolak.
+- `git diff --check`: pass. Model tidak dipakai dalam fixture ini; bukan QA
+  produk atau independent review. Handoff R9: diff contracts/runtime/runner,
+  QA instructions, docs, tests contracts dan keyboard_acceptance.
+Monitoring nyata sampai tidak ada job aktif: rencana baru #1/#4 9,94 / 11,63
+detik; developer #1 retry budget 78,24 detik, #4 91,44; review 2,41 / 2,87;
+QA #4 10,93 detik. #1 ditolak karena tes placeholder true===true; #4 gagal
+locator data-test-id yang belum diimplementasikan. Extra cycle yang diizinkan
+terpakai; tidak auto-retry atau memperpanjang lagi. #2/#3 tetap menunggu #1.
+Perubahan platform ini belum commit/push. Worker baru memuat runner reload;
+API/web tetap hidup, produk berhenti pada blocker bounded repair.
+
+### Perbaikan keyboard acceptance — 2026-10-06
+Status: DONE (scope fix), assignment monitoring latency dan platform.
+Review nyata #1/#4 sesudah context fix selesai 2,86 / 2,69 detik. QA #1
+gagal dalam 9,88 detik: suite Enter memakai fill `Enter Key Item\\n`, bukan
+keyboard event. DSL lama tidak punya press walau UAC meminta Enter. Tambahkan
+aksi press dengan daftar tombol terbatas, instruksi QA, kontrak dan actual
+browser regression; jangan mengubah suite/receipt/approval lama. Runner digest
+berubah sehingga wajib suite/target/QA baru. Repair #1 4/4, #4 3/3; AGENTS.md
+mewajibkan keputusan pengguna untuk extension. Tidak otomatis menaikkan caps.
+File: pipeline contracts/runtime, trusted acceptance runner, QA instructions,
+tests/docs. Review: NOT_REVIEWED.
+Hasil: DSL press dengan 12 tombol bernama, schema memuat daftar valid; trusted
+runner memakai Playwright locator.press. Instruksi QA menjelaskan fill vs press.
+Tes aktual (Mac, Homebrew Git pada PATH):
+- `pytest tests/pipeline/test_contracts.py tests/pipeline/test_keyboard_acceptance.py
+  tests/pipeline/test_review_context.py -q`: **40 passed**, 20,52 detik.
+- Browser terisolasi fixture Enter: fill literal `\\n` failed dengan executed=1;
+  press Enter passed dengan executed=1, assertion nama item dan input kosong.
+  Suite/nonce berbeda, stale runner digest ditolak sebelum run. Tidak memakai
+  model atau mengubah approval produk. `git diff --check` pass.
+Handoff R8: diff contracts/runner/runtime, instruksi QA, docs, tests contracts
+dan file baru `tests/pipeline/test_keyboard_acceptance.py`; NOT_REVIEWED.
+Status demo: #1 repair 4/4 sesudah suite Enter yang salah; #4 repair 3/3 sesudah
+review menolak file JSX yang masih import library test tidak terpasang. Review
+menyebut package/lock memuat library itu, tetapi pembacaan aktual tidak menemukan
+Vitest/testing-library dalam keduanya; import ada hanya di src/App.test.jsx.
+Tidak mengulang developer tanpa keputusan pengguna untuk repair/budget. Histori,
+kandidat dan hasil QA gagal tetap tersedia; bukan keberhasilan produk/UAT.
+
+### Perbaikan konteks technical review — 2026-10-06
+Status: DONE (scope fix). Assignment: pantau latensi/demo dan perbaiki
+bug platform. Kandidat #1/#4 lolos repo gate, tetapi technical review gagal
+`ContextTooLarge`: ~22.887/~22.586 token untuk full diff/lockfile/gates, limit 8.000.
+Rencana: context review terpisah dibatasi 32.768 tanpa mengubah builder bersama,
+scope/diff/evidence lengkap, ContextRefused/TooLarge menjadi permanent refusal
+agar tidak membuang transient retry. Budget/repair/evidence produk tidak direset.
+File: `app/agents/runtime.py`, `app/pipeline/runtime.py`, tes review/context,
+docs keputusan. Review: NOT_REVIEWED. Retry operator sesudah fix memakai API
+domain queue dan user authorization dari assignment ini, tanpa tambahan caps.
+Hasil: context review per-call 32.768, builder chat/plan tetap 8.000. Scope,
+full diff dan gate report tidak dipotong. Refusal context permanen, tidak
+diklasifikasikan sebagai crash transient. Handoff R7: diff runtime structured/
+pipeline, docs, `tests/pipeline/test_review_context.py` (baru), dan regression
+large diff dalam product loop; independent review NOT_REVIEWED.
+Verifikasi aktual di Mac (Homebrew Git pada PATH):
+- `pytest tests/pipeline/test_review_context.py tests/agents/test_context.py
+  tests/agents/test_runtime.py tests/pipeline/test_gates.py
+  tests/pipeline/test_review_regressions.py -q`: **67 passed**, 7,00 detik.
+- `pytest tests/pipeline/test_product_loop.py::test_actual_build_and_browser_pass_with_fake_model_cannot_advance_uat -q`:
+  **1 passed**, 16,72 detik. Docker/build/browser nyata, model/driver FAKE;
+  full diff >8.000 token diterima review, label fake tetap menahan UAT.
+- Replay context kandidat immutable #1/#4 tanpa call model atau mutasi artefak:
+  estimasi **24.264 / 24.266 token**, cap 32.768, kedua repo gate passed.
+  Ini membuktikan context muat, bukan kualitas kandidat atau QA nyata.
+Worker idle dihentikan SIGINT tertib sebelum memuat fix; review operator retry
+menggunakan kandidat/evidence yang sama. Budget dan repair counter tetap.
+
+### Perbaikan Node TAP bertingkat dan feedback tool — 2026-10-06
+Status: DONE (scope fix). Assignment: investigasi demo berulang ditolak
+walaupun tiga Node tests lulus, hingga repair limit tercapai. Evidence kandidat
+`5c42754589e9446ea7c72e12a59b8f1e`: summary tests/pass=3, adapter lama hanya
+menghitung satu result suite top-level. Rencana: hitung test bertingkat terpisah
+dari suite, pertahankan pemeriksaan skipped/empty/summary/exit serta fingerprint
+baseline; tampilkan gate saat run test dan arahkan argumen write ke patch_file.
+File: `app/pipeline/{gates,runtime}.py`, instruksi developer, docs keputusan.
+Worker dihentikan tertib agar retry tidak menghabiskan budget selama diagnosis.
+Tidak reset usage, repair counter, candidate, atau evidence; empat slot dibatalkan
+sesuai keputusan pengguna untuk demo satu slot. Review: NOT_REVIEWED.
+Hasil pembacaan ulang artefak demo, tanpa mengubah receipt/evidence produk:
+- stdout SHA `c75dfc4d...9639cf` (Node suite tiket #4): `passed`, discovered=3,
+  executed=3, passed=3; ID ketiga test mencakup nama suite.
+- stdout SHA `f0440763...cbc82c` (echo tiket #1): tetap `incomplete`, semua count 0.
+- `git diff --check`: pass.
+Pengguna memilih "yang paling safe dan terbaik" setelah ditawarkan tes dan satu
+siklus tambahan. Tes regresi diizinkan; command API `repair-authorizations` #1
+menambah limit 3 → 4, cycles tetap 3, blocker hilang, usage/evidence tidak direset.
+File verifikasi: `tests/pipeline/test_gates.py` dan fixture stdout Node 22.20.0
+`tests/pipeline/fixtures/node-tap-suite-passed.txt` (artefak demo asli tanpa secret).
+Perintah aktual (apps/backend; Homebrew Git pada PATH):
+- `pytest tests/pipeline/test_gates.py tests/onboarding/test_waivers.py
+  tests/pipeline/test_review_regressions.py tests/pipeline/test_contracts.py -q`:
+  awal 37 passed, 2 failed karena directive `# SKIP/TODO` memakai spasi sesudah #.
+  Regex diperbaiki; recheck **39 passed**. Termasuk nested suite/test, ID per suite,
+  gagal/skip/todo, duplicate, hook failure, echo, dan fingerprint baseline lama.
+- `pytest tests/workers tests/domain/test_evidence.py tests/pipeline/test_scheduler.py -q`:
+  **128 passed**, Mac, tidak membuktikan Linux/WSL sesudah perubahan.
+- `pytest tests/pipeline/test_product_loop.py tests/pipeline/test_product_regressions.py -q`:
+  **15 passed** dalam 173,23 detik; Docker/build/browser dengan model FAKE berlabel.
+Total recheck akhir **182 passed**. Handoff R6: diff enam file tracked plus fixture
+baru di atas; setup normal tidak berubah, worker dimuat ulang untuk membaca fix.
+Pemetaan bukti: nested counts/ID dan failure metadata pada test_gates; fingerprint
+waiver pada test_waivers; gate/removal/stale/cancel/repair pada product regressions;
+model/tool/budget/cleanup tetap terfence pada workers/domain tests. Review: NOT_REVIEWED.
+Known issues: gate repo hanya bukti minimum; browser QA tetap terpisah. Tidak
+menyamakan tiga tes hijau dengan bukti UAC aplikasi. Model/pipeline belum diulang
+dengan fix ini saat penutupan implementasi; hasil demo tetap menunggu run produk.
+Tidak commit/push atau merubah receipt kandidat lama.
+
 ### Perbaikan bootstrap proyek baru — 2026-10-06
 Status: DONE (scope fix). Pelaksana: Codex; assignment pengguna memperbaiki developer
 yang berulang mencari source kosong dan gagal install karena lockfile belum ada.

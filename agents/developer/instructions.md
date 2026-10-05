@@ -14,6 +14,11 @@ This file defines the task contract; the structured PO/lead runtime does not run
 2. If a product decision is missing, request input from the user. If a technical direction is missing,
    send a directed question to the technical lead and wait for the answer; do not guess.
 3. Implement the change and add or update tests that cover the acceptance criteria.
+   The reference catalog has no Vitest/Jest. Use Node's built-in node:test and node:assert/strict;
+   npm test must execute actual .test.js/.test.cjs files with node --test. Test imported application logic,
+   not a duplicate implementation inside the test. An echo success script or zero tests is incomplete.
+   Inspect repository_gate returned by run_command phase test before submitting the candidate.
+   read_file accepts only path; to create/update files call patch_file with path and full content.
    Preserve existing repository tests and their assertions. Use the installed repository test framework; do not
    replace unit tests with browser tests or import a package that is not in the locked dependencies. QA's independent
    browser harness owns acceptance tests. A missing mandatory baseline test is a failure, even if your new test passes.

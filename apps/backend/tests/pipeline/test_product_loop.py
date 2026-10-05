@@ -78,8 +78,10 @@ def plan(accept=True):
     return {'kind': 'technical_plan', 'summary': 'Add cart total', 'steps': [{'title': 'Add handler'}]}
 
 
-def test_actual_build_and_browser_pass_with_fake_model_cannot_advance_uat(agent_env, tmp_path):
+def test_actual_build_and_browser_pass_with_fake_model_cannot_advance_uat(agent_env, tmp_path, monkeypatch):
     env = agent_env
+    # A large candidate diff reproduces the real lockfile context failure.
+    monkeypatch.setitem(FILES, 'review-notes.txt', 'fixture review record ' * 4000)
     runtime, sup, scheduler = setup(env, tmp_path)
     env.script(plan(), {'kind': 'review', 'accept': True, 'summary': 'Diff implements scope', 'findings': []})
     t = env.approved_ticket()
@@ -93,6 +95,11 @@ def test_actual_build_and_browser_pass_with_fake_model_cannot_advance_uat(agent_
         assert env.world.ticket(t.id).phase == 'qa'
         candidate = s.scalar(select(Candidate))
         assert candidate.commit_sha != candidate.base_sha and candidate.target_digest
+        review_job = next(j for j in jobs(env, t.id) if j.stage == 'technical_review')
+        context = json.loads(env.store.read_bytes(s, review_job.context_artifact_id))
+        assert context['manifest']['limit_tokens'] == 32768
+        assert context['manifest']['estimated_tokens'] > 8000
+        assert 'fixture review record ' * 4000 in env.provider.requests[-1].user
         assert all(not Path(runtime.workspace.root / env.project.id / 'runs' / resource['run_id'] / 'worktree').exists()
             for j in jobs(env, t.id) for resource in j.runtime_ref.get('resources', []) if resource['kind'] == 'pipeline_workspace')
 

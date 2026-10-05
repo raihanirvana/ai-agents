@@ -28,6 +28,13 @@ reply lead untuk pertanyaan developer mewarisi pool pengirim. Perpanjangan
 hanya lewat command pengguna; tidak ada fallback model otomatis. Provider/model
 tetap dapat dipilih per role melalui `agents/models.json`.
 
+Technical review memakai builder khusus per call dengan batas estimasi 32.768
+token untuk scope, full diff (termasuk lockfile), dan gate evidence. Builder chat/
+planning tetap 8.000 secara default; tidak ada mutasi konfigurasi builder bersama.
+Manifest snapshot mencatat limit dan estimasi aktual. `ContextRefused/TooLarge`
+gagal permanen sebelum model call; ukuran di atas cap tidak dipotong diam-diam
+atau diulang sebagai transient crash. Usage/token/time caps job tetap berlaku.
+
 Penolakan lead atau browser assertion gagal menghasilkan `repair_feedback` yang
 persisten. Developer berikutnya menyalin source kandidat yang ditolak ke snapshot
 baru dengan attempt/ref/credential baru; accepted ref tidak bergerak. Domain membatasi
@@ -58,12 +65,21 @@ dalam transaksi publikasi sehingga hasil stale tidak membuat Verification/UAT.
 ## Required checks dan baseline waiver
 
 Install/build dijalankan pada clean source kandidat dengan manifest dan image ID
-yang dipin. `test` adalah required repo gate; adapter minimum membaca **flat Node TAP**
-(`node --test`, atau `npm test` yang menjalankannya). Test kosong, skipped/todo,
+yang dipin. `test` adalah required repo gate; adapter membaca **Node TAP**
+(`node --test`, atau `npm test` yang menjalankannya), termasuk
+`describe`/`it` bertingkat: result suite tidak dihitung sebagai eksekusi test, dan
+ID anak memakai path nama suite agar nama sama di suite berbeda tetap terpisah.
+Test kosong, skipped/todo,
 cancelled, duplicate IDs, summary tidak konsisten, atau format framework lain menjadi
 incomplete. Test IDs yang ditemukan di accepted baseline juga wajib muncul pada
 kandidat. Perubahan test tetap masuk diff yang direview lead. Output target pada gate
 repo tidak pernah menjadi authoritative browser report.
+
+Perbaikan demo 2026-10-06: adapter lama menghitung hanya result top-level dan
+menolak tiga test hijau di dalam satu suite (executed=1 vs tests=3). `run_command`
+phase test kini mengembalikan `repository_gate` agar developer melihat incomplete
+sebelum submit. Salah argumen write ke read_file ditolak dengan petunjuk patch_file.
+Script echo sukses/tes kosong tetap incomplete. Histori evidence/repair tidak diubah.
 
 Baseline memakai command/image/config yang sama dalam sandbox baru. Failure asli
 baseline memperoleh fingerprint artifact dari verification service. Hanya waiver
@@ -78,12 +94,25 @@ dapat di-waive; browser UAC tetap wajib. Evidence menampilkan `required_checks:
 
 ## Suite dan evidence authoritative
 
-QA melalui Hermes hanya menyusun DSL browser yang tervalidasi: click/fill dan
+QA melalui Hermes hanya menyusun DSL browser yang tervalidasi: click/fill/press/reload dan
 assert_text/count/visible/value. Ada 1–24 mandatory tests, setiap test punya assertion,
 ID unik, tujuan feature/bug/regression/smoke, dan pemetaan UAC. Semua automated UAC
 harus tercakup; manual UAC tetap checklist pengguna dalam domain/API/GUI yang ada.
 Suite disimpan sebagai artifact supervisor di luar mount developer. Tool schema
 meng-inline referensi Pydantic agar nested plan/steps terkirim utuh ke Hermes.
+`fill` mengubah nilai field, bukan event keyboard. Enter harus berupa langkah
+`press` dengan selector field dan value `Enter`, sesudah fill. Tombol press
+dibatasi Enter/Tab/Escape/Space/Backspace/Delete/ArrowUp/Down/Left/Right/Home/End;
+string arbitrary, chord, newline, dan missing value ditolak kontrak. Tetap wajib
+assertion hasil; press sendiri tidak membuktikan UAC. Perubahan runner keyboard
+mengubah code digest, sehingga suite/target/QA lama tidak dapat dilabel ulang
+pass: rencana yang salah harus dibuat ulang dan target baru diverifikasi.
+Untuk persistence, `{"action":"reload"}` tidak menerima selector/value dan
+memuat ulang page dalam context test yang sama, preserving browser storage.
+Health response harus 200. State harus di-assert lagi sesudah reload; add/assert
+tanpa reload tidak membuktikan restoration. Tiap mandatory test tetap memakai
+context baru, jadi tidak mewarisi state dari test lain. Actual fixture regression
+membuktikan persistence passed sedangkan memory-only gagal sesudah reload.
 
 Build bundle immutable, build record, suite digest, source/base SHA, configuration,
 toolchain, fixture/migration definitions, image ID, dan runner-code/image digest

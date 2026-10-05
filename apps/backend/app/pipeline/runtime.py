@@ -1,9 +1,11 @@
 """Lead plan -> Hermes developer -> lead review -> trusted QA. Approval stays in Workflow."""
 import json
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from sqlalchemy import select
 from app.agents.tools import ToolFacade
+from app.agents.context import ContextRefused, ContextTooLarge
 from app.agents.outputs import LeadPlanOutput, Clarification
 from app.domain import Actor, Attempt
 from app.persistence.models import Candidate, Job, Ticket, TicketVersion, Artifact, Verification, Approval
@@ -41,7 +43,12 @@ class PipelineRuntime:
                 t = s.get(Ticket, identity['ticket_id'])
                 if not self.workflow._eligible(s, t):
                     return Outcome('failed', error='planning requires an eligible approved scope')
-        return getattr(self, '_' + task)(ctx, identity)
+        try:
+            return getattr(self, '_' + task)(ctx, identity)
+        except (ContextRefused, ContextTooLarge) as exc:
+            error = self.redactor.redact('pipeline context refused: ' + str(exc))[:500]
+            ctx.log(error)
+            return Outcome('failed', error=error, retryable=False)
 
     def _technical_plan(self, ctx, identity):
         from app.workspace import WorkspaceSupervisor
@@ -84,6 +91,13 @@ class PipelineRuntime:
             'name': 'qa_plan', 'instruction': 'Create mandatory browser assertions from approved UAC and the technical plan. '
             'Use CSS selectors. Every automated UAC must be covered. feature/bug cases must fail on the base when applicable; '
             'regression cases may pass on both. Use propose_tests with one QaPlan object. Do not edit source or claim pass.',
+            'keyboard_guidance': 'fill changes field text and never simulates a key. To test Enter, fill the input '
+                'then use a separate step {"action":"press","selector":"input selector","value":"Enter"}. '
+                'Do not append newline or the literal characters \\n to simulate Enter.',
+            'persistence_guidance': 'To test state restoration, create/change state, assert it, use '
+                '{"action":"reload"}, then assert the restored state on the same page/context. '
+                'Adding an item and asserting it before reload does not test persistence. '
+                'reload takes no selector or value. Every test starts with a fresh browser context.',
             'schema': QaPlan.model_json_schema(), 'source_files': source_files,
             'empty_source_guidance': ('The accepted base is empty; this is expected for a new project. '
                 'There is no DOM or other folder to inspect. Plan feature tests from approved UAC and technical plan, '
@@ -141,7 +155,10 @@ class PipelineRuntime:
                 'for this approved scope here. There is no existing application in another directory; '
                 'never search host paths or /work. patch_file creates directories automatically.' if not source_files else None),
             'qa_suite': suite.model_dump(), 'instructions': 'Implement the approved scope. Read/patch files with relative paths. '
-            'read_file path "." lists source files. run_command selects install/test/build only. '
+            'read_file accepts only path and never writes; patch_file accepts path and full content. '
+            'read_file path "." lists source files. run_command selects bootstrap/install/test/build. '
+            'For repository tests use node:test and node:assert/strict, with npm test running node --test. '
+            'Create real .test.js/.test.cjs files that exercise application code; echo success and empty tests fail the gate. '
             'Do not remove or skip repository tests to make checks pass. Completion REQUIRES submit_candidate; a prose answer fails the job. '
             'Use the locked dependencies and existing Node tests, not an uninstalled browser unit test library. '
             'Unclear requirements: use request_decision for the lead. Only the trusted harness determines QA.'},
@@ -150,7 +167,8 @@ class PipelineRuntime:
         result = {}
         def read(c, i, a):
             if set(a) != {'path'}:
-                raise ValueError('read_file requires path')
+                raise ValueError('read_file is read-only and accepts only {"path":"relative/file"}. '
+                    'To write a file, call patch_file with {"path":"relative/file","content":"full file text"}.')
             if a['path'] == '.':
                 return {'files': sup.list_files(started.ref, started.credential)}
             return {'content': self.redactor.redact(sup.read_file(started.ref, started.credential, a['path']).decode(errors='replace'))}
@@ -171,8 +189,15 @@ class PipelineRuntime:
                 return {'exit_code': 1, 'error': 'package-lock.json is missing. Create package.json with the '
                         'exact reference_bootstrap versions, then call run_command phase bootstrap before install.'}
             r = sup.run_phase(started.ref, started.credential, a['phase'])
-            return {'exit_code': r.exit_code, 'stdout': r.stdout.decode(errors='replace')[:16000],
-                    'stderr': r.stderr.decode(errors='replace')[:16000]}
+            response = {'exit_code': r.exit_code, 'stdout': r.stdout.decode(errors='replace')[:16000],
+                        'stderr': r.stderr.decode(errors='replace')[:16000]}
+            if a['phase'] == 'test':
+                from .gates import node_gate
+                response['repository_gate'] = node_gate(r.stdout, r.stderr, r.exit_code)
+                if response['repository_gate']['status'] == 'incomplete':
+                    response['next'] = ('Repository test evidence is incomplete. Create and run actual Node tests; '
+                        'npm exit code 0 alone is insufficient. Read repository_gate counts before submitting.')
+            return response
         def submit(c, i, a):
             if set(a) != {'message'}:
                 raise ValueError('submit_candidate requires message')
@@ -237,7 +262,8 @@ class PipelineRuntime:
         output, meta, _ = self.structured._ask(ctx, identity, {'name': 'technical_review', 'candidate_id': candidate.id,
             'diff': self.redactor.redact(diff), 'repo_gates': gates, 'schema': Review.model_json_schema(),
             'instructions': 'Review the diff against approved scope, including all changes to repo tests and skip/removal. '
-            'Return a Review JSON. Technical acceptance cannot approve user scope/UAT/release.'}, Review)
+            'Return a Review JSON. Technical acceptance cannot approve user scope/UAT/release.'}, Review,
+            context_limits=replace(self.structured.builder.limits, total_tokens=32768))
         if not output.accept:
             return self._reject(ctx, identity, candidate, output.summary + '\n' + '\n'.join(output.findings))
         with self.db.write() as s:

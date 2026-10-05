@@ -1,7 +1,7 @@
 import copy
 import pytest
 from pydantic import ValidationError
-from app.pipeline.contracts import QaPlan, validate_report, tool_schema
+from app.pipeline.contracts import QaPlan, Step, KEYS, validate_report, tool_schema
 
 PLAN = {'kind': 'qa_plan', 'summary': 'Test total', 'tests': [{'id': 'total', 'uac': ['UAC-1'],
     'purpose': 'feature', 'steps': [{'action': 'click', 'selector': '#add'},
@@ -66,3 +66,30 @@ def test_qa_tool_parameter_has_actual_properties_and_no_misplaced_local_referenc
     assert 'action' in test['properties']['steps']['items']['properties']
     import json
     assert '$ref' not in json.dumps(schema) and '$defs' not in json.dumps(schema)
+
+
+@pytest.mark.parametrize('key', KEYS)
+def test_keyboard_steps_accept_only_supported_named_keys(key):
+    assert Step(action='press', selector='#input', value=key).value == key
+
+
+@pytest.mark.parametrize('key', [None, 1, '\n', '\\n', 'Control+Enter', 'javascript:alert(1)'])
+def test_keyboard_steps_refuse_missing_or_arbitrary_values(key):
+    with pytest.raises(ValidationError, match='supported named key'):
+        Step(action='press', selector='#input', value=key)
+
+
+def test_reload_step_has_no_selector_or_value():
+    assert Step(action='reload').selector is None
+
+
+@pytest.mark.parametrize('arguments', [{'selector': '#item'}, {'value': 'Enter'}])
+def test_reload_refuses_locator_or_value(arguments):
+    with pytest.raises(ValidationError, match='reload takes no'):
+        Step(action='reload', **arguments)
+
+
+@pytest.mark.parametrize('action', ['click', 'fill', 'press', 'assert_visible'])
+def test_element_steps_still_require_a_selector(action):
+    with pytest.raises(ValidationError, match='requires a selector'):
+        Step(action=action)

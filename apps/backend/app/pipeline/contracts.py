@@ -26,19 +26,32 @@ def tool_schema(contract):
     return expand(schema)
 
 
+KEYS = ('Enter', 'Tab', 'Escape', 'Space', 'Backspace', 'Delete',
+        'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End')
+
+
 class Step(Contract):
-    action: Literal["click", "fill", "assert_text", "assert_count", "assert_visible", "assert_value"]
-    selector: str = Field(min_length=1, max_length=300)
-    value: StrictStr | StrictInt | None = None
+    action: Literal["click", "fill", "press", "reload", "assert_text", "assert_count", "assert_visible", "assert_value"]
+    selector: str | None = Field(default=None, min_length=1, max_length=300)
+    value: StrictStr | StrictInt | None = Field(default=None,
+        description='For press, one named key only: ' + ', '.join(KEYS) + '. fill does not press keys.')
 
     @model_validator(mode="after")
     def arguments(self):
+        if self.action == 'reload':
+            if self.selector is not None or self.value is not None:
+                raise ValueError('reload takes no selector or value')
+            return self
+        if self.selector is None:
+            raise ValueError('this step requires a selector')
         if self.action in ("fill", "assert_text", "assert_value") and (not isinstance(self.value, str) or len(self.value) > 1000):
             raise ValueError("step needs a string value of at most 1000 characters")
         if self.action == "assert_count" and (type(self.value) is not int or not 0 <= self.value <= 100):
             raise ValueError("assert_count needs an integer 0..100")
         if self.action in ("click", "assert_visible") and self.value is not None:
             raise ValueError("this step takes no value")
+        if self.action == "press" and self.value not in KEYS:
+            raise ValueError("press requires a supported named key: " + ', '.join(KEYS))
         return self
 
 

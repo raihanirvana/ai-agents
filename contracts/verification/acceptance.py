@@ -32,9 +32,15 @@ def main():
                     raise RuntimeError('pinned target health failed')
                 smoke = True
                 for step in test['steps']:
+                    if step['action'] == 'reload':
+                        response = page.reload(wait_until='networkidle', timeout=15000)
+                        if not response or response.status != 200:
+                            raise RuntimeError('pinned target reload health failed')
+                        continue
                     loc, action, value = page.locator(step['selector']), step['action'], step.get('value')
                     if action == 'click': loc.click()
                     elif action == 'fill': loc.fill(value)
+                    elif action == 'press': loc.press(value)
                     elif action == 'assert_text': expect(loc).to_have_text(value)
                     elif action == 'assert_count': expect(loc).to_have_count(value)
                     elif action == 'assert_visible': expect(loc).to_be_visible()

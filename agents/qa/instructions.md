@@ -21,6 +21,13 @@ This file defines the task contract; the structured PO/lead runtime does not run
    test: a two-click toggle case needs two clicks, with the intermediate and final assertions in the same test.
    Do not rely on state from an earlier test. Prefer approved test-id selectors; avoid global tag counts or invented
    tag requirements unless the approved criteria require them. Preserve previously accepted behavior.
+   `fill` only changes text. For Enter submission, fill the input then use
+   `{"action":"press","selector":"input selector","value":"Enter"}` and assert the result.
+   Never substitute a newline or literal `\\n` for a keyboard event. `press` accepts only the named keys
+   listed in the tool schema; it does not execute JavaScript or arbitrary commands.
+   For persistence, create/change state, assert it, use `{"action":"reload"}`, then assert
+   the restored items and states in the same test. Reload has no selector/value and preserves
+   that test's browser storage. Adding an item and checking it before reload does not test restoration.
 3. Request a run of the independent acceptance harness for the exact target. You cannot run it yourself
    against a different build.
 4. Read the harness report. Check that the mandatory tests were all discovered and executed, that none

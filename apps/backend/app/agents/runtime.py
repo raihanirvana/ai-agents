@@ -24,7 +24,7 @@ from app.persistence.models import Job, Message, Ticket
 from app.workers.queue import QuotaWait, StaleLease
 from app.workers.runtime import Cancelled, Outcome, RunContext, WaitingForInput
 
-from .context import ContextBuilder, ContextSnapshot, ContextRefused, ContextTooLarge
+from .context import ContextBuilder, ContextLimits, ContextSnapshot, ContextRefused, ContextTooLarge
 from .effects import append_effect
 from .models import ConfigError, ModelClient, ModelError, ModelResult
 from .outputs import (Clarification, InvalidOutput, LeadAnswer, LeadPlanOutput, PoOutput, PoProposal,
@@ -86,7 +86,8 @@ class StructuredAgentRuntime:
         """The first job of a retry chain; effects are keyed on it so a retried run never duplicates them."""
         return identity["root_job_id"]
 
-    def _ask(self, ctx: RunContext, identity: dict[str, Any], task: dict[str, Any], union, *, repo_refs=None):
+    def _ask(self, ctx: RunContext, identity: dict[str, Any], task: dict[str, Any], union, *, repo_refs=None,
+             context_limits: ContextLimits | None = None):
         """Context -> reserved model call -> validated answer, with at most one repair call."""
         checkpoint_key = hashlib.sha256(json.dumps({"task": task, "answer": ctx.answer},
                                                    sort_keys=True).encode()).hexdigest()
@@ -98,9 +99,14 @@ class StructuredAgentRuntime:
         # Give the model the same contract we validate, including task-specific
         # union alternatives. Prose alone confused revision dependency IDs with
         # breakdown keys in the real DEV-015 pilot; repair needs the shape too.
-        snapshot = self.builder.build(identity, task={**task, 'output_schema': TypeAdapter(union).json_schema()},
-                                      repo_refs=repo_refs, answer=ctx.answer,
-                                      lease=ctx.lease, queue=ctx.queue)
+        builder = self.builder
+        if context_limits is not None:
+            # A per-call builder keeps limits isolated from concurrent PO/reply contexts.
+            builder = ContextBuilder(self.builder.db, self.builder.store, self.builder.agents,
+                                     self.builder.redactor, limits=context_limits)
+        snapshot = builder.build(identity, task={**task, 'output_schema': TypeAdapter(union).json_schema()},
+                                 repo_refs=repo_refs, answer=ctx.answer,
+                                 lease=ctx.lease, queue=ctx.queue)
         ctx.log(f"context {snapshot.sha256[:12]} ~{snapshot.estimated_tokens} tokens (estimate), "
                 f"{len(snapshot.manifest['gaps']) - 1} gaps")
         prompt, calls, total = snapshot.user, [], {}
