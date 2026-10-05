@@ -3,7 +3,7 @@
 Platform AI Software Development Team dengan frontend React, API lokal
 berautentikasi (DEV-008), domain workflow/approval, dan worker dengan antrean
 persisten. PO/lead terstruktur tersedia (DEV-007); pipeline developer/QA nyata
-menunggu DEV-010 dan GUI board/chat menunggu DEV-009.
+menunggu DEV-010. GUI board/chat PO/review scope tersedia (DEV-009).
 
 ## Toolchain yang digunakan
 
@@ -82,10 +82,10 @@ tidak membutuhkan provider key, Hermes, container engine, atau VPS.
 
 Saat pertama start, API membuat login code pada `data/auth/login-code` (atau
 `DATA_DIR/auth/login-code`). Baca file itu secara lokal; jangan masukkan ke Git,
-chat, atau variabel `VITE_`. GUI login belum dibuat; client yang disiapkan untuk
-DEV-009 ada di `apps/web/src/api/client.ts`. Jalankan `client.login(code)` dari
-origin web `127.0.0.1` yang diizinkan. Cookie HttpOnly tetap di browser; CSRF
-disimpan di memori client dan diperoleh kembali melalui `client.session()`.
+chat, atau variabel `VITE_`. Tempel code itu pada layar login GUI
+(`http://127.0.0.1:5173`); client ada di `apps/web/src/api/client.ts`. Cookie
+HttpOnly tetap di browser; CSRF disimpan di memori client dan diperoleh kembali
+melalui `client.session()`.
 
 Command memakai `Idempotency-Key` yang sama saat retry tindakan yang sama,
 beserta `expected_revision` dari snapshot untuk perubahan entity. Approval scope,
@@ -107,6 +107,27 @@ npx playwright test --config playwright.api.config.ts
 Tes HTTP/worker memakai provider fake berlabel, tanpa panggilan model nyata.
 Tes browser memakai tiga server fixture sementara dan merekam header preview
 tanpa menyimpan credential. Hasil sanitasi: `data/dev008/browser-results.json`.
+
+## GUI board, chat PO, dan review scope (DEV-009)
+
+Setelah login, GUI menyediakan proyek/brief, board per phase, detail tiket (scope
+version, UAC, dependency, usulan PO dengan diff, kandidat/bukti, UAT, waiver), chat
+PO, dan aktivitas run (stop, waiting_input/quota, blocker). Chat PO membutuhkan
+worker yang berjalan (`python -m app.worker --runtime structured`); tanpa worker,
+pesan tersimpan dan run PO tetap antre. Tanpa provider key, run PO gagal dan tidak
+mengarang jawaban. Keputusan dan batasan: [GUI](docs/decisions/gui.md).
+
+```sh
+npx playwright install chromium
+# Dari root, Windows (server fixture memakai .venv/Scripts/python.exe):
+npx playwright test --config playwright.web.config.ts
+# Linux/macOS: API_TEST_PYTHON=apps/backend/.venv/bin/python npx playwright test --config playwright.web.config.ts
+```
+
+Tes ini membuka Vite pada `127.0.0.1:19851` dan API nyata pada `19850` dengan
+supervisor yang memakai FakeProvider berlabel (balasan PO diskrip lewat port kontrol
+`19852` khusus tes). `states.spec.ts` memakai respons API tiruan untuk state yang tidak
+bisa dipicu fixture (quota, evidence hilang, UAT). Tidak ada panggilan model nyata.
 
 ## Regression smoke tests
 

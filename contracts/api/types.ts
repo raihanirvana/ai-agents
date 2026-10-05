@@ -23,7 +23,7 @@ export interface Run {
   lane: "interactive" | "execution"; stage: string;
   status: "queued" | "running" | "waiting_input" | "waiting_quota" | "succeeded" | "failed" | "cancelled" | "stopped";
   attempt: number; usage: Usage; attempt_usage: Usage; limits: { [key: string]: number | string };
-  result: { [key: string]: Json }; request_id: string | null; context_artifact_id: string | null;
+  result: { [key: string]: Json } | null; request_id: string | null; context_artifact_id: string | null;
   available_at: string | null;
 }
 export interface InputRequest {

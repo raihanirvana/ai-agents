@@ -59,6 +59,7 @@ export class ApiClient {
   artifact(artifactId: string) { return this.request<{ artifact: Artifact }>(`/artifacts/${encodeURIComponent(artifactId)}`); }
   artifactUrl(artifactId: string) { return `${this.base}/artifacts/${encodeURIComponent(artifactId)}/content`; }
   watch(projectId: string, cursor: number, handlers: {
+    open?: () => void;
     event: (event: StateEvent) => void;
     snapshot: (snapshot: Board, reason: SnapshotRequired["reason"]) => void | Promise<void>;
     error: (error: unknown) => void;
@@ -67,6 +68,7 @@ export class ApiClient {
     let closed = false;
     const open = () => {
       source = new EventSource(`${this.base}/projects/${encodeURIComponent(projectId)}/events?cursor=${cursor}`, { withCredentials: true });
+      source.onopen = () => { if (!closed) handlers.open?.(); };
       source.addEventListener("state", (raw: MessageEvent) => {
         try {
           const event = JSON.parse(raw.data) as StateEvent;

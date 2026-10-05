@@ -1,70 +1,50 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { api } from "./api/instance";
+import Login from "./components/Login";
+import Projects from "./components/Projects";
+import Workspace from "./components/Workspace";
+import { WorkspaceProvider } from "./workspace";
 
-type HealthState = "checking" | "connected" | "unavailable";
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+type Auth = "checking" | "anonymous" | "authenticated";
+interface Route { project: string | null; ticket: string | null }
+
+/** Selection lives in the URL hash so a reload (or a shared tab) restores the same context. */
+function parse(hash: string): Route {
+  const match = /^#\/p\/([^/]+)(?:\/t\/([^/]+))?$/.exec(hash);
+  return match ? { project: decodeURIComponent(match[1]), ticket: match[2] ? decodeURIComponent(match[2]) : null } : { project: null, ticket: null };
+}
+function href(route: Route): string {
+  if (!route.project) return "#/";
+  const ticket = route.ticket ? "/t/" + encodeURIComponent(route.ticket) : "";
+  return "#/p/" + encodeURIComponent(route.project) + ticket;
+}
 
 export default function App() {
-  const [health, setHealth] = useState<HealthState>("checking");
+  const [auth, setAuth] = useState<Auth>("checking");
+  const [expired, setExpired] = useState(false);
+  const [route, setRoute] = useState<Route>(() => parse(window.location.hash));
 
   useEffect(() => {
-    let active = true;
-    let poll: number | undefined;
-    let controller: AbortController | undefined;
-    let timeout: number | undefined;
-
-    async function checkHealth() {
-      controller = new AbortController();
-      timeout = window.setTimeout(() => controller?.abort(), 3000);
-      try {
-        const response = await fetch(`${apiBaseUrl}/health`, {
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        if (!response.ok) throw new Error("Health request failed");
-        const body: unknown = await response.json();
-        const connected = body !== null && typeof body === "object" &&
-          "status" in body && body.status === "ok";
-        if (active) setHealth(connected ? "connected" : "unavailable");
-      } catch {
-        if (active) setHealth("unavailable");
-      } finally {
-        window.clearTimeout(timeout);
-        if (active) poll = window.setTimeout(checkHealth, 2000);
-      }
-    }
-
-    void checkHealth();
-
-    return () => {
-      active = false;
-      window.clearTimeout(poll);
-      controller?.abort();
-      window.clearTimeout(timeout);
-    };
+    api.session().then(() => setAuth("authenticated"), () => setAuth("anonymous"));
+  }, []);
+  useEffect(() => {
+    const onHash = () => setRoute(parse(window.location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const labels: Record<HealthState, string> = {
-    checking: "Memeriksa backend…",
-    connected: "Backend terhubung",
-    unavailable: "Backend tidak tersedia",
-  };
+  const go = useCallback((next: Route) => { window.location.hash = href(next); }, []);
+  const authLost = useCallback(() => { setExpired(true); setAuth("anonymous"); }, []);
+  const project = route.project;
+  const selectTicket = useCallback((ticket: string | null) => go({ project, ticket }), [go, project]);
 
+  if (auth === "checking") return <main className="page-shell"><p className="muted" role="status" aria-busy="true">Memeriksa sesi…</p></main>;
+  if (auth === "anonymous") return <Login expired={expired} onLogin={() => { setExpired(false); setAuth("authenticated"); }} />;
+  if (!route.project) return <Projects onAuthLost={authLost} onOpen={(project) => go({ project, ticket: null })} />;
   return (
-    <main className="page-shell">
-      <section className="welcome-card" aria-labelledby="welcome-title">
-        <div className="brand-mark" aria-hidden="true">AI</div>
-        <p className="eyebrow">AI SOFTWARE DEVELOPMENT TEAM</p>
-        <h1 id="welcome-title">Ruang kerja tim development</h1>
-        <p className="intro">
-          Satu tempat untuk merencanakan, membangun, dan memeriksa pekerjaan
-          software bersama tim AI.
-        </p>
-        <div className={`health health--${health}`} role="status" aria-live="polite">
-          <span className="health-dot" aria-hidden="true" />
-          {labels[health]}
-        </div>
-        <p className="footer-note">Fondasi lokal · tanpa akun model</p>
-      </section>
-    </main>
+    <WorkspaceProvider key={route.project} projectId={route.project} selectedTicket={route.ticket} selectTicket={selectTicket} onAuthLost={authLost}>
+      <Workspace onProjects={() => go({ project: null, ticket: null })}
+        onLogout={async () => { try { await api.logout(); } finally { setExpired(false); setAuth("anonymous"); go({ project: null, ticket: null }); } }} />
+    </WorkspaceProvider>
   );
 }

@@ -1,0 +1,461 @@
+import { useEffect, useMemo, useState } from "react";
+import type { Artifact, Candidate, Criterion, Message, TicketDetail, Verification } from "../../../../contracts/api/types";
+import { ApiError } from "../api/client";
+import { api } from "../api/instance";
+import { asScope, diffScope, type ScopeDoc } from "../diff";
+import { RUN_STATUS_LABEL, blockerLabel, senderLabel, short, text, when } from "../format";
+import { useWorkspace } from "../workspace";
+import { Badge, ConfirmButton, FakeBadge } from "./ui";
+
+export default function TicketPanel() {
+  const { detail, board, selectedTicket, selectTicket } = useWorkspace();
+  if (!selectedTicket) return <p className="muted pad">Pilih tiket di board untuk melihat scope, bukti, dan keputusan.</p>;
+  if (!detail || detail.ticket.id !== selectedTicket) return <p className="muted pad" aria-busy="true">Memuat tiket…</p>;
+  const { ticket } = detail;
+  const runs = (board?.runs ?? []).filter((r) => r.ticket_id === ticket.id);
+  const fake = runs.some((r) => r.fake);
+  const blocker = blockerLabel(ticket.blocker);
+  return (
+    <div className="ticket" data-ticket={ticket.id} key={ticket.id}>
+      <header className="ticket-head">
+        <button type="button" className="link" onClick={() => selectTicket(null)}>← Tutup</button>
+        <h2>#{ticket.number} {ticket.title}</h2>
+        <div className="chips">
+          <Badge tone="info">{ticket.phase}</Badge><Badge>scope v{ticket.scope_version}</Badge>
+          <Badge title="Revisi tiket">rev {ticket.revision}</Badge>
+          {fake && <FakeBadge />}
+        </div>
+        {blocker && <div className="blocker" role="alert"><strong>Blocker:</strong> {blocker}</div>}
+      </header>
+      <ScopeSection detail={detail} />
+      <ProposalSection detail={detail} />
+      <Dependencies detail={detail} />
+      <Candidates detail={detail} fake={fake} />
+      <Approvals detail={detail} />
+      <Work detail={detail} />
+      <Messages messages={detail.messages} />
+    </div>
+  );
+}
+
+function currentScope(detail: TicketDetail): { doc: ScopeDoc; version: number } {
+  const entry = detail.versions.find((v) => v.version === detail.ticket.scope_version) ?? detail.versions[detail.versions.length - 1];
+  return { version: entry?.version ?? 0, doc: entry ? asScope(entry.scope, { title: entry.title, description: entry.description, uac: entry.uac }) : { title: detail.ticket.title, uac: [] } };
+}
+
+function ScopeSection({ detail }: { detail: TicketDetail }) {
+  const { command, board } = useWorkspace();
+  const { ticket } = detail;
+  const { doc } = currentScope(detail);
+  const [editing, setEditing] = useState<{ doc: ScopeDoc; revision: number } | null>(null);
+  const [version, setVersion] = useState<number | null>(null);
+  const shown = detail.versions.find((v) => v.version === (version ?? ticket.scope_version)) ?? detail.versions[0];
+  const editable = ["draft", "scope_review", "ready"].includes(ticket.phase);
+  return (
+    <section aria-labelledby="scope-h">
+      <div className="section-head">
+        <h3 id="scope-h">Scope dan UAC</h3>
+        {detail.versions.length > 1 && (
+          <label className="inline">Versi
+            <select value={shown?.version} onChange={(e) => setVersion(Number(e.target.value))}>
+              {detail.versions.map((v) => <option key={v.version} value={v.version}>v{v.version}{v.version === ticket.scope_version ? " (saat ini)" : ""}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      {editing ? (
+        <><p className="muted">Draf dari rev {editing.revision}.
+          {editing.revision !== ticket.revision && " Scope berubah saat Anda mengedit. Salin draf, batalkan, lalu buka editor dari data terbaru; simpan draf lama akan ditolak."}</p>
+        <ScopeForm doc={editing.doc} onCancel={() => setEditing(null)} onSave={async (document) => {
+          const result = await command<"editScope">(`/tickets/${ticket.id}/scope-versions`, { expected_revision: editing.revision, document });
+          if (result) setEditing(null);
+        }} /></>
+      ) : shown && (
+        <>
+          <p className="desc">{shown.description || <span className="muted">Tanpa deskripsi</span>}</p>
+          <ul className="uac" aria-label="Kriteria penerimaan">
+            {shown.uac.map((c) => <li key={c.id}><code>{c.id}</code> {c.text} {c.mode === "manual" && <Badge tone="warn" title="Perlu konfirmasi manual Anda saat UAT">manual</Badge>}</li>)}
+          </ul>
+        </>
+      )}
+      <div className="actions">
+        {!editing && editable && <button type="button" onClick={() => setEditing({ doc, revision: ticket.revision })}>Edit scope</button>}
+        {ticket.phase === "scope_review" && !editing && (
+          <ConfirmButton label={`Setujui scope v${ticket.scope_version}`} confirmLabel="Ya, setujui" onConfirm={async () => {
+            await command<"approveScope">(`/projects/${board?.project.id}/scope-approvals`, {
+              items: [{ ticket_id: ticket.id, scope_version: ticket.scope_version, expected_revision: ticket.revision }] });
+          }} intent={JSON.stringify([ticket.id, ticket.scope_version, ticket.revision])} />
+        )}
+        {!["cancelled", "accepted"].includes(ticket.phase) && !editing && (
+          <ConfirmButton tone="danger" label="Batalkan tiket" confirmLabel="Ya, batalkan"
+            intent={JSON.stringify([ticket.id, ticket.revision])}
+            onConfirm={async () => { await command<"cancel">(`/tickets/${ticket.id}/cancel`, { expected_revision: ticket.revision }); }} />
+        )}
+        {ticket.phase === "scope_review" && <span className="muted">Approval selalu atas scope v{ticket.scope_version} tiket ini.</span>}
+      </div>
+      <AskPo ticketId={ticket.id} />
+    </section>
+  );
+}
+
+function ScopeForm({ doc, onSave, onCancel }: { doc: ScopeDoc; onSave: (d: ScopeDoc) => Promise<void>; onCancel: () => void }) {
+  const [title, setTitle] = useState(doc.title);
+  const [description, setDescription] = useState(doc.description ?? "");
+  const [uac, setUac] = useState<Criterion[]>(doc.uac.map((c) => ({ ...c })));
+  const [saving, setSaving] = useState(false);
+  const patch = (index: number, change: Partial<Criterion>) => setUac((rows) => rows.map((r, i) => (i === index ? { ...r, ...change } : r)));
+  return (
+    <form className="form" onSubmit={async (e) => {
+      e.preventDefault(); setSaving(true);
+      await onSave({ ...doc, title, description, uac: uac.filter((c) => c.text.trim()), dependencies: doc.dependencies ?? [] });
+      setSaving(false);
+    }}>
+      <label>Judul<input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={120} /></label>
+      <label>Deskripsi<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} /></label>
+      <fieldset><legend>Kriteria penerimaan (UAC)</legend>
+        {uac.map((c, i) => (
+          <div className="uac-row" key={c.id}>
+            <code>{c.id}</code>
+            <input aria-label={`Teks ${c.id}`} value={c.text} onChange={(e) => patch(i, { text: e.target.value })} />
+            <select aria-label={`Mode ${c.id}`} value={c.mode ?? "automated"} onChange={(e) => patch(i, { mode: e.target.value as "automated" | "manual" })}>
+              <option value="automated">otomatis</option><option value="manual">manual</option>
+            </select>
+          </div>
+        ))}
+        <button type="button" className="ghost" onClick={() => {
+          const used = new Set(uac.map((c) => c.id)); let n = uac.length + 1;
+          while (used.has(`UAC-${n}`)) n += 1;
+          setUac([...uac, { id: `UAC-${n}`, text: "", mode: "automated" }]);
+        }}>+ Tambah UAC</button>
+      </fieldset>
+      <div className="actions">
+        <button type="submit" className="primary" disabled={saving || !title.trim() || uac.every((c) => !c.text.trim())}>Simpan sebagai versi baru</button>
+        <button type="button" className="ghost" onClick={onCancel}>Batal</button>
+      </div>
+    </form>
+  );
+}
+
+function AskPo({ ticketId }: { ticketId: string }) {
+  const { command, board } = useWorkspace();
+  const [body, setBody] = useState("");
+  return (
+    <form className="ask" onSubmit={async (e) => {
+      e.preventDefault();
+      if (!board || !body.trim()) return;
+      const result = await command<"message">(`/projects/${board.project.id}/messages`, {
+        expected_revision: board.project.revision, body: body.trim(), task: "revise", ticket_id: ticketId });
+      if (result) setBody("");
+    }}>
+      <label>Minta PO merevisi tiket ini
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2} placeholder="Mis. tambahkan kriteria untuk stok habis" />
+      </label>
+      <button type="submit" disabled={!body.trim()}>Kirim ke PO</button>
+    </form>
+  );
+}
+
+function ProposalSection({ detail }: { detail: TicketDetail }) {
+  const { command } = useWorkspace();
+  const { ticket } = detail;
+  const { doc } = currentScope(detail);
+  const decided = new Map<string, Message>();
+  for (const m of detail.messages) if (m.reply_to) decided.set(m.reply_to, m);
+  const proposals = detail.messages.filter((m) => m.metadata.intent === "scope_proposal");
+  if (proposals.length === 0) return null;
+  return (
+    <section aria-labelledby="prop-h">
+      <h3 id="prop-h">Usulan revisi dari PO</h3>
+      {[...proposals].reverse().map((proposal) => {
+        const verdict = decided.get(proposal.id);
+        const stale = proposal.metadata.base_version !== ticket.scope_version;
+        const next = asScope(proposal.metadata.document, doc);
+        const base = detail.versions.find((v) => v.version === proposal.metadata.base_version);
+        const changes = diffScope(base ? asScope(base.scope, { title: base.title, description: base.description, uac: base.uac }) : doc, next);
+        return (
+          <article className="proposal" key={proposal.id} data-proposal={proposal.id}>
+            <div className="chips">
+              <Badge tone={verdict ? (verdict.body === "accepted" ? "good" : "neutral") : stale ? "warn" : "info"}>
+                {verdict ? (verdict.body === "accepted" ? "Diterima" : "Ditolak") : stale ? "Basi: scope sudah berubah" : "Menunggu keputusan Anda"}
+              </Badge>
+              <span className="muted">{senderLabel(proposal.sender)} · dari scope v{text(proposal.metadata.base_version)}</span>
+              {proposal.metadata.fake === true && <FakeBadge title="Usulan dari fake provider" />}
+            </div>
+            <table className="diff" aria-label="Perbedaan usulan">
+              <tbody>
+                {changes.filter((c) => c.kind !== "same").length === 0 && <tr><td colSpan={2} className="muted">Tidak ada perbedaan dari scope asal usulan.</td></tr>}
+                {changes.filter((c) => c.kind !== "same").map((c) => (
+                  <tr key={c.label} className={`diff-${c.kind}`}>
+                    <th scope="row">{c.label}</th>
+                    <td>{c.before !== undefined && <del>{c.before || "(kosong)"}</del>} {c.after !== undefined && <ins>{c.after || "(kosong)"}</ins>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!verdict && !stale && (
+              <div className="actions">
+                <button type="button" className="primary" onClick={() => void command<"proposalDecision">(
+                  `/tickets/${ticket.id}/proposals/${proposal.id}/decisions`, { expected_revision: ticket.revision, accept: true })}>Terima revisi</button>
+                <button type="button" onClick={() => void command<"proposalDecision">(
+                  `/tickets/${ticket.id}/proposals/${proposal.id}/decisions`, { expected_revision: ticket.revision, accept: false })}>Tolak</button>
+                <span className="muted">Menerima membuat versi scope baru; approval scope tetap tindakan terpisah.</span>
+              </div>
+            )}
+          </article>
+        );
+      })}
+    </section>
+  );
+}
+
+function Dependencies({ detail }: { detail: TicketDetail }) {
+  const { board, selectTicket } = useWorkspace();
+  if (detail.dependencies.length === 0) return null;
+  return (
+    <section aria-labelledby="dep-h">
+      <h3 id="dep-h">Dependency</h3>
+      <ul className="plain">
+        {detail.dependencies.map((d) => {
+          const upstream = board?.tickets.find((t) => t.id === d.upstream_id);
+          return (
+            <li key={d.upstream_id}>
+              <button type="button" className="link" onClick={() => selectTicket(d.upstream_id)}>
+                {upstream ? `#${upstream.number} ${upstream.title}` : short(d.upstream_id)}
+              </button>{" "}
+              <Badge tone={d.state === "accepted" || d.state === "satisfied" ? "good" : "warn"}>{d.state}</Badge>
+              {d.integration_sha && <span className="muted"> integrasi {short(d.integration_sha, 8)}</span>}
+              {d.revalidation ? <Badge tone="bad" title={text(d.revalidation)}>perlu validasi ulang</Badge> : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function ArtifactChip({ id, label }: { id: string; label: string }) {
+  const { artifactEpoch } = useWorkspace();
+  const [artifact, setArtifact] = useState<Artifact | null>(null);
+  const [failure, setFailure] = useState("");
+  useEffect(() => {
+    let alive = true;
+    setArtifact(null); setFailure("");
+    api.artifact(id).then((r) => { if (alive) setArtifact(r.artifact); },
+      (e) => { if (alive) setFailure(e instanceof ApiError ? e.detail.message : "tidak dapat dimuat"); });
+    return () => { alive = false; };
+  }, [id, artifactEpoch]);
+  const missing = failure || artifact?.availability === "unavailable";
+  return (
+    <span className={`artifact${missing ? " artifact--missing" : ""}`} data-artifact={id}>
+      {label} <code>{short(id, 8)}</code>{" "}
+      {artifact === null && !failure && <span className="muted">memeriksa…</span>}
+      {missing && <Badge tone="bad">tidak tersedia{artifact?.unavailable_reason ? `: ${artifact.unavailable_reason}` : failure ? `: ${failure}` : ""}</Badge>}
+      {artifact?.availability === "available" && <a href={api.artifactUrl(id)} target="_blank" rel="noreferrer">buka</a>}
+    </span>
+  );
+}
+
+function Candidates({ detail, fake }: { detail: TicketDetail; fake: boolean }) {
+  if (detail.candidates.length === 0) {
+    return <section aria-labelledby="cand-h"><h3 id="cand-h">Kandidat dan bukti</h3><p className="muted">Belum ada kandidat. Bukti QA muncul setelah harness menjalankan verifikasi.</p></section>;
+  }
+  return (
+    <section aria-labelledby="cand-h">
+      <h3 id="cand-h">Kandidat dan bukti</h3>
+      {fake && <p className="notice">Tiket ini memiliki run fake. Hasil di bawah tidak membuktikan QA nyata atau kompatibilitas provider.</p>}
+      {detail.candidates.map((c) => <CandidateCard key={c.id} candidate={c} detail={detail} />)}
+      <UatSection detail={detail} />
+    </section>
+  );
+}
+
+function CandidateCard({ candidate: c, detail }: { candidate: Candidate; detail: TicketDetail }) {
+  return (
+    <article className="candidate" data-candidate={c.id}>
+      <div className="chips"><Badge tone={c.status === "superseded" || c.status === "rejected" ? "neutral" : "info"}>{c.status}</Badge>
+        <span className="muted">scope v{c.scope_version}{c.scope_version !== detail.ticket.scope_version ? " (bukan scope saat ini)" : ""}</span></div>
+      <dl className="ids">
+        <dt>Commit</dt><dd><code>{short(c.commit_sha, 12)}</code> · basis <code>{short(c.base_sha, 12)}</code></dd>
+        <dt>Target build</dt><dd>{c.target_digest ? <code title={c.target_digest}>{short(c.target_digest, 16)}</code> : <span className="muted">belum ada target terverifikasi</span>}</dd>
+        <dt>Artefak</dt>
+        <dd>
+          <ArtifactChip id={c.commit_artifact_id} label="commit" />
+          {c.build_artifact_id && <> · <ArtifactChip id={c.build_artifact_id} label="build" /></>}
+          {c.target_artifact_id && <> · <ArtifactChip id={c.target_artifact_id} label="target" /></>}
+        </dd>
+      </dl>
+      {c.verifications.length === 0 && <p className="muted">Belum ada verifikasi untuk target ini.</p>}
+      {c.verifications.map((v) => <VerificationRow key={v.id} v={v} />)}
+      <div className="evidence">{c.evidence_ids.filter((id) => !c.verifications.some((v) => v.evidence_ids.includes(id)))
+        .map((id) => <ArtifactChip key={id} id={id} label="bukti kandidat / preview" />)}</div>
+    </article>
+  );
+}
+
+function VerificationRow({ v }: { v: Verification }) {
+  return (
+    <div className="verification" data-verification={v.id}>
+      <Badge tone={v.status === "passed" ? "good" : v.status === "failed" ? "bad" : "warn"}>{v.status === "incomplete" ? "incomplete (belum lulus)" : v.status}</Badge>{" "}
+      <span className="muted">
+        {Object.entries(v.counts).map(([k, n]) => `${k} ${n}`).join(" · ")}
+      </span>
+      <div className="coverage">
+        {Object.entries(v.uac_coverage).map(([uac, tests]) => <span key={uac}><code>{uac}</code> {tests.length > 0 ? `${tests.length} tes` : <Badge tone="bad">tanpa tes</Badge>}</span>)}
+      </div>
+      <div className="evidence">{v.evidence_ids.map((id) => <ArtifactChip key={id} id={id} label="bukti" />)}</div>
+    </div>
+  );
+}
+
+function UatSection({ detail }: { detail: TicketDetail }) {
+  const { ticket } = detail;
+  const target = useMemo(() => {
+    for (const c of [...detail.candidates].reverse()) {
+      if (c.status === "superseded" || c.status === "rejected" || c.scope_version !== ticket.scope_version) continue;
+      const v = [...c.verifications].reverse().find((x) => x.status === "passed" && x.target_digest === c.target_digest);
+      if (v && c.target_artifact_id && c.target_digest) return { candidate: c, verification: v };
+    }
+    return null;
+  }, [detail.candidates, ticket.scope_version]);
+  const manualUac = (detail.versions.find((v) => v.version === ticket.scope_version)?.uac ?? []).filter((c) => c.mode === "manual");
+  if (ticket.phase !== "uat") return null;
+  if (!target) return <p className="notice">UAT belum bisa diputuskan: tidak ada kandidat dengan verifikasi lulus untuk scope saat ini.</p>;
+  const { candidate, verification } = target;
+  const identity = JSON.stringify([ticket.id, ticket.scope_version, candidate.id, candidate.target_artifact_id,
+    candidate.target_digest, verification.id, candidate.evidence_ids, manualUac]);
+  return <UatDecision key={identity} detail={detail} candidate={candidate} verification={verification} manualUac={manualUac} identity={identity} />;
+}
+
+function UatDecision({ detail, candidate, verification, manualUac, identity }: {
+  detail: TicketDetail; candidate: Candidate; verification: Verification; manualUac: Criterion[]; identity: string;
+}) {
+  const { command } = useWorkspace();
+  const { ticket } = detail;
+  const [reason, setReason] = useState("");
+  const [manual, setManual] = useState<Set<string>>(new Set());
+  const allManual = manualUac.every((c) => manual.has(c.id));
+  return (
+    <div className="uat" aria-label="Keputusan UAT">
+      <h4>Keputusan UAT untuk target <code>{short(candidate.target_digest, 12)}</code></h4>
+      {manualUac.length > 0 && (
+        <fieldset><legend>Konfirmasi UAC manual (Anda yang memeriksa)</legend>
+          {manualUac.map((c) => (
+            <label key={c.id}><input type="checkbox" checked={manual.has(c.id)}
+              onChange={(e) => setManual((prev) => { const n = new Set(prev); e.target.checked ? n.add(c.id) : n.delete(c.id); return n; })} /> {c.id}: {c.text}</label>
+          ))}
+        </fieldset>
+      )}
+      <div className="actions">
+        <ConfirmButton label="Terima (UAT)" confirmLabel="Ya, terima target ini" disabled={!allManual}
+          intent={`${identity}:${ticket.revision}`}
+          onConfirm={async () => {
+            await command<"uat">(`/tickets/${ticket.id}/uat-decisions`, {
+              expected_revision: ticket.revision, candidate_id: candidate.id, scope_version: ticket.scope_version,
+              target_artifact_id: candidate.target_artifact_id!, target_digest: candidate.target_digest!,
+              verification_id: verification.id, evidence_ids: candidate.evidence_ids, manual_uac_ids: [...manual] });
+          }} />
+        {!allManual && <span className="muted">Konfirmasi semua UAC manual lebih dulu.</span>}
+      </div>
+      <form className="ask" onSubmit={async (e) => {
+        e.preventDefault();
+        const result = await command<"changes">(`/tickets/${ticket.id}/request-changes`, {
+          expected_revision: ticket.revision, candidate_id: candidate.id, reason: reason.trim() });
+        if (result) setReason("");
+      }}>
+        <label>Minta perubahan<textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} /></label>
+        <button type="submit" disabled={!reason.trim()}>Kirim permintaan perubahan</button>
+      </form>
+    </div>
+  );
+}
+
+function Approvals({ detail }: { detail: TicketDetail }) {
+  const { command, board } = useWorkspace();
+  const { ticket } = detail;
+  const [cycles, setCycles] = useState(1);
+  const [fingerprint, setFingerprint] = useState("");
+  const [reason, setReason] = useState("");
+  const needsHuman = typeof ticket.blocker === "object" && ticket.blocker !== null && !Array.isArray(ticket.blocker) && ticket.blocker.reason === "needs_human";
+  return (
+    <section aria-labelledby="appr-h">
+      <h3 id="appr-h">Persetujuan dan waiver</h3>
+      {detail.approvals.length === 0 ? <p className="muted">Belum ada persetujuan tercatat.</p> : (
+        <ul className="plain">
+          {detail.approvals.map((a) => {
+            const details = a.details && typeof a.details === "object" && !Array.isArray(a.details) ? a.details : {};
+            const waived = a.type.includes("waiver") || details.status === "waived";
+            return (
+              <li key={a.id} data-approval={a.type}>
+                <Badge tone={waived ? "warn" : "good"}>{waived ? "waiver baseline" : a.type}</Badge>{" "}
+                {a.scope_version !== null && <span className="muted">scope v{a.scope_version} · </span>}
+                {a.target_digest && <span className="muted">target <code>{short(a.target_digest, 12)}</code> · </span>}
+                {a.evidence_ids.length > 0 && <span className="muted">{a.evidence_ids.length} bukti</span>}
+                {waived && typeof details.reason === "string" && <div className="muted">Alasan: {details.reason}</div>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {needsHuman && (
+        <form className="ask" onSubmit={async (e) => {
+          e.preventDefault();
+          await command<"repair">(`/tickets/${ticket.id}/repair-authorizations`, { expected_revision: ticket.revision, additional_cycles: cycles });
+        }}>
+          <label>Izinkan siklus perbaikan tambahan
+            <input type="number" min={1} max={3} step={1} value={cycles} onChange={(e) => setCycles(Math.min(3, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))} />
+          </label>
+          <button type="submit">Izinkan {cycles} siklus</button>
+        </form>
+      )}
+      <details>
+        <summary>Waiver baseline (keputusan khusus pengguna)</summary>
+        <form className="form" onSubmit={async (e) => {
+          e.preventDefault();
+          if (!board) return;
+          const result = await command<"waiver">(`/projects/${board.project.id}/baseline-waivers`, {
+            expected_revision: ticket.revision, ticket_id: ticket.id, fingerprint_artifact_id: fingerprint.trim(), reason: reason.trim() });
+          if (result) { setFingerprint(""); setReason(""); }
+        }}>
+          <p className="muted">Waiver mengikat satu fingerprint kegagalan baseline yang sudah tercatat; tidak mengubah hasil QA.</p>
+          <label>ID artefak fingerprint<input value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} /></label>
+          <label>Alasan<textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} /></label>
+          <button type="submit" disabled={!fingerprint.trim() || !reason.trim()}>Catat waiver</button>
+        </form>
+      </details>
+    </section>
+  );
+}
+
+function Work({ detail }: { detail: TicketDetail }) {
+  const { board } = useWorkspace();
+  const runs = (board?.runs ?? []).filter((r) => r.ticket_id === detail.ticket.id);
+  if (runs.length === 0) return null;
+  return (
+    <section aria-labelledby="work-h">
+      <h3 id="work-h">Status pekerjaan</h3>
+      <ul className="plain">
+        {runs.map((r) => (
+          <li key={r.id}>{senderLabel(`agent:${r.role}`)} · {r.stage} · <Badge tone={r.status === "failed" ? "bad" : r.status.startsWith("waiting") ? "warn" : "info"}>{RUN_STATUS_LABEL[r.status]}</Badge>{" "}
+            {r.fake && <FakeBadge />}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Messages({ messages }: { messages: Message[] }) {
+  const visible = messages.filter((m) => !["scope_proposal", "scope_decision"].includes(String(m.metadata.intent)));
+  return (
+    <section aria-labelledby="msg-h">
+      <h3 id="msg-h">Pesan dan handoff</h3>
+      {visible.length === 0 ? <p className="muted">Belum ada pesan.</p> : (
+        <ol className="messages compact">
+          {visible.map((m) => (
+            <li key={m.id}><strong>{senderLabel(m.sender)}</strong> <span className="muted">{when(m.created_at)}</span>
+              {m.metadata.fake === true && <> <FakeBadge /></>}<p>{m.body}</p></li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}

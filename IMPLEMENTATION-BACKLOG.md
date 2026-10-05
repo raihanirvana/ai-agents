@@ -59,7 +59,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-004 | Worker persisten, dua lane, dan recovery | DEV-003 | DONE |
 | DEV-007 | Soul, context, model client, dan pesan antar-agent | DEV-002, DEV-004 | DONE |
 | DEV-008 | API aplikasi, autentikasi lokal, dan SSE | DEV-003, DEV-004, DEV-007 | DONE |
-| DEV-009 | GUI board, chat PO, dan review scope | DEV-008 | TODO |
+| DEV-009 | GUI board, chat PO, dan review scope | DEV-008 | DONE |
 | DEV-010 | Pipeline lead/developer/QA dengan bukti test | DEV-003, DEV-006, DEV-007 | TODO |
 | DEV-011 | Preview kandidat dan feedback UAT | DEV-008, DEV-009, DEV-010 | TODO |
 | DEV-012 | Integrasi accepted, dependency, dan recovery Git/DB | DEV-005, DEV-010, DEV-011 | TODO |
@@ -1163,6 +1163,56 @@ reconnect/replay, dan penolakan akses dari origin preview. Browser/header captur
 preview uji membuktikan session kontrol tidak terkirim; CORS test saja tidak cukup.
 
 ## DEV-009 — GUI board, chat PO, dan review scope
+
+### Catatan pengerjaan
+Status: DONE setelah perbaikan review Codex. Pelaksana awal: Claude (Sonnet 5.5), 2026-10-05.
+Review Codex menemukan regresi pada intent approval, fencing editor, dan payload UAT.
+Rencana perbaikan: ikat konfirmasi/checklist ke identitas scope/target; pertahankan revision
+draf dan evidence kandidat lengkap; uji retry command, input chat, brief, dan SSE.
+File: komponen GUI, workspace/client, `tests/web-browser/review-*`, laporan review.
+Rencana: GUI React di `apps/web/src` memakai `ApiClient` DEV-008 (tanpa state lokal sebagai
+sumber kebenaran): login code lokal, daftar/buat proyek + brief, board per phase yang
+dimuat dari snapshot dan diperbarui lewat SSE (`watch`), drag/drop hanya memanggil
+`priority`, panel detail tiket (scope version, UAC, dependency, pesan, kandidat/bukti,
+blocker, label fake), chat PO (breakdown/revise/note) dengan diff proposal accept/reject,
+approval batch scope yang eksplisit, daftar run/activity (waiting_input/quota, stop dengan
+body `{}` tanpa `expected_revision`), serta tampilan conflict/error terstruktur.
+File rencana: `apps/web/src/**`, `tests/web-browser/**` + `playwright.web.config.ts`,
+update `tests/smoke/health.spec.ts`, `docs/decisions/gui.md`, handoff DEV-009.
+Scope tetap DEV-009: tanpa kantor Three.js, preview (DEV-011), UAT/release execution.
+Belum ada commit/push.
+
+Hasil: GUI login/proyek/brief, board dengan drag/drop prioritas dan approval batch, detail
+tiket (scope version, diff usulan PO, dependency, kandidat/bukti/UAT/waiver), chat PO dan
+aktivitas run (stop dengan body `{}` tanpa `expected_revision`) dibuat. Pemetaan AC ke bukti,
+perintah, dan known issues: [DEV-009-handoff](docs/reviews/DEV-009-handoff.md). Keputusan:
+[GUI](docs/decisions/gui.md).
+
+Verifikasi (Windows): `npm run build` lulus; `playwright.web.config.ts` 9 tes lulus (diulang
+3x = 27 lulus): 3 melawan API/scheduler/runtime nyata dengan FakeProvider berlabel (brief ->
+proposal -> revisi tolak/terima -> edit -> approval batch -> reload, conflict 409, stop), 6 dengan
+respons API tiruan sesuai kontrak (quota/input/evidence hilang/UAT/waiver/layar 3 ukuran).
+Smoke DEV-001 5 lulus dan browser DEV-008 3 lulus. Uji mutasi stop-dengan-revision menggagalkan
+tes. Bug yang ditemukan tes: `Run.result` null membuat render crash (diperbaiki, tipe kontrak
+diperbarui, ditambah `CrashGuard`). Pytest tidak dijalankan ulang: backend tidak berubah.
+Keterbatasan: tanpa UI release (DEV-014), PO/model nyata belum diverifikasi (DEV-015), state quota/
+input hanya diuji lewat respons tiruan. Belum commit/push; tiket berikutnya DEV-010 tidak dikerjakan.
+
+Review Codex 2026-10-05: verdict awal **NEEDS_FIX**, tiket sempat dibuka IN_PROGRESS.
+15 kelompok temuan diperbaiki: intent approval scope/batch dan UAT/checklist dipin;
+revision draf scope/brief dibekukan; deskripsi/revert dipertahankan; evidence UAT termasuk
+preview smoke; retry 5xx memakai key yang sama; pertanyaan blocking masuk chat dan dijawab
+ke run yang tepat; gap cursor/reconnect diperbaiki; balasan handoff dan perubahan availability
+artefak terlihat; log generation 0, batas repair 3, serta diff historis diperbaiki.
+Laporan: [DEV-009-review](docs/reviews/DEV-009-review.md).
+Verifikasi akhir Windows: build lulus, GUI **29 lulus** (9 awal + 20 regresi; 5 tes API nyata,
+24 respons tiruan), smoke **5 lulus**, browser DEV-008 **3 lulus**, diff whitespace bersih.
+Probe kode staged menunjukkan UAT 409 sebelum fix -> 200 setelah fix dan draf lama
+menimpa update dengan 200 sebelum fix -> 409 setelah fix. Fixture UAT memakai receipt
+sintetis berlabel contract fixture, bukan QA nyata/provider nyata. Pytest backend tidak
+dijalankan ulang karena kode backend produk tidak berubah. Implementasi kembali DONE;
+review perbaikan menunggu re-review independen, R5 belum ditutup. Perbaikan belum di-stage;
+tidak ada commit/push.
 
 **Tujuan:** pengguna bisa memberi brief dan review tiket sebelum coding.
 
