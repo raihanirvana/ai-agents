@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.persistence import Database, migrate
 from app.persistence.__main__ import main as cli
-from app.persistence.models import ENTITY_TABLES
+from app.persistence.models import ENTITY_TABLES, SYSTEM_TABLES
 
 
 def tables(path):
@@ -25,7 +25,7 @@ def test_sqlite_has_json_functions():
 def test_empty_database_is_built_with_the_twelve_entities(tmp_path):
     path = tmp_path / "new.sqlite3"
     migrate.upgrade(path)
-    assert tables(path) - {"alembic_version", "sqlite_sequence"} == set(ENTITY_TABLES)
+    assert tables(path) - {"alembic_version", "sqlite_sequence"} == set(ENTITY_TABLES + SYSTEM_TABLES)
     assert len(ENTITY_TABLES) == 12
     assert migrate.current_revision(path) == migrate.head_revision()
 

@@ -1,19 +1,6 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+"""Importing the API does not open a database or mint credentials."""
+from .config import API_PORT, CORS_ORIGINS
+from .http.application import create_app
+from .http.security import Settings
 
-from .config import CORS_ORIGINS
-
-app = FastAPI(title="AI Software Development Team API", version="0.1.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["GET"],
-    allow_headers=["Accept", "Content-Type"],
-)
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+app = create_app(settings=Settings(port=API_PORT, origins=tuple(CORS_ORIGINS)))

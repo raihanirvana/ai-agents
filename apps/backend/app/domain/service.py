@@ -14,6 +14,35 @@ class Workflow:
     def __init__(self, db: Database, store: ArtifactStore):
         self.db, self.store = db, store
 
+    def create_project(self, actor, *, name, mode, brief="", repo_ref=None):
+        if actor.role != "user" or not name.strip() or mode not in ("new", "existing"):
+            raise Invalid("user project name and valid mode required")
+        if mode == "existing" and not repo_ref:
+            raise Invalid("existing project requires a repository reference")
+        with self.db.write() as s:
+            project = Project(id=actor.project_id, name=name, mode=mode, brief=brief, repo_ref=repo_ref,
+                              workflow={"onboarding": "pending"})
+            s.add(project)
+            s.flush()
+            self._event(s, actor, "project.created", project, {"mode": mode})
+            return project
+
+    def update_brief(self, actor, expected_revision, brief):
+        with self.db.write() as s:
+            self._permit(s, actor, "user")
+            project = self._row(s, Project, actor.project_id, actor)
+            return apply_change(s, Project, project.id, expected_revision=expected_revision,
+                values={"brief": brief, "brief_version": project.brief_version + 1},
+                event=EventSpec("project.brief_changed", actor.id))
+
+    def set_priority(self, actor, ticket_id, expected_revision, priority):
+        with self.db.write() as s:
+            self._permit(s, actor, "user")
+            t = self._ticket(s, actor, ticket_id, expected_revision)
+            if type(priority) is not int or not -10000 <= priority <= 10000:
+                raise Invalid("priority must be a bounded integer")
+            return self._change(s, actor, t, "priority_changed", priority=priority)
+
     def _row(self, s, model, identity, actor):
         row = s.get(model, identity)
         if row is None:

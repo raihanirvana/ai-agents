@@ -258,8 +258,8 @@ class ContextBuilder:
                           cap=self.limits.messages_tokens, droppable="oldest")
         for m in rows:
             intent = (m.meta or {}).get("intent")
-            if intent == "summary":
-                continue
+            if intent == "summary" or (m.meta or {}).get("runtime_log"):
+                continue  # summaries have their own layer; supervisor log lines are never conversation
             if m.kind not in CHAT_KINDS and not (m.kind == "system" and intent in SYSTEM_INTENTS):
                 continue
             # A ticket run sees its own ticket's messages; project-level chat belongs to project runs.

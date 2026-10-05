@@ -287,3 +287,19 @@ def test_messages_with_identical_timestamps_keep_their_thread_order(agent_env):
     assert positions == sorted(positions)
     layer = next(l for l in snap.manifest["layers"] if l["name"] == "recent_messages")
     assert [item["seq"] for item in layer["items"]] == [1, 2, 3, 4]
+
+
+def test_supervisor_log_lines_never_enter_the_model_context(agent_env):
+    """Regression (DEV-008 review): run logs are stored as messages but are not conversation."""
+    env = agent_env
+    ticket = env.approved_ticket()
+    dev = env.ctx(env.job("developer", "implement", ticket=ticket, stage="development", lane="execution",
+                          runtime="fake"))
+    dev.log("tool read_file")
+    dev.log("context abc ~1200 tokens (estimate), 1 gaps")
+    say(env, ticket.id, "Please keep prices in cents.")
+    snap = build(env, lead(env, ticket))
+    assert "Please keep prices in cents." in snap.user  # real conversation is still there
+    assert "system:supervisor" not in snap.user and "tool read_file" not in snap.user
+    layer = next(l for l in snap.manifest["layers"] if l["name"] == "recent_messages")
+    assert len(layer["items"]) == 1

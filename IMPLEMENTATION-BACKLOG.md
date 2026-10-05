@@ -58,7 +58,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-003 | Domain tiket, versi scope, dan approval | DEV-002 | DONE |
 | DEV-004 | Worker persisten, dua lane, dan recovery | DEV-003 | DONE |
 | DEV-007 | Soul, context, model client, dan pesan antar-agent | DEV-002, DEV-004 | DONE |
-| DEV-008 | API aplikasi, autentikasi lokal, dan SSE | DEV-003, DEV-004, DEV-007 | TODO |
+| DEV-008 | API aplikasi, autentikasi lokal, dan SSE | DEV-003, DEV-004, DEV-007 | DONE |
 | DEV-009 | GUI board, chat PO, dan review scope | DEV-008 | TODO |
 | DEV-010 | Pipeline lead/developer/QA dengan bukti test | DEV-003, DEV-006, DEV-007 | TODO |
 | DEV-011 | Preview kandidat dan feedback UAT | DEV-008, DEV-009, DEV-010 | TODO |
@@ -1090,6 +1090,52 @@ otorisasi tools, serta request/reply dengan attempt yang sudah dibatalkan.
 Uji duplicate answers, restart waiting, revisi scope, dan akumulasi usage.
 
 ## DEV-008 — API aplikasi, autentikasi lokal, dan SSE
+
+### Catatan pengerjaan
+Status: DONE. Pelaksana: Codex, 2026-10-05. Review Claude selesai; perbaikan diverifikasi Codex (R5 terbuka).
+Rencana: API factory dengan dependency DB/domain/queue; session lokal persisten dan
+credential runtime terpisah; receipt command atomik untuk revision/idempotency;
+query board/detail/message/run/evidence; SSE replay dari events dengan refresh snapshot;
+kontrak TypeScript dan pengujian HTTP, concurrency/restart, serta capture header browser preview.
+File rencana: `app/http/`, `app/api.py`, migration/model persistence pendukung,
+`tests/http/`, `contracts/api/`, browser checks, dan `docs/decisions/api.md`.
+Scope tetap DEV-008; pipeline/preview/release execution yang belum tersedia ditandai
+NotWired, tidak disimulasikan sebagai hasil nyata. Belum ada commit/push untuk tiket ini.
+
+Hasil: API/auth/session runtime/receipt atomik, query board/detail/chat/run/evidence,
+SSE persisten dan kontrak TypeScript telah dibuat. Pemetaan tujuh AC, file baru,
+perintah verifikasi dan known issues: [DEV-008-handoff](docs/reviews/DEV-008-handoff.md).
+Keputusan dan endpoint: [API](docs/decisions/api.md).
+
+Verifikasi: HTTP akhir 48 lulus di Windows dan WSL; suite backend lengkap WSL
+652 lulus termasuk Docker (sebelum empat tambahan tes terakhir, yang kemudian lulus
+pada HTTP suite akhir). Build frontend dan browser HTTP/Chromium lulus. Capture
+localhost preview membuktikan Cookie/Authorization/CSRF absen, Origin preview
+OPTIONS ditolak 403; native Last-Event-ID reconnect dan stream logout teruji.
+Suite Windows luas masih menemukan flaky DEV-004 crash/retry yang sudah diketahui;
+hasil lengkap dan failure run awal dicatat pada handoff, tidak diklaim hijau.
+Belum di-stage/commit/push. Tidak menjalankan provider nyata atau membuka R5 sebagai
+reviewed. Tiket berikutnya sesuai dependency: DEV-009, tidak dikerjakan di scope ini.
+
+Review DEV-008 oleh Claude (Opus 5.5, 2026-10-05): **NEEDS_FIX** pada review awal, bukan penutupan R5. Kontrol akses
+(Host/Origin/CSRF, pemisahan cookie dan bearer runtime, receipt atomik, SSE) tidak ditemukan celah. Temuan, semuanya
+direproduksi dengan DB/artifact asli lalu diperbaiki oleh reviewer atas instruksi pengguna: (P1) stop gagal 409 karena
+heartbeat menaikkan revision job, kini tanpa `expected_revision`; (P2) stop pada run tidak aktif melapor sukses, kini 409;
+(P2) log runtime tercampur di daftar pesan dan detail tiket; (P2) log runtime masuk ke prompt model (konteks DEV-007);
+(P3) `board` kuadratik terhadap jumlah job; (P3) respons guard tanpa header pengerasan; (P3) client TS melempar
+`SyntaxError` untuk error non-JSON. Regresi baru: 8 backend (gagal di tree awal) dan 1 browser. Setelah fix: Windows
+513 passed/8 skipped, WSL backend lengkap 664 passed, build dan Chromium 3 passed. DEV-008 tetap **DONE** dengan perbaikan
+yang **menunggu re-review independen**. Detail, reproduksi, observasi (tanpa throttling login, tanpa GC session/receipt,
+tanpa paging mundur pesan) dan pemetaan AC:
+[docs/reviews/DEV-008-review.md](./docs/reviews/DEV-008-review.md).
+
+Recheck perbaikan reviewer oleh Codex (2026-10-05): R008-01–07 dibaca ulang dan
+tidak ditemukan blocker untuk commit. Windows `tests/http` + `tests/agents/test_context.py`
+74 passed, build frontend lulus, Chromium 3 passed, diff checks lulus. Suite lengkap
+tidak diulang; 513 passed/8 skipped Windows dan 664 passed WSL di atas adalah hasil
+Claude. Pengguna mengotorisasi commit/push DEV-008 setelah recheck. Ini verifikasi
+perbaikan, bukan penutupan independent review R5. Kontrak DEV-009: stop body `{}`,
+tanpa `expected_revision`; key yang sama dipakai untuk retry command yang sama.
 
 **Tujuan:** UI mendapat kontrak command/query dan event yang konsisten.
 

@@ -499,3 +499,38 @@ class Event(Base):
 
 ENTITY_TABLES = ("projects", "tickets", "ticket_versions", "approvals", "dependencies", "messages",
                  "jobs", "candidates", "verifications", "artifacts", "releases", "events")
+
+
+class LocalSession(Base):
+    __tablename__ = "local_sessions"
+    token_hash: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+
+
+class RuntimeCredential(Base):
+    __tablename__ = "runtime_credentials"
+    token_hash: Mapped[str] = mapped_column(String, primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False)
+    owner: Mapped[str] = mapped_column(String, nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    __table_args__ = (CheckConstraint("generation >= 1", name="generation"),)
+
+
+class ApiCommand(Base):
+    """Receipt committed atomically with the command, shared across processes and restarts."""
+    __tablename__ = "api_commands"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    actor_key: Mapped[str] = mapped_column(String, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String, nullable=False)
+    request_hash: Mapped[str] = mapped_column(String, nullable=False)
+    response: Mapped[Any] = mapped_column(Json, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+    __table_args__ = (UniqueConstraint("actor_key", "idempotency_key"), _json("response", "object"))
+
+
+SYSTEM_TABLES = ("local_sessions", "runtime_credentials", "api_commands")

@@ -1,8 +1,9 @@
 # AI Software Development Team
 
-Skeleton lokal untuk platform AI Software Development Team. MVP ini berisi
-frontend React, health API FastAPI, dan worker terpisah dengan antrean job persisten
-(DEV-004). Runtime agent nyata belum di-wire ke worker (DEV-010).
+Platform AI Software Development Team dengan frontend React, API lokal
+berautentikasi (DEV-008), domain workflow/approval, dan worker dengan antrean
+persisten. PO/lead terstruktur tersedia (DEV-007); pipeline developer/QA nyata
+menunggu DEV-010 dan GUI board/chat menunggu DEV-009.
 
 ## Toolchain yang digunakan
 
@@ -74,7 +75,38 @@ Untuk mencoba production build control UI, jalankan `npm run build` lalu
 `WEB_PREVIEW_PORT`). Jalankan API juga.
 
 Worker/API berhenti dengan Ctrl+C (SIGINT); SIGTERM juga ditangani worker.
-Tidak dibutuhkan provider key, Hermes, container engine, database, atau VPS.
+API membuat SQLite lokal dan menjalankan migrasi saat startup. Health/fondasi
+tidak membutuhkan provider key, Hermes, container engine, atau VPS.
+
+## API lokal, login, dan SSE (DEV-008)
+
+Saat pertama start, API membuat login code pada `data/auth/login-code` (atau
+`DATA_DIR/auth/login-code`). Baca file itu secara lokal; jangan masukkan ke Git,
+chat, atau variabel `VITE_`. GUI login belum dibuat; client yang disiapkan untuk
+DEV-009 ada di `apps/web/src/api/client.ts`. Jalankan `client.login(code)` dari
+origin web `127.0.0.1` yang diizinkan. Cookie HttpOnly tetap di browser; CSRF
+disimpan di memori client dan diperoleh kembali melalui `client.session()`.
+
+Command memakai `Idempotency-Key` yang sama saat retry tindakan yang sama,
+beserta `expected_revision` dari snapshot untuk perubahan entity. Approval scope,
+UAT, release, dan waiver tetap command pengguna. SSE pada
+`/projects/{id}/events` mengirim event database; refresh snapshot saat
+`snapshot_required`. Penjelasan endpoint, error, input dan credential runtime:
+[keputusan API](docs/decisions/api.md).
+
+```sh
+cd apps/backend
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/http -q
+.venv/bin/python -m app.http.contract
+# Dari root, Windows (server fixture memakai .venv/Scripts/python.exe):
+npx playwright test --config playwright.api.config.ts
+# Linux/macOS: API_TEST_PYTHON=apps/backend/.venv/bin/python npx playwright test --config playwright.api.config.ts
+```
+
+Tes HTTP/worker memakai provider fake berlabel, tanpa panggilan model nyata.
+Tes browser memakai tiga server fixture sementara dan merekam header preview
+tanpa menyimpan credential. Hasil sanitasi: `data/dev008/browser-results.json`.
 
 ## Regression smoke tests
 
