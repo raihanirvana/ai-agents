@@ -236,6 +236,7 @@ class Job(Base):
     lease_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     lease_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     heartbeat_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    available_at: Mapped[datetime | None] = mapped_column(UtcDateTime)  # earliest claim (backoff/quota)
     waiting_request_id: Mapped[str | None] = mapped_column(ForeignKey("messages.id"))
     runtime_ref: Mapped[Any] = mapped_column(Json, nullable=True)
     context_artifact_id: Mapped[str | None] = mapped_column(ForeignKey("artifacts.id"))

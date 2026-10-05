@@ -1,8 +1,50 @@
+"""Worker process: the persistent job supervisor (DEV-004).
+
+    python -m app.worker [--runtime none|fake] [--db PATH] [--worker-id ID]
+
+With --runtime none (default) the worker reconciles leases and quota waits but claims no
+work: the real Hermes adapter is wired in DEV-010. --runtime fake runs the LABELLED fake
+runtime for local dry runs; its results are never real provider or QA evidence.
+"""
+import argparse
+import os
 import signal
 import threading
+from pathlib import Path
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m app.worker", description=__doc__)
+    parser.add_argument("--db", type=Path)
+    parser.add_argument("--artifacts", type=Path)
+    parser.add_argument("--runtime", choices=("none", "fake"), default=os.getenv("WORKER_RUNTIME", "none"))
+    parser.add_argument("--worker-id")
+    parser.add_argument("--lease-s", type=float, default=float(os.getenv("WORKER_LEASE_S", "30")))
+    args = parser.parse_args(argv)
+
+    from app.config import ARTIFACT_DIR, DATABASE_PATH
+    from app.domain import Workflow
+    from app.persistence import ArtifactStore, Database, migrate
+    from app.workers import JobQueue, ProviderLimiter, Supervisor, WorkerConfig
+
+    db_path, artifact_dir = args.db or DATABASE_PATH, args.artifacts or ARTIFACT_DIR
+    if not Path(db_path).exists() or migrate.current_revision(db_path) != migrate.head_revision():
+        print(f"Database {db_path} belum di revisi terbaru; jalankan: python -m app.persistence upgrade", flush=True)
+        return 2
+
+    db, store = Database(db_path), ArtifactStore(artifact_dir)
+    workflow = Workflow(db, store)
+    queue = JobQueue(db, lease_s=args.lease_s, startable=workflow.startable)
+    runtimes = {}
+    if args.runtime == "fake":
+        from app.adapters.runtime.fake import FakeRuntime
+        runtimes["fake"] = FakeRuntime()
+        print("PERINGATAN: runtime FAKE aktif; hasilnya bukan bukti provider/QA nyata.", flush=True)
+    config = WorkerConfig(**({"worker_id": args.worker_id} if args.worker_id else {}),
+                          heartbeat_s=max(0.5, args.lease_s / 3))
+    supervisor = Supervisor(db, store, runtimes, queue=queue, limiter=ProviderLimiter(), config=config,
+                            workflow=workflow)
+
     stopped = threading.Event()
 
     def request_stop(signum: int, _frame: object) -> None:
@@ -11,10 +53,15 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
-    print("Worker siap; menunggu job (belum ada scheduler).", flush=True)
-    stopped.wait()
+    claims = ", ".join(runtimes) or "tidak ada (hanya rekonsiliasi lease/quota)"
+    print(f"Worker siap ({config.worker_id}); runtime: {claims}.", flush=True)
+    try:
+        supervisor.run_forever(stopped)
+    finally:
+        db.dispose()
     print("Worker berhenti dengan tertib.", flush=True)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,8 +1,8 @@
 # AI Software Development Team
 
 Skeleton lokal untuk platform AI Software Development Team. MVP ini berisi
-frontend React, health API FastAPI, dan entry point worker terpisah. Belum ada
-scheduler atau agent runtime.
+frontend React, health API FastAPI, dan worker terpisah dengan antrean job persisten
+(DEV-004). Runtime agent nyata belum di-wire ke worker (DEV-010).
 
 ## Toolchain yang digunakan
 
@@ -50,7 +50,7 @@ Jalankan tiap proses pada terminal terpisah dari root checkout.
 cd apps/backend
 ./.venv/bin/python -m app
 
-# Terminal 2: worker terpisah, menunggu tanpa job
+# Terminal 2: worker terpisah (perlu database: python -m app.persistence upgrade)
 cd apps/backend
 ./.venv/bin/python -m app.worker
 
@@ -201,3 +201,21 @@ cd apps/backend
 Actor dibuat authentication/supervisor tepercaya, bukan role dari request klien.
 Kontrak receipt, izin, pemetaan AC, cara menjalankan, dan batas implementasi:
 [docs/decisions/workflow.md](docs/decisions/workflow.md).
+
+## Worker dan antrean job (DEV-004)
+
+`python -m app.worker` sekarang menjalankan supervisor job persisten: claim/lease/generation di
+database, lane interaktif dan satu slot execution, heartbeat, retry terbatas, waiting input/quota,
+pembatalan yang menghentikan process group, dan recovery setelah worker mati. Database harus sudah
+di revisi terbaru (`python -m app.persistence upgrade`).
+
+```sh
+cd apps/backend
+./.venv/bin/python -m app.worker                 # tanpa runtime: hanya rekonsiliasi lease/quota
+./.venv/bin/python -m app.worker --runtime fake  # dry run berlabel FAKE, bukan bukti QA/provider
+./.venv/bin/python -m pytest tests/workers -q
+```
+
+Supervisi proses memerlukan host POSIX; di Windows jalankan worker di WSL. Runtime Hermes nyata
+di-wire pada DEV-010. Rancangan dan batasnya:
+[docs/decisions/workers.md](docs/decisions/workers.md).

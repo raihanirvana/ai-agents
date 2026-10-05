@@ -56,7 +56,7 @@ Kontrak review Astra diterapkan pada tiket berikut:
 | DEV-006 | Spike runtime nyata dan keputusan adapter | DEV-005 | DONE |
 | DEV-002 | Persistence, migrasi, dan event | DEV-001 | DONE |
 | DEV-003 | Domain tiket, versi scope, dan approval | DEV-002 | DONE |
-| DEV-004 | Worker persisten, dua lane, dan recovery | DEV-003 | TODO |
+| DEV-004 | Worker persisten, dua lane, dan recovery | DEV-003 | DONE |
 | DEV-007 | Soul, context, model client, dan pesan antar-agent | DEV-002, DEV-004 | TODO |
 | DEV-008 | API aplikasi, autentikasi lokal, dan SSE | DEV-003, DEV-004, DEV-007 | TODO |
 | DEV-009 | GUI board, chat PO, dan review scope | DEV-008 | TODO |
@@ -467,6 +467,104 @@ approval actor salah, dependency siklus/revalidasi, target build yang berbeda,
 serta pembatasan aktor dan fingerprint waiver baseline.
 
 ## DEV-004 — Worker persisten, dua lane, dan recovery
+
+### Catatan pengerjaan
+Status: DONE (review/fix Codex selesai, 2026-10-05).
+Rencana review: verifikasi fencing, cleanup/recovery/resume race, idempotency,
+budget kumulatif/token, evidence/ownership. Tambahkan regresi konkret, perbaiki,
+jalankan suite Windows/WSL, catat laporan lalu commit/push sesuai instruksi pengguna.
+Pelaksana/sesi: Claude (Opus 5.5), sesi Windows + WSL 2026-10-05
+Rencana: antrean persisten claim/lease/generation, supervisor dua lane non-blocking, pembatalan
+revoke-lalu-stop, recovery dengan verifikasi kepemilikan proses, retry terbatas, waiting input/
+quota, cap kumulatif per scope, limiter provider, fake runtime berlabel, worker CLI.
+Dependency DEV-003 DONE (diff perbaikan review DEV-003 belum di-re-review independen).
+
+File hasil: `apps/backend/app/workers/{__init__,queue,limiter,runtime,supervisor}.py`,
+`apps/backend/app/adapters/{__init__,runtime/__init__,runtime/fake}.py`, `apps/backend/app/worker.py`
+(skeleton DEV-001 diganti supervisor), `apps/backend/migrations/versions/0003_job_scheduling.py` +
+kolom `jobs.available_at` di `models.py`, helper baca `Workflow.startable` di
+`app/domain/service.py` (aturan sama dengan `bind_attempt`), `tests/workers/{__init__,conftest,
+test_queue,test_supervisor,test_processes}.py`, assertion head revisi di
+`tests/domain/test_transactions.py`, `.env.example`, `README.md`, `docs/decisions/workers.md`.
+
+Pemetaan AC ke bukti (`apps/backend/tests/workers/`):
+- AC1 satu slot execution, interaktif tetap jalan, heartbeat/cancel: `test_single_execution_slot_is_counted_in_the_database`,
+  `test_only_one_execution_job_runs_at_a_time`, `test_interactive_work_is_served_while_a_long_execution_job_runs`,
+  `test_cancel_while_a_tool_is_active_revokes_then_stops_and_keeps_the_log`.
+- AC2 claim eligible, dua worker tidak menyelesaikan job sama: `test_two_claimers_never_take_the_same_job`,
+  `test_ticket_work_starts_only_when_the_domain_says_it_is_eligible`, `test_claim_honours_runtime_and_available_at`.
+- AC3 hasil/tool call attempt lama ditolak: `test_stale_generation_cannot_change_anything`,
+  `test_borrowed_or_forged_lease_is_rejected`, `test_a_revoked_attempts_late_result_is_rejected`, edit scope
+  domain mencabut attempt development yang berjalan (test eligibility di atas).
+- AC4 cancel mencabut credential, menghentikan process group/container, menyimpan log:
+  `test_cancel_stops_the_whole_process_group`, `test_cancel_revokes_and_archives_the_attempts_workspace_run`
+  (credential DEV-005 ditolak setelah cancel, `ARCHIVE-MANIFEST.json` ada), log artifact pada semua cara selesai.
+- AC5 crash/restart, retry terbatas, needs_human, ownership preview terpisah:
+  `test_expired_lease_is_fenced_then_retried_once_then_needs_human`,
+  `test_recovery_after_a_dead_worker_stops_its_verified_processes_then_retries`,
+  `test_recovery_never_kills_a_process_that_is_not_the_attempts`, `test_unverifiable_leftover_processes_block_the_retry`,
+  `test_a_crashing_runtime_is_retried_once_and_usage_accumulates`.
+- AC6 status berbeda, request/checkpoint sebelum slot dilepas, resume generation baru:
+  `test_input_request_and_checkpoint_are_persisted_before_the_slot_is_released`,
+  `test_answer_resumes_exactly_once_with_a_new_generation`, `test_answer_after_scope_change_cancels_instead_of_resuming`,
+  `test_recovery_ignores_jobs_waiting_for_input`, `test_waiting_for_input_survives_a_restart_and_resumes_once`.
+- AC7 cap durasi/model/tool/token, usage tidak reset, limiter interaktif dan quota:
+  `test_fake_model_that_keeps_calling_tools_stops_at_the_cap`, `test_active_time_cap_stops_the_job`,
+  `test_budget_is_cumulative_across_retries_and_stops_at_the_cap`, `test_extending_a_budget_needs_a_user_decision_and_keeps_usage`,
+  `test_usage_per_ticket_scope_survives_retries`, `test_failed_provider_call_is_counted_and_its_usage_is_unknown`,
+  `test_interactive_capacity_is_reserved_in_the_provider_limiter`, `test_shared_provider_quota_puts_every_affected_job_in_waiting_quota`,
+  `test_quota_wait_is_visible_and_promoted_after_retry_time`.
+- AC8 fake berlabel, bukan QA pass: `test_enqueue_is_idempotent_and_fake_is_labelled`,
+  `test_fake_job_completes_labelled_and_its_log_is_archived` (`fake_provider=true`, semua event `fake`); domain
+  DEV-003 menolak receipt QA ber-`fake_provider`.
+
+Verifikasi aktual (dari `apps/backend`):
+- WSL suite backend lengkap `/root/aiagent-dev002-venv/bin/python -m pytest -q`: **420 passed**, 197 detik
+  (376 sebelumnya + 44 worker; Docker nyata, tanpa skip).
+- Windows `.venv/Scripts/python.exe -m pytest tests/domain tests/persistence tests/workers -q`:
+  **271 passed, 6 skipped** (1 symlink + 5 test process group yang butuh POSIX).
+- Mutation check di WSL (dipulihkan setelahnya): tanpa fence generation 2 test gagal; budget di-reset per retry
+  1 gagal; slot hanya di memori 2 gagal; reaper tanpa cek label 1 gagal.
+- CLI di WSL: DB belum dimigrasi -> exit 2 dengan pesan; `--runtime none` tidak meng-claim job, SIGINT exit 0;
+  `--runtime fake` menyelesaikan 2 job, SIGTERM exit 0, 8/8 event job berlabel fake.
+- `python -m app.persistence check` pada DB baru: revisi 0003, sehat. Test upgrade DB 0001 berisi data kini
+  naik ke head (0003) dan turun lagi ke 0001 dengan trigger/cursor utuh.
+
+Temuan saat pengerjaan (diperbaiki): reaper awal hanya memeriksa leader group sehingga anak yatim bisa
+lolos (kini semua anggota group diperiksa, kepemilikan campuran tidak dibunuh); call provider yang gagal
+tidak ditandai usage `unknown`.
+
+Keterbatasan: hanya fake runtime (Hermes nyata di DEV-010); supervisi proses POSIX-only (WSL di Windows);
+deteksi cancel mengikuti interval heartbeat; limiter/quota per proses supervisor (status job tetap
+persisten); `total_tokens` hanya bila provider melaporkan token; API jawab input/cancel/perpanjang budget
+adalah DEV-008. Detail: `docs/decisions/workers.md`.
+Handoff R4: diff = file tracked yang berubah + file baru di atas (belum di-stage; lihat `git status`).
+Review: NOT_REVIEWED — self-check implementer; R4 (DEV-002/003/004) menunggu independent review.
+Tiket berikutnya sesuai dependency: DEV-007.
+
+Review independen DEV-004 oleh Codex (2026-10-05): **NEEDS_FIX** pada snapshot staged awal
+`1af40b74e3f16dcafabcba355c93b3f818736664`. Pengguna menginstruksikan perbaikan langsung dan commit/push.
+Semua temuan telah diperbaiki: barrier cleanup persisten sebelum slot/retry/resume tersedia,
+rekonsiliasi crash setelah fencing, intent resource sebelum launch dan ownership workspace/PG,
+shutdown revoke-first dan stop non-blocking, token input/total/late usage serta final active time,
+policy budget terikat project/scope dan keputusan pengguna, idempotency payload penuh,
+log persisten/pin artifact/arsip gagal yang terlihat, capacity execution satu dan quota waiter.
+File fix: worker queue/runtime/supervisor/limiter, fake adapter, `persistence/pins.py`,
+`tests/workers/test_review_regressions.py`, tambahan `test_processes.py`, expectation usage pada
+`test_queue.py`, `docs/decisions/workers.md`, laporan `docs/reviews/DEV-004-review.md`.
+
+Verifikasi Codex: WSL backend lengkap **453 passed** (189.92 detik, Docker nyata, tanpa skip);
+Windows domain/persistence/workers **302 passed, 8 skipped** (symlink + tujuh POSIX).
+Worker setelah pemeriksaan akhir cleanup/recovery: WSL **77 passed**, Windows **70 passed, 7 skipped**.
+31 regresi perilaku gagal di kode staged awal dan lulus setelah fix; dua tes POSIX tambahan
+mematikan worker nyata dan menguji cleanup workspace/credential/log, run lain tidak tersentuh,
+serta spawn sebelum PGID tersimpan. Smoke CLI DB disposable: 0003 sehat, mode none/fake,
+SIGTERM exit 0. Helper/output/patch review lokal ada di gitignored `data/dev004/`.
+Pemetaan AC lengkap dan batas pengujian ada di laporan review. Tidak memakai provider nyata.
+
+DEV-004 kembali DONE setelah AC terpenuhi. Review awal independen telah dilakukan; diff fix Codex
+diverifikasi melalui self-check, **belum independent re-review**. R4 tetap terbuka juga karena
+diff fix DEV-003 belum re-review; ini tidak mengklaim R4 selesai. Commit/push mengikuti instruksi pengguna.
 
 **Tujuan:** developer bekerja tanpa memblokir chat PO dan tanpa job ganda.
 

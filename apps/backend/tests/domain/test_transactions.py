@@ -86,7 +86,7 @@ def test_migrate_populated_0001_preserves_rows_cursor_and_triggers(tmp_path):
         c.execute("INSERT INTO events (project_id,type,actor,payload,created_at) VALUES ('p','old','user','{}','2026-10-05')")
         before = c.execute("SELECT name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name").fetchall()
     migrate.upgrade(path)
-    assert migrate.current_revision(path) == "0002"
+    assert migrate.current_revision(path) == migrate.head_revision()
     assert migrate.schema_drift(path) == []
     with sqlite3.connect(path) as c:
         assert c.execute("SELECT workflow FROM projects WHERE id='p'").fetchone() == ("{}",)

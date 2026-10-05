@@ -51,6 +51,7 @@ _SELECTS = [
     f"SELECT j.value, 'candidate', c.id FROM candidates c, json_each(c.evidence_artifact_ids) j WHERE c.status IN ({_PINNING})",
     *(f"SELECT {col}, 'candidate', id FROM candidates WHERE status IN ({_PINNING})" for col in _CANDIDATE_COLUMNS),
     f"SELECT context_artifact_id, 'job', id FROM jobs WHERE status IN ({_quoted(ACTIVE_JOB_STATUSES)})",
+    "SELECT j.value, 'job_log', b.id FROM jobs b, json_each(b.result, '$.evidence_artifact_ids') j",
 ]
 _PIN_QUERY = text("SELECT artifact_id, owner_kind, owner_id FROM (" + " UNION ALL ".join(_SELECTS)
                   + ") WHERE artifact_id IS NOT NULL")

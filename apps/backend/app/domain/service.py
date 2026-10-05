@@ -272,6 +272,24 @@ class Workflow:
                 return False
         return True
 
+    def startable(self, s, job) -> bool:
+        """Read-only scheduler pre-check run inside the caller's claim transaction.
+
+        Mirrors bind_attempt (which stays authoritative after the claim): the ticket must be at
+        the job's scope version, unblocked, in the phase that this stage/role works on, and for
+        development fully eligible (approved scope, satisfied dependencies, repair budget).
+        """
+        t = s.get(Ticket, job.ticket_id)
+        if t is None or t.project_id != job.project_id or t.current_version != job.scope_version:
+            return False
+        if t.phase not in ("ready", "development", "technical_review", "qa") or t.blocker or self._repair_exhausted(t):
+            return False
+        stage = "development" if t.phase == "ready" else t.phase
+        roles = {"development": "developer", "technical_review": "technical-lead", "qa": "qa"}
+        if job.stage != stage or (job.runtime_ref or {}).get("role") != roles[stage]:
+            return False
+        return stage != "development" or self._eligible(s, t)
+
     def eligible(self, actor, ticket_id):
         with self.db.read() as s:
             self._permit(s, actor, "user", "scheduler")
