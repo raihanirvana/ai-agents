@@ -46,7 +46,7 @@ Kode: `apps/backend/app/workers/`, `apps/backend/app/adapters/runtime/fake.py`,
 - **Recovery.** Job `running` dengan lease kedaluwarsa: (1) di-fence (generation naik, status
   `failed`, `lease_expired`); (2) process group yang dicatat dihentikan **hanya bila** semua anggota
   group yang masih hidup membawa label `AIAGENTS_RUN=<job>:<generation>` milik attempt itu (dibaca
-  dari `/proc`); proses lain (PID dipakai ulang, preview) tidak disentuh; kepemilikan campuran tidak
+  dari `/proc` pada Linux, psutil pada macOS); proses lain (PID dipakai ulang, preview) tidak disentuh; kepemilikan campuran tidak
   pernah dibunuh; (3) rekonsiliasi workspace dengan supervisor ID, job, generation, dan lease yang
   cocok; (4) arsip log lalu retry. Intent pembuatan process group/workspace dicatat sebelum launch,
   sehingga crash sebelum registrasi resource tetap bisa ditangani. Proses worker zombie dianggap
@@ -54,7 +54,7 @@ Kode: `apps/backend/app/workers/`, `apps/backend/app/adapters/runtime/fake.py`,
   Ledger cleanup dan token rekonsiliasi persisten mempertahankan pekerjaan jika crash terjadi
   setelah fencing. Cleanup failed/waiting/cancelled dapat dilanjutkan tanpa replay pekerjaan input.
   Bila kepemilikan tidak bisa diverifikasi
-  (host tanpa `/proc`), job ditandai `needs_human`. Job `waiting_input` tidak punya lease dan tidak
+  (platform tidak didukung atau akses inspeksi ditolak), job ditandai `needs_human`. Job `waiting_input` tidak punya lease dan tidak
   pernah dijalankan ulang tanpa jawaban.
 - **Retry terbatas.** Kegagalan transient (runtime crash, lease kedaluwarsa) membuat **attempt baru**
   (baris job baru, `parent_job_id`, `attempt+1`), default satu retry (`max_attempts=2`). Setelah itu,
@@ -96,8 +96,13 @@ Konfigurasi: `WORKER_RUNTIME` (`none`/`fake`), `WORKER_LEASE_S` (default 30; hea
 
 - Hanya fake runtime. Adapter Hermes nyata (DEV-006 embed + relay) dan pipeline lead/developer/QA
   dengan bukti test di-wire pada DEV-010 memakai `RunContext`/`ctx.actor()` ini.
-- Supervisi process group POSIX-only (`killpg`, `/proc`); di Windows jalankan worker di WSL. Logika
+- Supervisi process group mendukung Linux (`killpg`, `/proc`) dan macOS (`killpg`, psutil,
+  `/bin/ps` untuk discovery PID/UID); di Windows jalankan worker di WSL. Logika
   antrean/lane/budget juga diuji di Windows native.
+- Perbaikan macOS 2026-10-06: 86 worker tests lulus, termasuk process/recovery nyata.
+  Identitas owner memakai create time untuk mendeteksi PID reuse. Record macOS lama
+  tanpa start identity hanya boleh pulih setelah owner hilang/zombie. Akses ownership
+  yang ditolak tetap memblokir cleanup. Linux/WSL belum diuji ulang setelah perubahan ini.
 - Deteksi pembatalan mengikuti interval heartbeat (CLI default 10 detik), bukan push. Stop resource
   dan recovery berjalan di thread terpisah agar tidak memblokir heartbeat/lane interaktif.
 - Limiter provider dan status quota bersifat per proses supervisor (MVP satu supervisor); job yang

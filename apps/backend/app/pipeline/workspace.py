@@ -180,6 +180,31 @@ class ProductWorkspace:
                     [], 'rebase_result', candidate_id=candidate.id, old_base=candidate.base_sha, new_base=base, applied=rebased)
         return sup, started, manifest
 
+    def bootstrap_available(self, identity):
+        manifest, base = self.configuration(identity)
+        with self.db.read() as s:
+            project = s.get(Project, identity['project_id'])
+            is_new = project.mode == 'new'
+        broker = WorkspaceSupervisor(self.root).broker(identity['project_id'])
+        return (is_new and manifest.runner == 'react-vite' and
+                not broker._bare('ls-tree', '-r', '--name-only', base).strip())
+
+    def bootstrap(self, ctx, sup, started):
+        from .bootstrap import generate_lock, bootstrap_contract
+        identity = ctx.queue.verify(ctx.lease)
+        if identity['role'] != 'developer' or not self.bootstrap_available(identity):
+            raise ValueError('reference bootstrap is only available to a developer on a NEW empty accepted base')
+        package = json.loads(sup.read_file(started.ref, started.credential, 'package.json'))
+        lock = generate_lock(package)
+        # A generated dependency lock is ordinary attempt source, included in diff/commit/review.
+        # This write rechecks product lease, workspace ownership and snapshot path boundaries.
+        sup.write_file(started.ref, started.credential, 'package-lock.json',
+                       (json.dumps(lock, indent=2) + '\n').encode())
+        contract = bootstrap_contract()
+        ctx.log('reference dependency bootstrap catalog=' + contract['catalog_digest'])
+        return {'exit_code': 0, 'generated': 'package-lock.json', 'catalog_digest': contract['catalog_digest'],
+                'next': 'Run install, test and build through run_command. Submit the generated lock with the candidate.'}
+
     def save_checkpoint(self, ctx, sup, started):
         record = sup.checkpoint(started.ref, started.credential, 'Persistent product checkpoint')
         files = {}

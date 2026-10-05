@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import signal
 import socket
+import sys
 import subprocess
 import threading
 import time
@@ -18,6 +19,12 @@ from typing import Any, Protocol
 
 from .limiter import ProviderLimiter
 from .queue import JobQueue, Lease, QuotaWait
+
+if sys.platform == "darwin":
+    import psutil
+    ProcessInspectionError = psutil.Error
+else:
+    ProcessInspectionError = OSError
 
 
 class WaitingForInput(Exception):
@@ -227,7 +234,12 @@ def kill_group(pgid: int, grace_s: float = 3.0) -> bool:
 
 
 def process_tag(pid: int) -> str | None:
-    """The ownership label of a live process (from /proc), or None if unknown/gone."""
+    """Read only the attempt label; unavailable ownership remains unknown."""
+    if sys.platform == "darwin":
+        try:
+            return psutil.Process(pid).environ().get("AIAGENTS_RUN")
+        except psutil.Error:
+            return None
     try:
         environ = open(f"/proc/{pid}/environ", "rb").read().split(b"\0")
     except OSError:
@@ -247,12 +259,17 @@ def reap_recorded_processes(snapshot: dict[str, Any]) -> bool:
     intentions = [r for r in ref.get("resources", []) if r.get("kind") == "process_groups"]
     if not processes and not intentions:
         return True
-    if not os.path.isdir("/proc") or not hasattr(os, "killpg"):
+    if (sys.platform != "darwin" and not os.path.isdir("/proc")) or not hasattr(os, "killpg"):
         return False
     for intent in intentions:
         tag = f"{snapshot['id']}:{intent['generation']}"
         groups = set()
-        for entry in os.listdir("/proc"):
+        try:
+            entries = _intent_pids() if sys.platform == "darwin" else os.listdir("/proc")
+        except (OSError, ProcessInspectionError, subprocess.SubprocessError, ValueError):
+            return False
+        for entry in entries:
+            entry = str(entry)
             if entry.isdigit() and process_tag(int(entry)) == tag:
                 try:
                     groups.add(os.getpgid(int(entry)))
@@ -260,13 +277,19 @@ def reap_recorded_processes(snapshot: dict[str, Any]) -> bool:
                     pass
         processes.extend({"pgid": pgid, "tag": tag} for pgid in groups)
     for proc in processes:
-        members = group_members(proc["pgid"])
+        try:
+            members = group_members(proc["pgid"])
+        except (OSError, ProcessInspectionError):
+            return False
         if not members:
             continue
         # The leader may already be gone while its children live on: check every member.
         tags = {process_tag(pid) for pid in members}
         if tags == {proc["tag"]}:
-            if not kill_group(proc["pgid"]):
+            try:
+                if not kill_group(proc["pgid"]):
+                    return False
+            except (OSError, ProcessInspectionError):
                 return False
         elif proc["tag"] in tags or None in tags:
             return False  # mixed ownership: never kill blindly, leave it to a human
@@ -274,7 +297,16 @@ def reap_recorded_processes(snapshot: dict[str, Any]) -> bool:
 
 
 def group_members(pgid: int) -> list[int]:
-    """Live PIDs whose process group is pgid (read from /proc/<pid>/stat)."""
+    """Live non-zombie members; unreadable membership raises instead of proving absence."""
+    if sys.platform == "darwin":
+        members = []
+        for pid in psutil.pids():
+            try:
+                if os.getpgid(pid) == pgid and psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
+                    members.append(pid)
+            except (ProcessLookupError, psutil.NoSuchProcess):
+                continue
+        return members
     members = []
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
@@ -294,6 +326,11 @@ def host_identity() -> dict:
 
 
 def process_start(pid: int) -> str | None:
+    if sys.platform == "darwin":
+        try:
+            return str(psutil.Process(pid).create_time())
+        except psutil.Error:
+            return None
     try:
         with open(f"/proc/{pid}/stat") as fh:
             return fh.read().rsplit(")", 1)[-1].split()[19]
@@ -306,7 +343,20 @@ def owner_gone(snapshot: dict) -> bool:
     host = snapshot["runtime_ref"].get("cleanup", {}).get("host")
     if not host:
         return True  # direct queue claims have no executing Python runtime
-    if host.get("hostname") != socket.gethostname() or not os.path.isdir("/proc"):
+    if host.get("hostname") != socket.gethostname():
+        return False
+    if sys.platform == "darwin":
+        try:
+            process = psutil.Process(host["pid"])
+            if process.status() == psutil.STATUS_ZOMBIE:
+                return True
+            # Old macOS records have no start identity: only disappearance proves death.
+            return host.get("start") is not None and str(process.create_time()) != host["start"]
+        except psutil.NoSuchProcess:
+            return True
+        except psutil.Error:
+            return False
+    if not os.path.isdir("/proc"):
         return False
     if host.get("start") is None:
         return False
@@ -318,3 +368,25 @@ def owner_gone(snapshot: dict) -> bool:
     except OSError:
         return False
     return fields[0] == "Z" or fields[19] != host["start"]
+
+
+def _intent_pids() -> list[int]:
+    """Inspect same-user processes for launch intents on macOS, failing closed on denial."""
+    # macOS can deny proc_pidinfo even for identifying root-owned login processes.
+    # ps exposes PID/UID without reading their environments; only our UID can own a child.
+    listing = subprocess.run(["/bin/ps", "-axo", "pid=,uid="], capture_output=True, text=True,
+                             check=True, timeout=10)
+    pids = []
+    for line in listing.stdout.splitlines():
+        pid, uid = map(int, line.split())
+        if uid != os.getuid():
+            continue
+        try:
+            process = psutil.Process(pid)
+            if process.status() != psutil.STATUS_ZOMBIE:
+                # A denied environment read cannot prove an unregistered child absent.
+                process.environ()
+                pids.append(pid)
+        except psutil.NoSuchProcess:
+            continue
+    return pids

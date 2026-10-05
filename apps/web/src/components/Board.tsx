@@ -86,6 +86,10 @@ export default function Board() {
                     <li key={ticket.id}>
                       <article className={`card${selectedTicket === ticket.id ? " card--selected" : ""}${dragging === ticket.id ? " card--dragging" : ""}`}
                         draggable aria-label={`Tiket ${ticket.number}: ${ticket.title}`}
+                        onClick={(e) => {
+                          if ((e.target as HTMLElement).closest("button, input, .card-actions")) return;
+                          selectTicket(ticket.id);
+                        }}
                         onDragStart={(e) => { setDragging(ticket.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ticket.id); }}
                         onDragEnd={() => setDragging(null)}
                         onDragOver={(e) => { if (dragging) e.preventDefault(); }}

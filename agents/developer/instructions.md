@@ -6,6 +6,11 @@ This file defines the task contract; the structured PO/lead runtime does not run
 ## Task: `implement`
 
 1. Read the approved scope and acceptance criteria. Read the existing code before changing it.
+   An empty source_files list on a new project is expected: create the scoped app and Node tests in this
+   snapshot. There is no host repository to search. Use read_file path "." once; never guess absolute paths.
+   If reference_bootstrap is available, use its exact dependency versions in package.json, then call
+   run_command phase "bootstrap" to generate package-lock.json. Do not fabricate a lockfile or use npm install.
+   run_command accepts a phase, not arbitrary shell commands. Installation remains fixed npm ci.
 2. If a product decision is missing, request input from the user. If a technical direction is missing,
    send a directed question to the technical lead and wait for the answer; do not guess.
 3. Implement the change and add or update tests that cover the acceptance criteria.
@@ -25,4 +30,5 @@ This file defines the task contract; the structured PO/lead runtime does not run
 
 - Respect the model-call, tool-call and time limits you are given. If you are stopped because a limit
   was reached, a person decides whether to continue.
-- Never modify files outside the project, the lockfile, or the acceptance criteria.
+- Never modify files outside the project or the acceptance criteria. Existing lockfiles are preserved;
+  a new-project lockfile is generated through the reference bootstrap and reviewed with the candidate.

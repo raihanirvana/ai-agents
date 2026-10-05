@@ -468,6 +468,35 @@ serta pembatasan aktor dan fingerprint waiver baseline.
 
 ## DEV-004 — Worker persisten, dua lane, dan recovery
 
+### Perbaikan macOS — 2026-10-06
+Status: DONE. Pelaksana: Codex, assignment pengguna memperbaiki cleanup
+dan memulihkan antrean proyek Daftar Belanja. Cleanup sebelumnya memakai `/proc`
+Linux dan menahan slot execution setelah qa_plan berhasil pada macOS.
+Rencana/file: tambahkan inspeksi ownership/process group/start identity macOS pada
+`app/workers/runtime.py`, pin psutil di requirements, jalankan process/recovery
+tests pada Mac, lalu recovery melalui supervisor tanpa menghapus hasil/evidence.
+File hasil: `apps/backend/app/workers/runtime.py`, `apps/backend/requirements{.txt,.lock}`,
+`apps/backend/tests/workers/test_processes.py`, file baru
+`apps/backend/tests/workers/test_macos_identity.py`, `docs/decisions/workers.md`.
+Verifikasi: `PATH=/Users/23061535/homebrew/bin:$PATH ./.venv/bin/python -m pytest
+tests/workers -q` dari apps/backend — **86 passed** pada macOS. Tes meliputi cancel
+process group, child yang tertinggal, recovery worker zombie, launch sebelum
+registrasi, foreign ownership, akses inspection ditolak, PID reuse, identitas owner
+aktif dan record macOS lama tanpa start identity. Run pertama subset tes: 5 failed,
+33 passed; akses UID proses root `login` menyebabkan discovery ditolak dan helper
+cleanup tes mengirim signal ke group yang sudah kosong. Keduanya diperbaiki, lalu
+subset 38 passed dan full suite 86 passed. Linux/WSL belum diuji ulang untuk diff ini.
+Recovery aktual: worker lama dihentikan lewat SIGINT, worker pipeline baru pada DB
+yang sama merekonsiliasi qa_plan `d6e30b139b264efe8e25a6012e60f61c`; cleanup ledger
+dan cleanup_error sudah kosong, suite/result succeeded tetap tersimpan. Scheduler
+membuat development tiket #1 dan mengambil qa_plan tiket #4. Tidak ada DB reset,
+approval baru, atau replay qa_plan sukses. Error awal tetap sebagai histori result.
+Handoff: inspeksi macOS memakai psutil 7.2.2 dan `/bin/ps` PID/UID; Linux tetap
+memakai `/proc`. Access denied/unknown ownership menahan cleanup. Pada record
+macOS lama tanpa start identity, owner hidup tetap memblokir dan owner hilang
+dapat direkonsiliasi. Ini bukan bukti QA/pipeline proyek Daftar Belanja selesai.
+Review perubahan ini: NOT_REVIEWED; review historis tidak mencakup diff ini.
+
 ### Catatan pengerjaan
 Status: DONE (review/fix Codex selesai, 2026-10-05).
 Rencana review: verifikasi fencing, cleanup/recovery/resume race, idempotency,
@@ -1235,6 +1264,42 @@ batch approval, daftar run/activity, blocker, dan indikator fake/real.
 uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
+
+### Perbaikan bootstrap proyek baru — 2026-10-06
+Status: DONE (scope fix). Pelaksana: Codex; assignment pengguna memperbaiki developer
+yang berulang mencari source kosong dan gagal install karena lockfile belum ada.
+Rencana: bootstrap lockfile React/Vite dari katalog pinned yang dibatasi, tool
+developer dengan lease/izin tetap, konteks new-project dan QA selector contract,
+tes install/build/commit dari empty base serta regresi existing/stale/security.
+File relevan: `app/pipeline/{runtime,workspace}.py`, `contracts/bootstrap`,
+`agents/{developer,qa}/instructions.md`, tests pipeline dan dokumentasi keputusan.
+Budget run produk tidak direset/diperpanjang otomatis. Review fix: NOT_REVIEWED.
+File hasil tambahan: `app/pipeline/bootstrap.py`, `contracts/bootstrap/react-vite/{package.json,package-lock.json}`,
+`tests/pipeline/test_bootstrap.py`, `docs/decisions/pipeline.md`. Bootstrap tersedia
+hanya untuk developer proyek new dengan accepted tree kosong; range, dependency
+di luar katalog, workspace/override/peer/optional root ditolak. Lock masuk snapshot
+attempt lewat broker terfence, lalu commit/diff dan dependency digest target. Tidak
+ada source fitur yang disuntik ke accepted, npm host, atau egress kode target baru.
+Verifikasi aktual (apps/backend, prefix PATH=/Users/23061535/homebrew/bin:$PATH):
+- `./.venv/bin/python -m pytest tests/pipeline/test_bootstrap.py -q`: real Docker
+  empty-base generate-lock/install/test/build/commit/rebuild passed; 12 tests passed,
+  satu fixture existing gagal karena repo_ref belum diisi. Fixture diperbaiki.
+- `./.venv/bin/python -m pytest tests/pipeline/test_bootstrap.py -q -k 'not install_build_test'`:
+  terakhir **14 passed, 1 deselected**, termasuk existing/nonempty accepted lock
+  preservation, revoked attempt, QA role denial, versi/source dependency di luar
+  katalog dan root resolution overrides. Tes Docker pertama tidak diulang karena
+  perbaikan berikutnya hanya pada fixture/tests existing; kode build tidak berubah.
+- `./.venv/bin/python -m pytest tests/pipeline/test_scheduler.py tests/pipeline/test_contracts.py
+  tests/pipeline/test_review_regressions.py tests/workspace/test_manifest.py tests/agents/test_tools.py -q`:
+  **58 passed**. `./.venv/bin/python -m pytest tests/pipeline/test_product_loop.py -q`:
+  **6 passed**, Docker/build/browser dengan model FAKE berlabel, bukan bukti provider nyata.
+- `git diff --check`: pass. Worker pipeline direstart memakai konfigurasi yang sama.
+Handoff R6: diff/file baru di atas, setup normal tidak berubah. Bootstrap memakai
+katalog reference React/Vite 4 dependency langsung; dependency/stack tambahan belum
+dikualifikasi. Linux/WSL dan inference developer nyata belum diulang sesudah fix.
+Run Daftar Belanja stopped budget_exhausted tetap stopped, usage/evidence tidak
+di-reset. Melanjutkan produk memerlukan budget extension terbatas dari pengguna;
+ini tidak memblokir selesainya implementasi fix yang diminta. Review: NOT_REVIEWED.
 
 ### Catatan pengerjaan
 Status: DONE. Pelaksana: Codex, 2026-10-05. Review: NOT_REVIEWED.

@@ -200,7 +200,7 @@ for (const size of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }, 
     expect(send && send.y + send.height <= size.height).toBe(true);
     const board = await page.locator(".columns").boundingBox();
     expect(board && board.width > 500 && board.height > 250).toBe(true);
-    await page.locator("article.card").first().getByRole("button", { name: /Tiket scope_review 1/ }).click();
+    await page.locator("article.card").first().locator(".chips").click();
     await expect(page.getByRole("heading", { name: /Tiket scope_review 1/, level: 2 })).toBeVisible();
     expect(await fits()).toEqual({ overflowX: 0, overflowY: 0 });
   });

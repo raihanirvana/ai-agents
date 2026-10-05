@@ -79,11 +79,18 @@ class PipelineRuntime:
             return Outcome('succeeded', {'suite_artifact_id': saved, 'fake': self.fake})
         baseline = self.workspace.base_build(ctx)
         sup, started, manifest = self.workspace.start(ctx)
+        source_files = sup.list_files(started.ref, started.credential)
         snapshot = self.structured.builder.build(identity, task={
             'name': 'qa_plan', 'instruction': 'Create mandatory browser assertions from approved UAC and the technical plan. '
             'Use CSS selectors. Every automated UAC must be covered. feature/bug cases must fail on the base when applicable; '
             'regression cases may pass on both. Use propose_tests with one QaPlan object. Do not edit source or claim pass.',
-            'schema': QaPlan.model_json_schema(), 'baseline': {k: v for k, v in baseline.items() if k not in ('source', 'site')}},
+            'schema': QaPlan.model_json_schema(), 'source_files': source_files,
+            'empty_source_guidance': ('The accepted base is empty; this is expected for a new project. '
+                'There is no DOM or other folder to inspect. Plan feature tests from approved UAC and technical plan, '
+                'and declare stable selectors/text as a contract for the developer. Do not request user input '
+                'only because files are absent. Do not invent new requirements or regression cases for absent features.'
+                if not source_files else None),
+            'baseline': {k: v for k, v in baseline.items() if k not in ('source', 'site')}},
             answer=ctx.answer, lease=ctx.lease, queue=ctx.queue)
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
@@ -123,10 +130,16 @@ class PipelineRuntime:
         return {name: (lambda args, tool=name: facade._execute(ctx, tool, args)) for name in parameters}
 
     def _implement(self, ctx, identity):
+        from .bootstrap import bootstrap_contract
         sup, started, manifest = self.workspace.start(ctx)
         suite, suite_id = self.workspace.suite(identity)
+        source_files = sup.list_files(started.ref, started.credential)
+        bootstrap = bootstrap_contract() if self.workspace.bootstrap_available(identity) else None
         snapshot = self.structured.builder.build(identity, task={'name': 'implement', 'runner_manifest': manifest.to_dict(),
-            'source_files': sup.list_files(started.ref, started.credential),
+            'source_files': source_files, 'reference_bootstrap': bootstrap,
+            'empty_source_guidance': ('The source snapshot is empty by design. Create the application and Node tests '
+                'for this approved scope here. There is no existing application in another directory; '
+                'never search host paths or /work. patch_file creates directories automatically.' if not source_files else None),
             'qa_suite': suite.model_dump(), 'instructions': 'Implement the approved scope. Read/patch files with relative paths. '
             'read_file path "." lists source files. run_command selects install/test/build only. '
             'Do not remove or skip repository tests to make checks pass. Completion REQUIRES submit_candidate; a prose answer fails the job. '
@@ -150,8 +163,13 @@ class PipelineRuntime:
             sup.write_file(started.ref, started.credential, a['path'], a['content'].encode())
             return {'written': a['path']}
         def command(c, i, a):
-            if set(a) != {'phase'} or a['phase'] not in ('install', 'build', 'test'):
+            if set(a) != {'phase'} or a['phase'] not in ('bootstrap', 'install', 'build', 'test'):
                 raise ValueError('run_command requires a configured phase')
+            if a['phase'] == 'bootstrap':
+                return self.workspace.bootstrap(ctx, sup, started)
+            if a['phase'] == 'install' and bootstrap and 'package-lock.json' not in sup.list_files(started.ref, started.credential):
+                return {'exit_code': 1, 'error': 'package-lock.json is missing. Create package.json with the '
+                        'exact reference_bootstrap versions, then call run_command phase bootstrap before install.'}
             r = sup.run_phase(started.ref, started.credential, a['phase'])
             return {'exit_code': r.exit_code, 'stdout': r.stdout.decode(errors='replace')[:16000],
                     'stderr': r.stderr.decode(errors='replace')[:16000]}
@@ -173,7 +191,7 @@ class PipelineRuntime:
             'submit_candidate': submit, 'request_decision': decision})
         parameters = {'read_file': {'path': {'type': 'string'}}, 'patch_file': {'path': {'type': 'string'},
             'content': {'type': ['string', 'null'], 'description': 'Full new file contents; null deletes this file.'}},
-            'run_command': {'phase': {'type': 'string', 'enum': ['install', 'test', 'build']}}, 'inspect_diff': {},
+            'run_command': {'phase': {'type': 'string', 'enum': ['bootstrap', 'install', 'test', 'build']}}, 'inspect_diff': {},
             'submit_candidate': {'message': {'type': 'string'}}, 'request_decision': {'question': {'type': 'string'}}}
         self.driver.run(ctx, identity, snapshot, self._tools(ctx, facade, parameters), parameters)
         return Outcome('succeeded', result) if result else Outcome('failed', error='developer finished without a broker candidate')

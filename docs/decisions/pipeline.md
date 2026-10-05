@@ -144,6 +144,37 @@ baru. Tiket pertama tetap perlu membangun app, lockfile dan tests sesuai manifes
 serta approval scope pengguna. CLI tidak mengimpor repo sumber atau mengganti base
 yang berbeda dari DB. Manifest adalah konfigurasi operator, bukan tool model.
 
+### Bootstrap dependency pada proyek baru
+
+Pada proyek `new` yang accepted base-nya masih kosong, developer mendapat tool
+`run_command` phase `bootstrap`. Developer membuat `package.json` terlebih dahulu
+dengan versi persis dari `reference_bootstrap` pada context. Bootstrap menghasilkan
+`package-lock.json` dari katalog `contracts/bootstrap/react-vite`, kemudian developer
+menjalankan phase `install`, `test`, dan `build`. Tidak ada kode fitur/fondasi yang
+dimasukkan otomatis ke accepted ref. Lock yang dihasilkan adalah perubahan attempt
+yang ikut diff, commit, review, QA, serta UAT. Build target mem-pin dependency digest.
+
+Katalog awal: React/React DOM 18.3.1, Vite 6.4.3 dan plugin React 4.3.4 dengan seluruh
+dependency closure, URL registry HTTPS dan integrity SHA512. Root lock disesuaikan
+dengan nama/version dan dependency declaration package.json; closure referensi tetap
+dipertahankan agar peer/optional/platform pins tidak di-resolve ulang. Dependency baru,
+range versi, workspace, override, peer/optional root atau package sumber lain ditolak
+secara eksplisit; penambahannya membutuhkan kualifikasi katalog/runner. Ini dukungan
+reference runner MVP, bukan resolver npm umum.
+
+Bootstrap tidak menjalankan npm/kode target pada host, tidak membuka jaringan container,
+tidak melonggarkan install command, dan tidak mengubah lock repo existing. File dibaca/
+ditulis melalui broker snapshot dengan lease dan generation produk saat ini. Install
+tetap fixed `npm ci` dengan scripts dinonaktifkan dan tarball diverifikasi supervisor.
+Catalog digest dicatat di log run; lock sebenarnya masuk source SHA/dependency digest.
+
+QA dan developer diberi context eksplisit ketika source kosong: tidak ada folder lain
+untuk dicari. QA menyusun feature suite dari UAC/rencana teknis dan menyatakan selector
+sebagai kontrak untuk developer. QA tidak mengarang regression behavior yang belum ada.
+Run yang sudah stopped karena budget tetap stopped; operator fix/restart worker tidak
+mereset usage atau memperpanjang cap. Continuation memerlukan budget extension pengguna
+yang terbatas, memakai usage kumulatif dan command produk yang sama.
+
 Kualifikasi opt-in berbayar dengan DB terisolasi dan **bundled test fixture**:
 
 ```sh

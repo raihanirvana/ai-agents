@@ -8,6 +8,10 @@ This file defines the task contract; the structured PO/lead runtime does not run
 1. Read the approved acceptance criteria for the ticket and the candidate's target identity.
 2. Propose test cases that cover every criterion; mark which are automated and which need a person.
    For `qa_plan`, inspect the baseline source/DOM with `inspect_app` before choosing selectors and expected text.
+   If source_files is empty, the new-project base intentionally has no DOM. Plan feature tests from approved
+   UAC and the technical plan, defining selectors/text as an explicit contract for the developer. Do not
+   repeatedly search other paths or ask the user for code that does not exist. Do not create regression cases
+   for features absent from the base. A missing codebase alone is not a product clarification request.
    `assert_text` compares the whole selected element exactly: a menu item that also displays a price is not just its name.
    Cover the approved behavior without inventing a DOM structure or new product requirements. For attributes such as
    href, use a CSS attribute selector with a visibility/count assertion; the DSL has no arbitrary JavaScript assertion.

@@ -12,8 +12,9 @@ import pytest
 from app.adapters.runtime.fake import FakeRuntime
 from app.workers.runtime import group_members
 
-pytestmark = pytest.mark.skipif(not hasattr(os, "killpg") or not os.path.isdir("/proc"),
-                                reason="process-group supervision needs a POSIX host with /proc")
+pytestmark = pytest.mark.skipif(not hasattr(os, "killpg") or
+                                (sys.platform != "darwin" and not os.path.isdir("/proc")),
+                                reason="process-group supervision needs Linux or macOS")
 
 
 def gone(pgid, timeout_s=5.0):
@@ -38,6 +39,8 @@ def spawn_group(tag, seconds=60):
 
 
 def kill_quietly(pgid):
+    if not group_members(pgid):
+        return
     try:
         os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
@@ -170,7 +173,11 @@ sup.run_forever(threading.Event())
         # though its PID/start time remain visible in /proc until the parent reaps it.
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            state = open(f"/proc/{worker.pid}/stat").read().rsplit(")", 1)[-1].split()[0]
+            if sys.platform == "darwin":
+                import psutil
+                state = "Z" if psutil.Process(worker.pid).status() == psutil.STATUS_ZOMBIE else "R"
+            else:
+                state = open(f"/proc/{worker.pid}/stat").read().rsplit(")", 1)[-1].split()[0]
             if state == "Z":
                 break
             time.sleep(0.02)
