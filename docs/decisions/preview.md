@@ -21,6 +21,14 @@ memakai slot execution, tidak membuat job, dan hanya disentuh oleh `PreviewServi
 
 ## Lifecycle
 
+Perbaikan Batch 4 (2026-10-06): root socket sementara harus berupa direktori
+nyata (lstat, bukan symlink), dimiliki UID supervisor dan tanpa bit akses group/
+other (`mode & 0o077 == 0`). Direktori baru dibuat 0700; direktori existing yang
+tidak memenuhi syarat ditolak tanpa chmod otomatis. Pemeriksaan diterapkan pada
+launch dan sebelum penghapusan socket pada teardown agar root tak tepercaya
+tidak ikut dipakai oleh jalur cleanup. Tes multi-user/preview tidak dijalankan
+pada sesi ini; hasil aktual terbatas sintaks dan import, dicatat di backlog.
+
 `requested → starting → ready → stopping → stopped`, atau `failed`. Satu preview lokal aktif: permintaan baru
 mengubah yang lama menjadi `stopping` (`switched`) dalam transaksi yang sama (yang belum dimulai langsung `stopped`);
 supervisor menghentikan yang lama sebelum memulai yang baru. Meminta ulang kandidat yang sama saat masih

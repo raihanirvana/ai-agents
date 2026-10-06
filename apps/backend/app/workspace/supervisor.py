@@ -447,6 +447,8 @@ class WorkspaceSupervisor:
             raise WorkspaceError(f"build {build_id} failed in phase {failed}; see evidence")
         out = src / manifest.build_output
         entries = fsutil.scan_tree(out, limits=fsutil.TreeLimits(spec.limits.max_snapshot_files, spec.limits.max_snapshot_bytes))
+        if any(entry.kind == 'symlink' for entry in entries):
+            raise WorkspaceError('build output symlinks are unsupported; see build command evidence')
         build_digest = fsutil.sha256_tree(out, entries)
         artifact_dir = store.dir / "builds" / build_id / "artifact"
         artifact_dir.mkdir(parents=True, mode=0o755)

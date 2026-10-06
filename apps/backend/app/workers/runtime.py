@@ -179,6 +179,29 @@ class RunContext:
                 raise
             self._stoppers.append(stop)
 
+    def add_finalizer(self, stop, *, resource: dict):
+        """Persist cleanup now, but keep producer-owned files until its finally.
+
+        Cancellation can stop processes immediately without deleting files that
+        the runtime still needs to archive. The returned callback must run in
+        that producer's finally, before the job thread can release its slot.
+        """
+        finished = False
+        def when_finished():
+            if finished:
+                stop()
+        self.add_stopper(when_finished, resource=resource)
+        def finish():
+            nonlocal finished
+            with self._stop_lock:
+                finished = True
+                try:
+                    stop()
+                except Exception:
+                    self._cleanup_ok = False
+                    raise
+        return finish
+
     def stop_resources(self, grace_s: float = 3.0) -> bool:
         """Stop every process group of this attempt, then its other registered resources.
 

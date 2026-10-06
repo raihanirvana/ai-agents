@@ -19,7 +19,7 @@ def build_pipeline(structured, store, workflow, queue, *, env=None):
     if not supervisor.sandbox.available():
         raise ValueError('Docker engine is unavailable')
     harness.identity()  # fail early if the pinned runner image has not been built
-    driver = HermesDriver(env.get('HERMES_PYTHON', ''), root / '.hermes', structured.client)
+    driver = HermesDriver(env.get('HERMES_PYTHON', ''), root / '.hermes', structured.client, store=store)
     driver.validate_install()
     workspace = ProductWorkspace(structured.db, store, workflow, root, harness, structured.redactor)
     runtime = PipelineRuntime(structured, workspace, driver)

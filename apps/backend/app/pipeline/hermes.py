@@ -8,16 +8,18 @@ import threading
 import time
 from urllib.parse import urlsplit, unquote
 from app.runtime_spike.relay import Relay
-from app.workers.runtime import WaitingForInput
+from app.workers.runtime import WaitingForInput, reap_recorded_processes
 from .relay import ProductAdmission
+from .files import allocate_directory
 
 WORKER = Path(__file__).resolve().parents[1] / 'runtime_spike' / 'hermes_worker.py'
 
 
 class HermesDriver:
-    def __init__(self, python, home_root, client):
+    def __init__(self, python, home_root, client, *, store=None):
         # Resolving a venv's python symlink selects the base interpreter and loses installed Hermes.
         self.python, self.root, self.client = Path(python).absolute(), Path(home_root).resolve(), client
+        self.store = store
         if not self.python.is_file():
             raise ValueError('HERMES_PYTHON must name the pinned Hermes virtualenv interpreter')
 
@@ -47,6 +49,16 @@ class HermesDriver:
             raise ValueError('Hermes installation must be the clean pinned editable checkout with Python >=3.11,<3.14') from exc
 
     def run(self, ctx, identity, snapshot, tools, parameters):
+        finalizers = []
+        try:
+            return self._run(ctx, identity, snapshot, tools, parameters, finalizers)
+        finally:
+            for finish in reversed(finalizers):
+                finish()
+
+    def _run(self, ctx, identity, snapshot, tools, parameters, finalizers):
+        if self.store is None:
+            raise ValueError('Hermes driver requires the product artifact store for diagnostic cleanup')
         installation = self.validate_install()
         role = identity['role']
         config, provider = self.client.registry.for_role(role), self.client.provider_for(role)
@@ -60,8 +72,8 @@ class HermesDriver:
                      'context_artifact_id': snapshot.artifact_id}]}
         if provider.fake or identity['fake'] or not hasattr(provider, '_key'):
             raise ValueError('Hermes HTTP driver requires a real configured provider; fake tests use an injected driver')
-        directory = self.root / identity['job_id'] / str(identity['generation'])
-        directory.mkdir(parents=True, exist_ok=False, mode=0o700)
+        directory = allocate_directory(ctx, self.root, 'hermes', store=self.store,
+            redactor=self.client.redactor, finalizers=finalizers)
         home = directory / 'home'
         home.mkdir(mode=0o700)
         (home / 'config.yaml').write_text(json.dumps({'agent': {'api_max_retries': 1, 'auto_recovery_cycles': 0},
@@ -80,6 +92,7 @@ class HermesDriver:
         relay = Relay(admission, ctx.lease.job_id, ctx.lease.generation, config.model, provider._key,
                       {name: wrapped(name, handler) for name, handler in tools.items()})
         relay.ENDPOINT = provider.base_url + '/chat/completions'
+        proc, thread = None, None
         try:
             with relay:
                 worker_config = {'relay_url': relay.url, 'relay_token': relay.token, 'model': config.model,
@@ -133,10 +146,20 @@ class HermesDriver:
                 thread.join(timeout=5)
         finally:
             admission.close()
+            # A lease can be revoked inside the polling loop. Even on that
+            # exception path, stop the labelled child before collecting its
+            # final output or allowing its directory finalizer to run.
+            clean = reap_recorded_processes({'id': identity['job_id'], 'runtime_ref': {'resources': [
+                {'kind': 'process_groups', 'generation': identity['generation']}]}})
+            if proc is not None and clean:
+                proc.wait(timeout=5)
+            if thread is not None:
+                thread.join(timeout=5)
             (directory / 'transport.log').write_text(''.join(collected))
-            # The bearer credential is per-run and revoked at relay shutdown; do not retain it.
-            if (directory / 'worker.json').exists():
-                (directory / 'worker.json').unlink()
+            if not clean or thread is not None and thread.is_alive():
+                raise RuntimeError('Hermes process/collector cleanup is incomplete')
+            # The relay bearer is revoked now. Cleanup reads it only to redact
+            # diagnostics, then deletes the private config with the directory.
         if waiting:
             raise waiting[0]
         if admission.error:

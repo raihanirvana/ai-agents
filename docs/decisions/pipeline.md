@@ -72,6 +72,37 @@ Infrastructure/incomplete evidence menjadi failure terlihat, bukan loop tanpa ba
 
 ## Workspace, recovery, dan publikasi
 
+Perbaikan Batch 4 (2026-10-06): semua `request_changes`, termasuk penolakan UAT
+oleh pengguna, menyimpan message `repair_feedback` yang mengikat candidate/scope
+dalam transaksi domain yang sama. `_reject` memakai jalur ini tanpa pesan kedua.
+Workspace memilih feedback terbaru dari proyek/tiket/scope yang tepat, memeriksa
+kandidat superseded, lalu memulihkan sumber kandidat itu (atau rebase ke base
+accepted baru). Task developer membawa reason dan identitas feedback; history
+system repair/rebase juga tersedia dalam context. Tidak memakai pesan scope lama.
+Runner/config drift pada review atau QA masuk jalur request_changes dan selesai
+atomik dengan job; kandidat/target/review/QA/UAT baru tetap wajib. Repair counter
+dan budget tidak direset. Job yang sudah gagal sebelum patch perlu retry operator.
+
+Direktori QA/Hermes baru memakai resource `pipeline_directory` dengan intent
+sebelum mkdir serta marker owner/generation/allocation. `RunContext.add_finalizer`
+menunda penghapusan file sampai producer selesai, walaupun cancel lebih dahulu
+menghentikan proses. Callback finally selesai sebelum thread job melepas slot;
+failure dicatat sebagai cleanup tidak lengkap. Recovery memeriksa resource dan
+marker, membersihkan container/workspace dahulu, kemudian direktori tersebut.
+Log transport/conversation Hermes diarsipkan ke artefak dengan attachment pesan
+log yang mem-pin bukti. Provider secret dan revoked relay bearer diredaksi;
+worker config dan private home dihapus, tidak diarsipkan. Group proses harus
+terbukti berhenti sebelum cleanup diagnostik. Batas 64 MiB per log/config menahan
+cleanup bila terlampaui. Arsip gagal tidak boleh diikuti penghapusan bukti.
+Salinan site QA boleh dihapus; bundle/target/verification yang dipin tetap tersedia.
+Direktori lama tanpa marker/resource tidak dihapus otomatis. Artefak ber-pin tetap
+menggunakan penyimpanan; perubahan ini menghapus salinan/cache runtime tambahan.
+
+Output build dengan symlink ditolak sebelum target manifest dibuat. Packing
+bundle termasuk jalur build_error/handoff kandidat gagal build, sehingga submit
+tidak berulang dengan error generik sesudah commit broker. Perubahan Batch 4 baru
+diperiksa sintaks dan import modul; tes perilaku/Docker/provider tidak dijalankan.
+
 DEV-005 tetap memiliki sandbox, dependency-cache offline, broker commit, clean build,
 serta resource ownership. Resource intent ditulis ke job sebelum launch, lalu stopper
 dan reconciler memeriksa owner/generation. Cleanup dan pengarsipan selesai sebelum

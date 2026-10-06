@@ -14,6 +14,7 @@ from app.persistence.transactions import bind_service
 from .contracts import QaPlan, Review, tool_schema
 from .relay import reconcile_accounting
 from .workspace import FencedWorkspace, unpack_tree, cleanup_workspace
+from .files import allocate_directory, cleanup_directory
 
 
 class PipelineRuntime:
@@ -147,9 +148,14 @@ class PipelineRuntime:
         from .bootstrap import bootstrap_contract
         sup, started, manifest = self.workspace.start(ctx)
         suite, suite_id = self.workspace.suite(identity)
+        with self.db.read() as s:
+            feedback = self.workspace.repair_feedback(s, identity)
+            repair = ({'message_id': feedback.id, 'candidate_id': feedback.meta.get('candidate_id'),
+                       'reason': feedback.body} if feedback is not None else None)
         source_files = sup.list_files(started.ref, started.credential)
         bootstrap = bootstrap_contract() if self.workspace.bootstrap_available(identity) else None
         snapshot = self.structured.builder.build(identity, task={'name': 'implement', 'runner_manifest': manifest.to_dict(),
+            'repair_feedback': repair,
             'source_files': source_files, 'reference_bootstrap': bootstrap,
             'empty_source_guidance': ('The source snapshot is empty by design. Create the application and Node tests '
                 'for this approved scope here. There is no existing application in another directory; '
@@ -230,12 +236,11 @@ class PipelineRuntime:
             return c
 
     def _reject(self, ctx, identity, candidate, reason, **result):
+        reason = self.redactor.redact(reason)
         published = {**result, 'request_changes': True, 'candidate_id': candidate.id}
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
             t = s.get(Ticket, identity['ticket_id'])
-            self.workspace._post(s, identity, 'rejection:' + identity['root_job_id'], reason, [], 'repair_feedback',
-                                 candidate_id=candidate.id)
             bind_service(self.workflow, s).request_changes(ctx.actor(), t.id, t.revision, candidate.id, reason,
                 Attempt(identity['job_id'], identity['generation'], identity['scope_version']))
             # Like approve/open-UAT: the decision and the job outcome commit together, so a crash cannot
@@ -254,7 +259,9 @@ class PipelineRuntime:
         current_manifest, current_base = self.workspace.configuration(identity)
         from app.workspace.manifest import parse_manifest
         if current_manifest.digest != parse_manifest(target['execution_manifest']).digest or current_base != candidate.base_sha:
-            return Outcome('failed', error='Project runner/base changed: new candidate/target verification is required')
+            return self._reject(ctx, identity, candidate,
+                'Project runner/base changed; rebuild the candidate with the current configuration. '
+                'New technical review, QA and UAT are required.', runner_changed=True)
         if not self.gates_eligible(identity, candidate, gates):
             return self._reject(ctx, identity, candidate, 'Required repository gate failed without an exact baseline waiver: ' + json.dumps(gates.get('gate'))[:1800])
         sup = FencedWorkspace(self.workspace.root, ctx)
@@ -303,6 +310,14 @@ class PipelineRuntime:
         return {'status': 'waived' if failures else 'failed', 'waiver_ids': list(dict.fromkeys(matches))}
 
     def _verify(self, ctx, identity):
+        finalizers = []
+        try:
+            return self._verify_attempt(ctx, identity, finalizers)
+        finally:
+            for finish in reversed(finalizers):
+                finish()
+
+    def _verify_attempt(self, ctx, identity, finalizers):
         candidate = self._candidate(identity)
         self.structured.builder.build(identity, task={'name': 'trusted_verification', 'candidate_id': candidate.id}, lease=ctx.lease, queue=ctx.queue)
         with self.db.read() as s:
@@ -316,10 +331,13 @@ class PipelineRuntime:
         current_manifest, current_base = self.workspace.configuration(identity)
         from app.workspace.manifest import parse_manifest
         if current_manifest.digest != parse_manifest(target['execution_manifest']).digest or current_base != candidate.base_sha:
-            return Outcome('failed', error='Project runner/base changed: new candidate/target verification is required')
+            return self._reject(ctx, identity, candidate,
+                'Project runner/base changed; rebuild the candidate with the current configuration. '
+                'New technical review, QA and UAT are required.', runner_changed=True)
         if not self.gates_eligible(identity, candidate, gates):
             return self._reject(ctx, identity, candidate, 'Required gates/waiver no longer eligible')
-        directory = self.workspace.root / '.verification' / identity['job_id'] / str(identity['generation'])
+        directory = allocate_directory(ctx, self.workspace.root / '.verification', 'verification',
+                                       store=self.store, redactor=self.redactor, finalizers=finalizers)
         site = directory / 'site'
         unpack_tree(files, site)
         from app.workspace import fsutil
@@ -407,7 +425,10 @@ class PipelineRuntime:
         from app.workspace import WorkspaceSupervisor
         from app.workspace.runspec import RunRef
         sup = WorkspaceSupervisor(self.workspace.root)
-        for resource in snapshot['runtime_ref'].get('resources', []):
+        # Remove owned processes/containers/workspaces before their temporary files.
+        resources = sorted(snapshot['runtime_ref'].get('resources', []),
+                           key=lambda r: r.get('kind') == 'pipeline_directory')
+        for resource in resources:
             if resource.get('kind') == 'pipeline_workspace':
                 ref = RunRef(resource['project_id'], resource['run_id'])
                 cleanup_workspace(sup, ref, snapshot['id'], generation)
@@ -415,6 +436,16 @@ class PipelineRuntime:
                 from .harness import remove_owned
                 for name in resource['names']:
                     remove_owned(sup.sandbox, name, resource['owner'])
+            elif resource.get('kind') == 'pipeline_directory':
+                if resource.get('job_id') != snapshot['id'] or resource.get('project_id') != snapshot['project_id']:
+                    return False
+                if resource['purpose'] == 'verification':
+                    root = self.workspace.root / '.verification'
+                elif resource['purpose'] == 'hermes':
+                    root = self.driver.root
+                else:
+                    return False
+                cleanup_directory(root, resource, db=self.db, store=self.store, redactor=self.redactor)
             elif resource.get('kind') != 'process_groups':
                 return False
         return True

@@ -659,6 +659,18 @@ class Workflow:
             if not isinstance(reason, str) or not reason.strip():
                 raise Invalid("feedback reason required")
             cycles = t.workflow.get("repair_cycles", 0) + 1
+            # Every rejection path, including user UAT, identifies the exact
+            # immutable candidate the next developer attempt must repair.
+            origin = s.get(Job, attempt.job_id) if attempt is not None else None
+            append_message(s, project_id=t.project_id, ticket_id=t.id, thread_id="ticket:" + t.id,
+                sender=actor.id if actor.role == "user" else "agent:" + actor.role,
+                recipient="role:developer", body=reason[:7900],
+                idempotency_key=f"repair:{t.id}:v{t.current_version}:r{t.revision}:{candidate_id}",
+                meta={"intent": "repair_feedback", "candidate_id": candidate_id,
+                      "scope_version": t.current_version, "repair_cycle": cycles,
+                      "job_id": attempt.job_id if attempt else None,
+                      "generation": attempt.generation if attempt else None,
+                      "fake": bool((origin.runtime_ref or {}).get("fake")) if origin else False})
             self._invalidate(s, actor, t, "request_changes", keep_job_id=attempt.job_id if actor.role != "user" else None)
             return self._change(s, actor, t, "changes_requested", phase="development",
                 workflow={**t.workflow, "repair_cycles": cycles, "candidate_id": None, "attempts": {}, "feedback": reason},

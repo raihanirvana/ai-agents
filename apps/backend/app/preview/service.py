@@ -189,11 +189,7 @@ class PreviewService:
         site, run = directory / "site", self._socket_dir(row.id)
         if directory.exists():
             shutil.rmtree(directory)
-        self.sockets.mkdir(mode=0o700, exist_ok=True)
-        socket_root = self.sockets.lstat()
-        if not stat.S_ISDIR(socket_root.st_mode) or socket_root.st_uid != os.getuid():
-            raise PreviewFailed('socket directory must be a directory owned by the supervisor user')
-        self.sockets.chmod(0o700)
+        self._check_socket_root(create=True)
         shutil.rmtree(run, ignore_errors=True)
         run.mkdir(mode=0o777)
         run.chmod(0o777)  # the container user must be able to create its socket here; nothing else is mounted writable
@@ -295,7 +291,20 @@ class PreviewService:
         if container:
             self._remove_container(preview_id, container)
         shutil.rmtree(self.base / preview_id, ignore_errors=True)
-        shutil.rmtree(self._socket_dir(preview_id), ignore_errors=True)
+        if self._check_socket_root():
+            shutil.rmtree(self._socket_dir(preview_id), ignore_errors=True)
+
+    def _check_socket_root(self, *, create=False) -> bool:
+        if create:
+            self.sockets.mkdir(mode=0o700, exist_ok=True)
+        try:
+            info = self.sockets.lstat()
+        except FileNotFoundError:
+            return False
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o077):
+            raise PreviewFailed('socket directory must be a private directory owned by the supervisor user')
+        return True
 
     def _socket_dir(self, preview_id: str) -> Path:
         return self.sockets / preview_id[:16]

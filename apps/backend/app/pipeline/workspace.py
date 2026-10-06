@@ -3,7 +3,7 @@ import base64
 import json
 import uuid
 from pathlib import Path
-from sqlalchemy import select
+from sqlalchemy import func, select
 from app.domain import Actor, Attempt
 from app.persistence.models import Project, Ticket, TicketVersion, Job, Candidate, Message
 from app.agents.effects import append_effect
@@ -125,6 +125,14 @@ class ProductWorkspace:
             base = p.workflow['accepted_tip']
         return manifest, base
 
+    @staticmethod
+    def repair_feedback(s, identity):
+        return s.scalar(select(Message).where(
+            Message.project_id == identity['project_id'], Message.ticket_id == identity['ticket_id'],
+            func.json_extract(Message.meta, '$.intent').in_(('repair_feedback', 'rebase_request')),
+            func.json_extract(Message.meta, '$.scope_version') == identity['scope_version'])
+            .order_by(Message.created_at.desc(), Message.seq.desc(), Message.id.desc()).limit(1))
+
     def start(self, ctx):
         identity = ctx.queue.verify(ctx.lease)
         manifest, base = self.configuration(identity)
@@ -162,13 +170,13 @@ class ProductWorkspace:
                     unpack_tree(saved['files'], sup.src_dir(ref))
             if not checkpoint and identity['role'] == 'developer':
                 # Repair/rebase starts from the last superseded immutable candidate; the accepted ref stays untouched.
-                feedback = next((m for m in s.scalars(select(Message).where(Message.ticket_id == identity['ticket_id'])
-                    .order_by(Message.created_at.desc(), Message.seq.desc()))
-                    if m.meta.get('intent') in ('repair_feedback', 'rebase_request') and
-                    m.meta.get('scope_version') == identity['scope_version']), None)
+                feedback = self.repair_feedback(s, identity)
                 candidate = s.get(Candidate, feedback.meta.get('candidate_id')) if feedback else None
+                if feedback is not None and candidate is None:
+                    raise ValueError('repair feedback references an unavailable candidate')
                 if candidate is not None:
-                    if candidate.status != 'superseded' or candidate.scope_version != identity['scope_version']:
+                    if (candidate.status != 'superseded' or candidate.scope_version != identity['scope_version']
+                            or candidate.ticket_id != identity['ticket_id'] or candidate.project_id != identity['project_id']):
                         raise ValueError('repair candidate is obsolete')
                     fsutil.clear_dir(sup.src_dir(ref))
                     broker = sup.broker(ref.project_id)
@@ -265,11 +273,13 @@ class ProductWorkspace:
         record = sup.submit_candidate(started.ref, started.credential, message)
         identity = ctx.queue.verify(ctx.lease)
         suite, suite_id = self.suite(identity)
-        built, build_error = None, ''
+        built, build_files, build_error = None, None, ''
         try:
             built = sup.build_target(started.ref, record['sha'])
+            build_files = pack_tree(sup.run_dir(started.ref) / 'builds' / built['build_id'] / 'artifact')
         except Exception as exc:
             ctx.queue.verify(ctx.lease)
+            built, build_files = None, None
             build_error = self.redactor.redact(str(exc))[:2000]
         gate = None
         if built:
@@ -286,7 +296,6 @@ class ProductWorkspace:
                     if missing:
                         gate.update(status='incomplete', missing_baseline_tests=sorted(missing))
         runner = self.harness.identity() if built else None
-        build_files = pack_tree(sup.run_dir(started.ref) / 'builds' / built['build_id'] / 'artifact') if built else None
         with self.db.write() as s:
             identity = ctx.queue.identity(s, ctx.lease)
             t = s.get(Ticket, identity['ticket_id'])

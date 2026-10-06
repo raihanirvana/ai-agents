@@ -1395,6 +1395,62 @@ uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
 
+### Review Claude Batch 4 DEV-010/011 — 2026-10-06
+
+Status perbaikan: DONE (implementasi). Pelaksana: Codex. Review perbaikan: NOT_REVIEWED.
+Lima temuan dikonfirmasi pada head awal `743ede7` dan diperbaiki:
+
+1. Domain `request_changes` menulis message repair_feedback dengan kandidat,
+   scope, cycle dan provenance dalam transaksi yang sama dengan invalidasi dan
+   perubahan phase. Berlaku untuk user UAT, lead dan QA; `_reject` tidak lagi
+   membuat pesan duplikat. Workspace memilih feedback terbaru untuk proyek/tiket/
+   scope melalui SQL, memeriksa identitas kandidat superseded, lalu memulihkan
+   byte kandidat itu atau rebase ke accepted base saat ini. Task implement memuat
+   reason/candidate/message ID; konteks juga menerima system repair/rebase intent.
+2. Drift runner/base pada review/QA memakai `_reject`: phase kembali development,
+   candidate lama superseded, feedback tercatat, dan job selesai secara atomik.
+   Repair berikutnya memerlukan build target, review, QA dan UAT baru. Counter,
+   budget kumulatif, batas repair dan keputusan pengguna tetap ditegakkan.
+3. Direktori `.verification`/`.hermes` mendapat descriptor resource sebelum dibuat,
+   owner/generation/allocation marker, pemeriksaan UID/mode/path, serta finalizer
+   producer. Cancel menghentikan proses tanpa menghapus file yang masih dipakai;
+   finally producer mengarsipkan lalu cleanup sebelum thread melepas slot.
+   Reconciler membersihkan container/workspace dahulu, direktori sementara terakhir.
+   Log transport/conversation Hermes menjadi artefak beredaksi dan attachment
+   pesan log (pin persisten); worker config/bearer/private home tidak diarsipkan.
+   Label proses diperiksa sebelum cleanup Hermes, termasuk jalur lease revoked.
+   Arsip gagal/ownership salah menahan cleanup; bukti kandidat/QA/UAT tidak dihapus.
+4. `build_target` menolak symlink output sebelum membuat target manifest. Packing
+   bundle berada di dalam jalur build_error sehingga commit tetap dicatat sebagai
+   kandidat gagal build dengan handoff, bukan error submit generik berulang.
+5. Root socket preview diperiksa dengan lstat: real directory, UID supervisor,
+   tanpa akses group/other. Root yang tidak memenuhi syarat ditolak, bukan chmod
+   otomatis. Pemeriksaan berlaku sebelum launch dan sebelum teardown socket.
+
+Catatan stdout gate adalah batas otoritas yang sudah didokumentasikan; kelulusan
+QA tetap membutuhkan evidence runner terpisah, bukan TAP target.
+File hasil: `apps/backend/app/domain/service.py`, `apps/backend/app/agents/context.py`,
+`apps/backend/app/pipeline/{files,hermes,runtime,wiring,workspace}.py`,
+`apps/backend/app/workers/runtime.py`, `apps/backend/app/workspace/supervisor.py`,
+`apps/backend/app/preview/service.py`, `docs/decisions/{pipeline,preview}.md`, dan log ini.
+Verifikasi aktual:
+- `apps/backend/.venv/bin/python` dengan `ast.parse` pada file berubah + baru —
+  **10 file Python OK**.
+- Dari `apps/backend`, `.venv/bin/python` meng-import sepuluh modul terkait —
+  **10 modules OK**, tanpa menjalankan layanan/DB atau inference.
+- `git diff --check` — **lulus**. Self-check mencakup diff dan file baru `files.py`;
+  tidak diklaim sebagai independent review atau verifikasi perilaku.
+Tes regresi tidak ditambah/dijalankan karena permintaan lanjutan tidak secara
+eksplisit meminta tes. Docker, provider, BE/FE/worker tidak dijalankan.
+Keterbatasan: tidak menyapu direktori runtime lama tanpa marker/resource; artefak
+diagnostik yang dipin tetap memakai disk. Log/config >64 MiB ditolak dan menahan
+cleanup agar bukti tidak hilang. Job runner drift yang sudah gagal pada versi lama
+memerlukan retry operator; histori/blocker DB tidak diubah oleh patch repository.
+Handoff regresi: UAT reject setelah feedback lead lama (reason dan tree kandidat
+terbaru), rollback/duplicate request, runner drift di review dan QA, cleanup
+success/cancel/crash dengan pin/credential redaction, symlink build, serta root
+socket foreign UID/mode/symlink pada launch dan teardown. Checkpoint R6 tetap terbuka.
+
 ### Semua budget demo tanpa batas — 2026-10-06
 Status: DONE (scope konfigurasi demo dan resume). Pengguna meminta semua budget unlimited khusus demo.
 Rencana: otorisasi eksplisit untuk model/tool calls, waktu aktif, token total dan
