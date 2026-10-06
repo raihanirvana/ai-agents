@@ -1030,6 +1030,55 @@ dan hasil recovery. Jangan memasukkan key atau kredensial ke dokumentasi.
 
 ## DEV-007 — Soul, context, model client, dan pesan antar-agent
 
+### Output tanpa cap aplikasi untuk demo — 2026-10-06
+
+Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.
+Assignment: hapus cap output aplikasi pada semua role demo sesuai instruksi user.
+Hasil: max_output_tokens=null memakai maksimum provider dari metadata resmi
+OpenRouter, cache 5 menit, pada structured client dan Hermes; budget finite
+proyek lain tetap dihormati. Tidak ada ceiling registry 32768 yang arbitrer.
+File: agents/models.py, pipeline/hermes.py, models.example.json, docs/decisions/agents.md;
+konfigurasi lokal semua 4 role null (gitignored). Metadata yang tidak tersedia
+menjadi error eksplisit; adapter provider selain OpenRouter belum mendukung null.
+Verifikasi aktual: sintaks/import/registry dan git diff --check; metadata publik
+mengonfirmasi maksimum provider PO/QA 65536 dan TL/developer 943718. Demo pool
+semua limit null/unlimited_budgets=true; tiket tetap UAT dan tidak ada job aktif.
+Tidak menambah/menjalankan tes regresi atau panggilan model berbayar untuk perubahan ini.
+Timeout/transport/lease/approval tetap berlaku. Review independen belum dilakukan.
+
+### Streaming dan diagnosis respons provider — 2026-10-06
+
+Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.
+Assignment: diagnosis error TL `provider returned a non-text answer` dan gunakan
+streaming. Rencana: SSE Chat Completions terkonfigurasi per role, progress tanpa
+isi reasoning/secrets, diagnosis finish reason/type/usage, accounting respons
+gagal bila tersedia, serta retry review kandidat yang sama setelah fix.
+File: agents/models, konfigurasi contoh/lokal, docs keputusan dan log.
+Tidak menyimpan raw respons provider atau menerima reasoning sebagai verdict.
+Hasil: role memiliki opsi stream dan reasoning_effort tervalidasi; SSE dibatasi
+bytes/deadline, menerima comments/multi-line/usage terminal, memerlukan DONE dan
+finish reason, serta menolak length/tool_calls/filter/error/jawaban kosong.
+Content parts teks dinormalisasi. Usage gagal yang tersedia tetap diakumulasi;
+usage tidak tersedia tetap unknown. Progress hanya counts, tanpa raw reasoning
+atau fragmen teks/secret. Struktur JSON/izin/lease/approval tetap ditegakkan.
+Verifikasi aktual: sintaks/import dan parse model registry lulus; `git diff --check`
+lulus. Tidak menambah/menjalankan tes regresi. Percobaan provider nyata atas
+kandidat demo yang sama: job `bebb339bb86641b1b28d712dbfb2b8fa` menjelaskan
+error lama — finish_reason=length, answer_chars=0, completion_tokens=4096;
+usage/cost kali ini tercatat. API metadata resmi model DeepSeek v4.1 Flash
+mengonfirmasi default reasoning high, supported max/high/low. Local TL config
+(gitignored) diubah stream=true/max_output_tokens=8192/reasoning_effort=low;
+contoh tracked mengaktifkan stream dan cap 8192 tanpa mengasumsikan effort cocok
+untuk model contoh lain. Worker direstart; retry resmi
+`d278ed5bffb341b28cdee3639a4ebe6f` accepted dalam **23,9 detik**, finish stop,
+answer_chars=2526, output_tokens=6012. Kandidat tetap
+`4f16cedabc2a479f82e2e83984d8fc23`; tiket kemudian **UAT** melalui pipeline.
+Keterbatasan: SSE interruption/cancel/error/malformed/byte bound dan kompatibilitas
+provider lain belum melalui tes regresi. Effort low dan cap lebih besar sama-sama
+berubah; keberhasilan tidak mengukur pengaruh streaming sendiri. Progress hanya
+di log, tidak menampilkan token reasoning/jawaban parsial sebagai verdict. Belum
+commit/push; review independen belum dilakukan.
+
 ### Penyempurnaan empat peran — 2026-10-06
 
 Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.
@@ -1423,6 +1472,58 @@ batch approval, daftar run/activity, blocker, dan indikator fake/real.
 uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
+
+### Setup proyek baru otomatis dan recovery cleanup lokal — 2026-10-06
+
+Catatan operasional lanjutan: log Docker menunjukkan VM otomatis berhenti karena
+idle 30 detik, lalu startup berulang menahan command developer. Timeout idle
+Docker Desktop lokal diubah 30 → 3600 detik untuk demo dan Desktop direstart
+tanpa reset data; nilai awal disimpan di file gitignored
+`data/docker-idle-demo-backup.json`. Tidak mengubah setting Docker host lain.
+Job developer `b00b5079abe741fab5af25cc2a71ca3a` kemudian stopped karena
+200578 total tokens melewati default 200000. Sesuai instruksi unlimited demo
+sebelumnya, budget pool demo catatan dan policy pool baru diperbarui melalui
+`JobQueue.extend_budget(unlimited_budgets=True)` dengan authorization/event user;
+usage lama tidak dihapus. Arsip milik job/generation/base diverifikasi SHA256
+terhadap ARCHIVE-MANIFEST, 9 file source dipin sebagai checkpoint sebelum retry
+`de004a38e4b34aa6b953d2626d04fca2` dibuat dalam transaksi yang sama.
+Scope, approval, batas repair, target QA dan accepted ref tidak diubah.
+
+Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.
+Assignment: proyek baru tidak memerlukan konfigurasi runner manual; pulihkan demo
+catatan yang tertahan setelah QA planning. Rencana: job setup persisten tanpa
+model menyiapkan runner React/Vite referensi dan empty Git base di worker;
+rekonsiliasi menemukan proyek baru belum disiapkan. Approval scope tetap wajib.
+Supervisor mencoba cleanup ulang untuk attempt lokal yang terbukti sudah selesai,
+tanpa menunggu proses worker mati. Penyebab demo aktual: `docker ps timed out`
+saat cleanup QA; arsip runtime sudah berhasil, bukan bug pemeriksaan arsip.
+File: pipeline setup/wiring, worker, HTTP create project, broker Git, supervisor,
+README/dokumen keputusan dan log. Tidak menambah/menjalankan tes karena assignment
+tidak meminta tes; gunakan sintaks/import dan observasi layanan/demo nyata.
+
+Hasil: `pipeline/setup.py` membuat job persisten `project_setup` saat create
+project API (satu transaksi receipt) dan saat maintenance menemukan proyek baru
+lama belum siap. Manifest referensi, base Git kosong, event dan completion memakai
+identitas job/generation; publikasi DB atomik. Retry initialization hanya menerima
+bare repo kosong/satu initial empty commit; tidak mengubah accepted code/ref lain.
+Repo existing dan runner lengkap tidak ditimpa; approval scope/QA/UAT/release tetap.
+Supervisor menyimpan bukti thread lokal selesai untuk mencoba ulang cleanup,
+memeriksa owner/host/generation dan proses sebelum melepas ledger/slot.
+Verifikasi aktual: `ast.parse` **5 file Python OK**; import setup/HTTP/supervisor/
+broker serta parsing manifest referensi **lulus**; `git diff --check` **lulus**.
+Docker Desktop sempat tidak merespons socket/image inspect; direstart tanpa reset
+data. API `/health` **ok**, frontend tetap aktif, worker baru mendaftarkan runtime
+`project-setup`. Demo `25f7b5e9019646e0b13908fa59fa8b59`: cleanup job QA
+`6bfb9a03563a4531bce2a1daf94aa0b9` dipulihkan melalui recovery resmi,
+`cleanup_pending=false`, `needs_human=false`; tiket #1 masuk **development** dan
+job developer **running**. Histori dan artefak dipertahankan.
+Keterbatasan: tidak membuat proyek dummy di DB pengguna untuk menguji setup;
+jalur create-project baru, crash setup dan retry cleanup dalam worker yang sama
+belum melalui tes regresi/integrasi. Recovery demo memakai worker baru dengan
+owner lama sudah mati; bukan bukti cabang recovery owner masih hidup. Keberhasilan
+developer/QA/UAT akhir demo belum diklaim. Backend/worker direstart untuk memuat
+kode; FE tetap berjalan. Handoff: diff file di atas termasuk file setup baru;
+review independen belum dilakukan. Belum commit/push pada assignment ini.
 
 ### Review Claude Batch 4 DEV-010/011 — 2026-10-06
 

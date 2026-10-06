@@ -70,6 +70,7 @@ class Supervisor:
         self._handles: dict[str, _Handle] = {}
         self._last_heartbeat = 0.0
         self._recovering: dict[str, threading.Thread] = {}
+        self._finished_attempts: dict[str, int] = {}
         # Callables run every tick (reconcilers such as Threads.ensure_reply_jobs). A failing hook is
         # reported but never stops scheduling.
         self.maintenance: list = []
@@ -302,12 +303,30 @@ class Supervisor:
                 self._stop(handle)
 
     def _reap_finished(self) -> None:
+        # Keep proof only while a failed cleanup still owns resources. This is
+        # local thread-completion proof, never an assertion about another worker.
+        with self.db.read() as s:
+            pending = {job_id for job_id in self._finished_attempts
+                       if (job := s.get(Job, job_id)) is not None and job.runtime_ref.get('cleanup')}
+        self._finished_attempts = {k: v for k, v in self._finished_attempts.items() if k in pending}
         for job_id, handle in list(self._handles.items()):
             if not handle.thread.is_alive():
+                if handle.stop_thread is not None and handle.stop_thread.is_alive():
+                    continue
+                with self.db.read() as s:
+                    job = s.get(Job, job_id)
+                    if job is not None and job.runtime_ref.get('cleanup'):
+                        self._finished_attempts[job_id] = handle.lease.generation
                 self._handles.pop(job_id)
 
     def _reconcile(self, snapshot: dict) -> bool:
-        if not owner_gone(snapshot) or not reap_recorded_processes(snapshot):
+        cleanup = snapshot['runtime_ref'].get('cleanup', {})
+        from .runtime import host_identity
+        locally_finished = (self._finished_attempts.get(snapshot['id']) == cleanup.get('generation')
+                            and cleanup.get('owner') == self.owner
+                            and cleanup.get('host') == host_identity()
+                            and snapshot['id'] not in self._handles)
+        if not (locally_finished or owner_gone(snapshot)) or not reap_recorded_processes(snapshot):
             return False
         if snapshot["runtime_ref"].get("resources"):
             runtime = self.runtimes.get(snapshot["runtime_ref"].get("runtime"))

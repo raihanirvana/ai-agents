@@ -7,7 +7,7 @@
   "default": {"provider": "openrouter", "model": "qwen/qwen3.8-27b:free", "timeout_s": 60, "max_output_tokens": 2048},
   "roles": {
     "po": {},
-    "technical-lead": {},
+    "technical-lead": {"stream": true},
     "developer": {},
     "qa": {}
   }

@@ -12,6 +12,8 @@ import json
 import math
 import os
 import socket
+import time
+import threading
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -73,6 +75,8 @@ class ModelRequest:
     max_output_tokens: int
     model: str
     temperature: float = 0.2
+    stream: bool = False
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,8 +100,10 @@ class ModelConfig:
     provider: str
     model: str
     timeout_s: float = 60.0
-    max_output_tokens: int = 2048
+    max_output_tokens: int | None = 2048
     temperature: float = 0.2
+    stream: bool = False
+    reasoning_effort: str | None = None
 
 
 class ModelRegistry:
@@ -136,11 +142,17 @@ class ModelRegistry:
                 raise ConfigError(f"role {role} uses unknown provider {merged['provider']}")
             timeout = merged.get("timeout_s", 60)
             tokens = merged.get("max_output_tokens", 2048)
+            stream = merged.get('stream', False)
+            effort = merged.get('reasoning_effort')
+            if effort not in (None, 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'):
+                raise ConfigError(f'role {role} has an invalid reasoning_effort')
+            if type(stream) is not bool:
+                raise ConfigError(f'role {role} stream must be boolean')
             if (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 600 or
-                    isinstance(tokens, bool) or not isinstance(tokens, int) or not 0 < tokens <= 32768):
-                raise ConfigError(f"role {role} needs a finite timeout (0-600 s) and max_output_tokens")
+                    (tokens is not None and (type(tokens) is not int or tokens <= 0))):
+                raise ConfigError(f"role {role} needs a finite timeout (0-600 s) and positive max_output_tokens or null")
             configs[role] = ModelConfig(role, merged["provider"], merged["model"], float(timeout), tokens,
-                                        float(merged.get("temperature", 0.2)))
+                                        float(merged.get("temperature", 0.2)), stream, effort)
         for name, settings in providers.items():
             if not isinstance(settings, dict) or not settings.get("base_url") or not settings.get("api_key_env"):
                 raise ConfigError(f"provider {name} needs base_url and api_key_env")
@@ -196,19 +208,71 @@ class ChatCompletionsProvider:
         self.name, self.base_url, self._key = name, base_url.rstrip("/"), api_key
         self.redactor = redactor.with_secrets(api_key)
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+        self._output_limits: dict[str, tuple[float, int]] = {}
 
-    def complete(self, request: ModelRequest, *, timeout_s: float) -> ProviderResponse:
+    def output_limit(self, model: str) -> int:
+        """No application cap: resolve the provider's advertised completion maximum.
+
+        Cached briefly per adapter; never substitute a small runtime/default cap.
+        Other providers need an explicit supported metadata adapter before using null.
+        """
+        cached = self._output_limits.get(model)
+        if cached and time.monotonic() - cached[0] < 300:
+            return cached[1]
+        if urlsplit(self.base_url).hostname != 'openrouter.ai':
+            raise ConfigError('max_output_tokens=null requires OpenRouter model metadata')
+        try:
+            with self._opener.open(self.base_url + '/models', timeout=15) as response:
+                raw = response.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise ValueError('model metadata exceeds transport bound')
+            rows = json.loads(raw)['data']
+            row = next(item for item in rows if item.get('id') == model)
+            limit = (row.get('top_provider') or {}).get('max_completion_tokens')
+            if type(limit) is not int or limit <= 0:
+                raise ValueError('provider completion maximum is unavailable')
+        except (OSError, ValueError, KeyError, TypeError, StopIteration) as exc:
+            raise ProviderUnavailable('cannot resolve provider output maximum') from exc
+        self._output_limits[model] = (time.monotonic(), limit)
+        return limit
+
+    def complete(self, request: ModelRequest, *, timeout_s: float, progress=None, check=None) -> ProviderResponse:
         payload = {"model": request.model, "max_tokens": request.max_output_tokens,
                    "temperature": request.temperature,
                    "messages": [{"role": "system", "content": request.system},
                                 {"role": "user", "content": request.user}]}
         if urlsplit(self.base_url).hostname == "openrouter.ai":
             payload["usage"] = {"include": True}
+            if request.reasoning_effort is not None:
+                payload['reasoning'] = {'effort': request.reasoning_effort}
+        elif request.reasoning_effort is not None:
+            raise ProviderRejected('reasoning_effort is currently supported only through OpenRouter')
+        if request.stream:
+            payload.update(stream=True, stream_options={'include_usage': True})
         body = json.dumps(payload).encode()
         http = urllib.request.Request(self.base_url + "/chat/completions", data=body, method="POST", headers={
             "Authorization": "Bearer " + self._key, "Content-Type": "application/json"})
+        deadline = time.monotonic() + timeout_s
         try:
             with self._opener.open(http, timeout=timeout_s) as response:
+                if request.stream and 'text/event-stream' in response.headers.get('Content-Type', ''):
+                    # urllib's socket timeout is an idle timeout. A wall timer
+                    # also interrupts a stream that keeps sending small chunks.
+                    sock = getattr(getattr(getattr(response, 'fp', None), 'raw', None), '_sock', None)
+                    if sock is None:
+                        raise ProviderRejected('stream transport cannot enforce its response deadline')
+                    def abort():
+                        try:
+                            sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                    timer = threading.Timer(max(0.01, deadline - time.monotonic()), abort)
+                    timer.daemon = True
+                    timer.start()
+                    try:
+                        return self._stream(response, request, deadline=deadline, progress=progress, check=check)
+                    finally:
+                        timer.cancel()
                 raw = response.read(8 * 1024 * 1024 + 1)
         except urllib.error.HTTPError as exc:
             self._raise_http(exc)
@@ -218,6 +282,10 @@ class ChatCompletionsProvider:
             if isinstance(exc.reason, (socket.timeout, TimeoutError)):
                 raise ModelTimeout(f"provider did not answer within {timeout_s:g}s") from exc
             raise ProviderUnavailable(self.redactor.redact(f"provider unreachable: {exc.reason}")[:300]) from exc
+        except OSError as exc:
+            if time.monotonic() >= deadline:
+                raise ModelTimeout('provider exceeded the response deadline') from exc
+            raise ProviderUnavailable('provider connection interrupted') from exc
         if len(raw) > 8 * 1024 * 1024:
             raise ProviderRejected("provider answer too large")
         return self._parse(raw, request)
@@ -240,23 +308,132 @@ class ChatCompletionsProvider:
     def _parse(self, raw: bytes, request: ModelRequest) -> ProviderResponse:
         try:
             data = json.loads(raw)
-            text = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            message = choice['message']
+            if not isinstance(choice, dict) or not isinstance(message, dict):
+                raise ValueError()
+            text = message.get('content')
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ProviderUnavailable("provider returned a malformed answer") from exc
-        if not isinstance(text, str):
-            raise ProviderUnavailable("provider returned a non-text answer")
+        usage = self._usage(data)
+        if isinstance(text, list) and all(isinstance(p, dict) and p.get('type') == 'text'
+                                         and isinstance(p.get('text'), str) for p in text):
+            text = ''.join(p['text'] for p in text)
+        finish = choice.get('finish_reason')
+        reason = message.get('reasoning_content') or message.get('reasoning')
+        details = data.get('usage', {}).get('completion_tokens_details', {}) if isinstance(data.get('usage'), dict) else {}
+        if not isinstance(details, dict):
+            details = {}
+        diagnostic = (f'finish_reason={finish if finish in ("stop", "length", "tool_calls", "content_filter", "error", None) else "other"}; '
+                      f'content_type={type(text).__name__}; reasoning_present={bool(reason)}; '
+                      f'reasoning_tokens={details.get("reasoning_tokens") if type(details.get("reasoning_tokens")) is int else "unknown"}; '
+                      f'completion_tokens={usage.completion_tokens}')
+        if finish in ('length', 'tool_calls', 'content_filter', 'error') or not isinstance(text, str) or not text.strip():
+            error = ProviderRejected if finish in ('length', 'tool_calls', 'content_filter') else ProviderUnavailable
+            exc = error('provider returned incomplete/non-text answer: ' + diagnostic)
+            exc.usage_counters = usage.as_counters()
+            raise exc
+        return ProviderResponse(text, usage, self.name, str(data.get("model") or request.model))
+
+    @staticmethod
+    def _usage(data):
         raw_usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
 
         def number(*path):
             node: Any = raw_usage
             for step in path:
                 node = node.get(step) if isinstance(node, dict) else None
-            return node if isinstance(node, (int, float)) and not isinstance(node, bool) and node >= 0 else None
+            return node if isinstance(node, (int, float)) and not isinstance(node, bool) and math.isfinite(node) and node >= 0 else None
 
-        usage = Usage(prompt_tokens=number("prompt_tokens"), completion_tokens=number("completion_tokens"),
+        return Usage(prompt_tokens=number("prompt_tokens"), completion_tokens=number("completion_tokens"),
                       total_tokens=number("total_tokens"), cached_tokens=number("prompt_tokens_details", "cached_tokens"),
                       cost_usd=number("cost"))
-        return ProviderResponse(text, usage, self.name, str(data.get("model") or request.model))
+
+    def _stream(self, response, request, *, deadline, progress, check):
+        """Bounded SSE framing; reasoning is counted, never used as a verdict or logged."""
+        last_progress = time.monotonic()
+        text, fields, raw_usage = [], [], {}
+        total = content_chars = reasoning_chars = chunks = 0
+        finish = None
+        done = False
+        model = request.model
+        while not done:
+            if check:
+                check()
+            if time.monotonic() >= deadline:
+                raise ModelTimeout('provider stream exceeded the response deadline')
+            line = response.readline(1024 * 1024 + 1)
+            total += len(line)
+            if len(line) > 1024 * 1024 or total > 8 * 1024 * 1024:
+                raise ProviderRejected('provider stream exceeded its byte bound')
+            if not line:
+                break
+            try:
+                line = line.decode('utf-8').rstrip('\r\n')
+            except UnicodeDecodeError as exc:
+                raise ProviderUnavailable('provider stream is not UTF-8') from exc
+            if line.startswith('data:'):
+                fields.append(line[5:].lstrip(' '))
+                continue
+            if line:
+                continue  # SSE comments and other framing fields are not JSON.
+            if not fields:
+                continue
+            body, fields = '\n'.join(fields), []
+            if body == '[DONE]':
+                done = True
+                break
+            try:
+                data = json.loads(body)
+                if not isinstance(data, dict):
+                    raise ValueError()
+                if isinstance(data.get('usage'), dict):
+                    raw_usage = data['usage']
+                if data.get('error'):
+                    exc = ProviderUnavailable('provider reported a mid-stream error')
+                    exc.usage_counters = self._usage({'usage': raw_usage}).as_counters()
+                    raise exc
+                choices = data.get('choices') or []
+                if not isinstance(choices, list):
+                    raise ValueError()
+                choice = next((c for c in choices if isinstance(c, dict) and c.get('index', 0) == 0), {})
+                delta = choice.get('delta') or {}
+                if not isinstance(delta, dict):
+                    raise ValueError()
+                content = delta.get('content')
+                if content is not None and not isinstance(content, str):
+                    raise ValueError()
+                if content:
+                    text.append(content)
+                    content_chars += len(content)
+                reason = delta.get('reasoning_content') or delta.get('reasoning')
+                if isinstance(reason, str):
+                    reasoning_chars += len(reason)
+                if choice.get('finish_reason') is not None:
+                    finish = choice['finish_reason']
+                if isinstance(data.get('model'), str):
+                    model = data['model']
+                chunks += 1
+            except (ValueError, TypeError, KeyError) as exc:
+                raise ProviderUnavailable('provider stream contains an invalid chunk') from exc
+            if progress and (chunks == 1 or time.monotonic() - last_progress >= 5):
+                progress(f'model streaming: chunks={chunks}, answer_chars={content_chars}, reasoning_chars={reasoning_chars}')
+                last_progress = time.monotonic()
+        usage = self._usage({'usage': raw_usage})
+        if time.monotonic() >= deadline:
+            exc = ModelTimeout('provider stream exceeded the response deadline')
+            exc.usage_counters = usage.as_counters()
+            raise exc
+        if progress:
+            progress(f'model stream ended: chunks={chunks}, answer_chars={content_chars}, reasoning_chars={reasoning_chars}, '
+                     f'finish_reason={finish if finish in ("stop", "length", "tool_calls", "content_filter", "error", None) else "other"}, done={done}')
+        if not done or finish is None:
+            exc = ProviderUnavailable('provider stream ended without complete terminal evidence')
+            exc.usage_counters = usage.as_counters()
+            raise exc
+        # Reuse the same final-answer checks as non-streaming responses.
+        return self._parse(json.dumps({'model': model, 'usage': raw_usage, 'choices': [{'finish_reason': finish,
+            'message': {'content': ''.join(text), 'reasoning': bool(reasoning_chars)}}]}).encode(), request)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -299,20 +476,35 @@ class ModelClient:
             raise ConfigError(f"provider {config.provider} for role {role} is unavailable (no API key configured)")
         return provider
 
+    def output_limit(self, role: str, job_cap: int | None = None) -> int:
+        config = self.registry.for_role(role)
+        cap = config.max_output_tokens
+        if cap is None:
+            provider = self.provider_for(role)
+            if not isinstance(provider, ChatCompletionsProvider):
+                raise ConfigError('provider does not support output maximum metadata')
+            cap = provider.output_limit(config.model)
+        return min(cap, job_cap) if job_cap is not None else cap
+
     def complete(self, ctx: RunContext, role: str, system: str, user: str) -> ModelResult:
         """One reserved, limited, accounted model call for this run. Text is redacted in and out."""
         config, provider = self.registry.for_role(role), self.provider_for(role)
         system, user = self.redactor.redact(system), self.redactor.redact(user)
 
         def call(job_cap):
-            cap = min(config.max_output_tokens, job_cap) if job_cap else config.max_output_tokens
-            request = ModelRequest(system, user, cap, config.model, config.temperature)
+            cap = self.output_limit(role, job_cap)
+            request = ModelRequest(system, user, cap, config.model, config.temperature, config.stream, config.reasoning_effort)
             try:
-                response = provider.complete(request, timeout_s=config.timeout_s)
+                if isinstance(provider, ChatCompletionsProvider):
+                    response = provider.complete(request, timeout_s=config.timeout_s, progress=ctx.log, check=ctx._check)
+                else:
+                    response = provider.complete(request, timeout_s=config.timeout_s)
             except ProviderQuota as quota:
                 raise ctx.provider_quota(quota.retry_after_s, self.redactor.redact(quota.reason)) from quota
             except ModelError as exc:
-                raise type(exc)(self.redactor.redact(str(exc))) from None
+                error = type(exc)(self.redactor.redact(str(exc)))
+                error.usage_counters = getattr(exc, 'usage_counters', {})
+                raise error from None
             return response, response.usage.as_counters()
 
         response = ctx.model_call(call)

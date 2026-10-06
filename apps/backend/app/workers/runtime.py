@@ -102,9 +102,10 @@ class RunContext:
             self.queue.reserve(self.lease, "model")
             try:
                 result, usage = call(self.job["limits"].get("output_tokens"))
-            except BaseException:
+            except BaseException as exc:
                 # The request was already counted; whatever it consumed is unknown, never zero.
-                self.queue.finalize_usage(self.lease.job_id, self.lease.generation, unknown)
+                self.queue.finalize_usage(self.lease.job_id, self.lease.generation,
+                                          {**unknown, **getattr(exc, 'usage_counters', {})})
                 raise
         finally:
             self.limiter.release(self.lane)

@@ -131,6 +131,42 @@ DEV-004: `is_fake_runtime` (label `:fake`), `recipient` pada `request_input`, `J
 
 ## Konfigurasi dan cara menjalankan
 
+Role model menerima opsi boolean `stream` (default false); contoh mengaktifkan
+stream untuk technical lead. Adapter SSE menangani comments, multi-line data,
+usage chunk kosong/terminal berulang, `[DONE]`, dan error di tengah stream.
+Progress log hanya memuat counts chunk/answer/reasoning, tanpa raw reasoning atau
+potongan teks yang berpotensi membelah secret. Jawaban dikumpulkan, diperiksa
+terminal/finish reason, lalu divalidasi kontrak JSON sebelum efek domain.
+Byte bounds, deadline wall-clock socket, cancellation check dan accounting per
+request tetap berlaku. `length`, `tool_calls`, content filter, terminal hilang,
+dan jawaban kosong/non-text tidak menjadi verdict. Content parts berupa teks
+dinormalisasi; usage respons gagal dicatat jika tersedia, sisanya unknown.
+Dokumentasi integrasi:
+[OpenRouter streaming](https://openrouter.ai/docs/api_reference/streaming) dan
+[reasoning tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+Revisi ini tidak mengubah jalur relay Hermes yang terpisah.
+
+`reasoning_effort` opsional dikirim sebagai `reasoning.effort` hanya untuk
+OpenRouter; provider lain ditolak eksplisit bila opsi ini diminta. Pilih effort
+sesuai metadata model resmi, bukan mengasumsikan semua model mendukungnya.
+Diagnosis demo TL: stream dengan output cap 4096 berakhir `length`, answer_chars
+0, reasoning hadir. Metadata `GET /api/v1/models` untuk DeepSeek v4.1 Flash
+menunjukkan default effort high dan dukungan max/high/low. Konfigurasi lokal TL
+awalnya diubah menjadi stream=true, cap 8192, effort low. Review kandidat yang sama
+berhasil dengan finish stop, output 6012 tokens, sekitar 24 detik; bukan bukti
+streaming saja menghilangkan limit atau bahwa low akan sama cepat untuk semua tugas.
+
+Untuk demo lokal, seluruh role sekarang memakai `max_output_tokens: null`:
+cap output aplikasi dihapus. Structured client dan Hermes mengambil
+`top_provider.max_completion_tokens` dari metadata resmi OpenRouter `/models`
+(cache 5 menit), lalu meminta maksimum provider tersebut. Tidak memakai default
+Hermes/provider yang mungkin lebih kecil. Batas budget job yang finite tetap
+berlaku pada proyek lain. Metadata tidak tersedia menghasilkan error eksplisit,
+bukan fallback ke cap kecil. Provider lain belum mendukung opsi null; gunakan
+nilai eksplisit sampai tersedia adapter metadata. Timeout, lease, batas transport,
+accounting, dan approval tetap berlaku. Konfigurasi contoh mempertahankan default
+finite untuk penggunaan umum; override demo lokal tidak di-commit.
+
 ```sh
 cd apps/backend
 ./.venv/bin/python -m pytest tests/agents -q

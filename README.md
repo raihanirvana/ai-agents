@@ -61,6 +61,17 @@ npm run dev:web
 ```
 
 Buka <http://127.0.0.1:5173>. API health: <http://127.0.0.1:8000/health>.
+
+Untuk menjalankan tim AI nyata, gunakan worker
+`./.venv/bin/python -m app.worker --runtime pipeline`
+(Docker dan Hermes terkonfigurasi diperlukan). Proyek mode
+`new` otomatis mendapat job `project_setup`: worker memasang manifest React/Vite
+referensi dan empty Git base internal tanpa model atau eksekusi kode target.
+Tidak perlu menjalankan configure manual. Implementasi tetap menunggu persetujuan
+scope. Status setup/error terlihat di Aktivitas. Repo existing tetap memakai
+onboarding untuk memverifikasi runner dan sumbernya; stack di luar runner yang
+didukung membutuhkan konfigurasi yang diverifikasi.
+
 Web dan API bind ke `127.0.0.1`; konfigurasi host lain ditolak untuk control
 plane lokal. Port dapat diubah melalui `WEB_PORT` dan `API_PORT`;
 sesuaikan `VITE_API_BASE_URL` dengan port API. Jika `CORS_ORIGINS` diisi,

@@ -149,6 +149,9 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     def create_project(request: Request, body: b.ProjectCreate):
         def action(s, svc, key, principal):
             p = svc.workflow.create_project(user_actor(principal, new_id()), **request.app.state.api.redactor.redact_value(body.model_dump()))
+            if p.mode == 'new':
+                from app.pipeline.setup import enqueue_setup
+                enqueue_setup(s, svc.queue, p)
             return {"project": q.project(p)}
         return command(request, body, action)
     @app.get("/projects/{project_id}")

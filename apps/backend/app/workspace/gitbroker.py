@@ -95,10 +95,25 @@ class GitBroker:
         return self.run(["--git-dir", str(self.repo), *args], **kw)
 
     # -- project -------------------------------------------------------------
-    def init_project(self) -> str:
+    def init_project(self, *, resume: bool = False) -> str:
         """Create the bare repo with the supervisor's initial empty commit on accepted."""
-        if self.repo.exists():
+        if self.repo.is_symlink():
+            raise GitBrokerError('initialization refuses a symlink repository')
+        if self.repo.exists() and not resume:
             raise GitBrokerError("repository already exists")
+        if self.repo.exists():
+            if self._bare('rev-parse', '--is-bare-repository').decode().strip() != 'true':
+                raise GitBrokerError('initialization requires a managed bare repository')
+            refs = self.refs()
+            if refs:
+                if set(refs) != {ACCEPTED_REF}:
+                    raise GitBrokerError('initialization cannot replace existing refs')
+                sha = self.accepted_sha()
+                tree = self._bare('rev-parse', sha + '^{tree}').decode().strip()
+                history = self._bare('rev-list', '--count', sha).decode().strip()
+                if tree != EMPTY_TREE or history != '1':
+                    raise GitBrokerError('initialization cannot accept existing application code')
+                return sha
         self.repo.parent.mkdir(parents=True, exist_ok=True)
         self.run(["init", "--bare", "--initial-branch=accepted", str(self.repo)])
         tree = self._bare("hash-object", "-t", "tree", "-w", "--stdin", input=b"").decode().strip()

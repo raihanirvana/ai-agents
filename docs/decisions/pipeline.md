@@ -7,7 +7,7 @@ Sumber kebutuhan: ARCHITECTURE §5–10, AGENTS.md, AC DEV-010 di backlog.
 
 Worker `--runtime pipeline` mendaftarkan runtime structured untuk PO/lead dan pipeline
 untuk technical plan → QA plan → developer → technical review → verification.
-Scheduler hanya mengambil proyek yang dikonfigurasi eksplisit, scope yang disetujui,
+Scheduler hanya mengambil proyek dengan runner/base siap, scope yang disetujui,
 dependency eligible, dan tiket tanpa blocker. Approval scope, UAT, waiver, repair
 extension, serta release tetap berasal dari pengguna melalui domain produk.
 
@@ -318,3 +318,21 @@ minimum menggunakan trusted static server pada internal 4173 dan health `/`.
 Preview GUI, integration accepted ref dan existing-repo onboarding tersedia melalui
 DEV-011/012/013. Release dan pilot tetap DEV-014/015. Artifact besar, DB, serta private Hermes
 transcripts tidak di-commit. Review independen R6 belum dilakukan.
+## Setup otomatis proyek baru — 2026-10-06
+
+Pembuatan proyek `new` melalui API menyimpan job `project_setup` dalam transaksi
+yang sama. Worker pipeline juga mencari proyek baru lama yang belum mempunyai
+base/runner. Job persisten tanpa model menyiapkan manifest React/Vite referensi
+dan empty Git commit teknis; tidak membuat fitur, approval, kandidat, atau bukti
+QA. Publication base/config dan completion job atomik serta diperiksa lease.
+Idempotency key tetap; failure permanen tidak diputar dengan job baru otomatis.
+Initialization Git dapat dilanjutkan setelah crash, hanya pada bare repo tanpa
+ref atau dengan satu accepted initial empty commit; ref/kode existing tidak
+di-reset atau diterima sebagai hasil implementasi. Konfigurasi runner proyek yang
+sudah lengkap tidak ditimpa. Repo existing tetap melalui validasi onboarding.
+
+Cleanup setelah timeout Docker dapat dicoba ulang oleh supervisor yang sama jika
+ia menyimpan bukti lokal thread attempt dan thread stop sudah selesai, owner/host
+dan generation tepat, serta reaper membuktikan proses target sudah berhenti.
+Recovery worker lain tetap memerlukan bukti owner lama sudah mati. Tidak menghapus
+ledger cleanup atau membuka slot hanya berdasarkan status `succeeded`.
