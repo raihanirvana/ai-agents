@@ -20,14 +20,18 @@ Kantor Three.js tidak termasuk.
 
 - **Sumber kebenaran.** Setiap event SSE (atau respons command) memicu refetch board,
   pesan, dan detail tiket yang terbuka. Respons lama tidak boleh menimpa yang lebih baru
-  (nomor urut permintaan). Tidak ada update optimistis; yang tampil selalu hasil backend.
+  (nomor urut respons yang sudah diterapkan). Permintaan lebih baru yang masih berjalan
+  tidak menghalangi respons selesai untuk tampil. Epoch proyek dan pilihan tiket
+  menjaga respons lama saat pengguna berpindah. Tidak ada update optimistis;
+  yang tampil selalu hasil backend.
 - **Command.** Setiap tindakan memakai `Idempotency-Key` baru; key yang sama dipakai ulang
   hanya untuk pengulangan permintaan identik setelah kegagalan jaringan atau HTTP 5xx.
   Key dibuang setelah sukses atau penolakan 4xx; respons 5xx tidak membuktikan transaksi belum
   dijalankan. Body berbeda mendapat key berbeda. Key retry hanya bertahan selama komponen
   proyek terpasang, belum persisten lintas reload. `expected_revision` diambil dari data yang sedang tampil: revisi proyek
-  untuk chat/brief, revisi tiket untuk edit/priority/approval/UAT/repair, revisi run untuk
+  untuk brief, revisi tiket untuk edit/priority/approval/UAT/repair, revisi run untuk
   jawaban input. Conflict (409 `revision_conflict`) ditampilkan dan data dimuat ulang.
+  Append chat tidak membawa precondition revision proyek; idempotency key tetap wajib.
   Editor scope/brief menyimpan revision saat dibuka, bukan mengikuti revision dari SSE;
   draf lama ditolak dan tetap bisa disalin. Deskripsi disimpan terpisah dari metadata scope
   di DTO; editor mempertahankan keduanya, termasuk `reverts_candidate_id`.
@@ -44,7 +48,8 @@ Kantor Three.js tidak termasuk.
 - **Approval eksplisit.** Approval scope (satuan atau batch) menampilkan versi scope yang
   disetujui dan memerlukan konfirmasi kedua. Menerima usulan revisi PO hanya membuat versi
   baru; ia tidak menyetujui scope. UAT hanya tersedia bila ada kandidat scope saat ini dengan
-  verifikasi `passed` untuk target yang sama; UAC manual harus dikonfirmasi satu per satu, dan
+  verifikasi `passed` yang dipin pada `candidate.preview.verification_id` untuk target
+  yang sama; UAC manual harus dikonfirmasi satu per satu, dan
   payload membawa `target_artifact_id`, `target_digest`, `verification_id`, `evidence_ids`.
   Konfirmasi gugur jika identitas/revision scope, pilihan batch, atau target berubah.
   Checklist manual terikat candidate/scope/target/verifikasi/evidence; tidak berpindah ke

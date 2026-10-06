@@ -12342,8 +12342,15 @@
       "MessageCreate": {
         "properties": {
           "expected_revision": {
-            "type": "integer",
-            "minimum": 1.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expected Revision"
           },
           "body": {
@@ -12377,7 +12384,6 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "expected_revision",
           "body"
         ],
         "title": "MessageCreate"

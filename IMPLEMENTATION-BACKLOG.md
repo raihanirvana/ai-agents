@@ -1030,6 +1030,60 @@ dan hasil recovery. Jangan memasukkan key atau kredensial ke dokumentasi.
 
 ## DEV-007 — Soul, context, model client, dan pesan antar-agent
 
+### Review Claude Batch 3 DEV-007/008/009 — 2026-10-06
+
+Status perbaikan: DONE (implementasi). Pelaksana: Codex. Review perbaikan: NOT_REVIEWED.
+Tujuh temuan masih berlaku pada head awal `b3ac9c9` dan diperbaiki:
+
+1. `Threads.ensure_reply_jobs` memakai satu query kandidat pending dengan join
+   origin, NOT EXISTS reply, status waiting untuk input request, serta filter
+   needs_reply/category/penerima/scope. Pesan lama yang sudah punya reply tidak
+   dimaterialisasi dan tidak lagi menghasilkan query tambahan per pesan per tick.
+   Enqueue tetap memeriksa ulang eligibility dalam transaksi tulis dan memakai
+   idempotency key asli; tidak mengubah histori atau membangkitkan scope stale.
+3. `ContextBuilder._history` menyaring proyek, tiket (termasuk NULL untuk konteks
+   proyek), runtime log dan kind/intent langsung di SQL. Ringkasan tetap diambil
+   dan diverifikasi dengan digest sumber; urutan dan batas konteks dipertahankan.
+   Filter log bersama dipindah ke persistence, digunakan API dan context builder.
+4. Append chat tidak memakai revision proyek. Schema menerima expected_revision
+   opsional untuk klien lama tetapi mengabaikannya; Chat/AskPo tidak mengirimnya.
+   Receipt idempotent atomik, validasi proyek/tiket/task, auth dan CSRF tetap berlaku.
+5. SSE CLOSED atau parse/handler gagal menutup stream lama, memeriksa sesi,
+   mengambil snapshot dan membuka stream dari cursor snapshot. 401 memicu login;
+   kegagalan sementara di-retry dengan delay 1–10 detik. Stop membatalkan timer;
+   callback stream lama dan recovery selesai setelah stop diabaikan.
+6. UAT memilih `candidate.preview.verification_id` dengan status passed dan digest
+   target yang cocok, bukan urutan verification array. Pin yang tidak tersedia
+   tidak diganti dengan bukti lain; backend tetap memvalidasi approval/evidence.
+7. Retry-After numerik harus finite; nilai invalid/nonfinite memakai 30 detik,
+   kemudian di-clamp 1–3600 detik sebelum ProviderLimiter menerima nilai tersebut.
+8. Refresh membuang hasil yang lebih lama dari respons yang sudah diterapkan,
+   bukan semua yang lebih lama dari permintaan terbaru. Epoch proyek dan pilihan
+   tiket dicek agar respons dari proyek/tiket lama tidak menimpa detail baru.
+
+Temuan extend budget ganda sudah ditutup Batch 1 (`2c2f497`): parent yang punya
+retry ditolak sebelum cap diubah; idempotency key yang sama mengembalikan retry
+yang sama. API memakai jalur queue tersebut sehingga tidak memerlukan fix duplikat.
+File hasil: `apps/backend/app/agents/{threads,context,models}.py`,
+`apps/backend/app/persistence/messages.py`, `apps/backend/app/http/{application,
+schemas,queries}.py`, `apps/web/src/api/client.ts`, `apps/web/src/workspace.tsx`,
+`apps/web/src/components/{Chat,Ticket}.tsx`, `contracts/api/{openapi.json,requests.ts}`,
+`docs/decisions/{agents,api,gui}.md`, dan log ini.
+Verifikasi aktual:
+- `apps/backend/.venv/bin/python` dengan `ast.parse` — **7 file Python OK**.
+- Dari `apps/backend`: `.venv/bin/python -m app.http.contract` — **exit 0**;
+  kontrak OpenAPI/TypeScript diregenerasi tanpa menjalankan server/lifespan DB.
+- `node_modules/.bin/tsc -p apps/web/tsconfig.json --noEmit` — **exit 0**.
+- `git diff --check` — **lulus**; self-check diff, bukan review independen.
+Tes regresi tidak ditambah/dijalankan karena permintaan lanjutan tidak secara
+eksplisit meminta tes. Tidak ada benchmark riwayat besar, browser reconnect/401,
+uji concurrency, atau inference provider pada sesi ini; aplikasi/worker tetap mati.
+Handoff: diff tracked file di atas. Regresi berikutnya perlu memeriksa query count
+riwayat besar, pemulihan reply setelah crash/cancel/revisi, chat saat revision proyek
+berubah dan retry identik, SSE CLOSED/401/parse/snapshot gagal/stop, UAT dua receipt
+passed dengan urutan acak, Retry-After nan/inf/negatif/besar, serta refresh yang
+overlap terus dan pergantian proyek/tiket. Tidak menutup checkpoint R5 dari self-check.
+
 ### Catatan pengerjaan
 Status: DONE (fake/contract checks; F1–F7 review diperbaiki Codex, 2026-10-05)
 Pelaksana/sesi: Claude (Sonnet 5.5), sesi Windows + WSL 2026-10-05

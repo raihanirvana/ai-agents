@@ -1,16 +1,12 @@
 """Explicit public projections: never expose credential hashes, runtime refs or storage paths."""
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.persistence import NotFound, latest_cursor
+from app.persistence.messages import not_runtime_log
 from app.persistence.models import (Project, Ticket, TicketVersion, Candidate, Verification, Artifact,
                                     Approval, Dependency, Job, Message)
 from app.preview import requests as previews
 from app.release import requests as releases
-
-
-def not_runtime_log():
-    """SQL filter: conversation messages only (supervisor log lines carry metadata.runtime_log)."""
-    return func.json_extract(Message.meta, "$.runtime_log").is_(None)
 
 
 def row(s, model, identity, project_id=None):

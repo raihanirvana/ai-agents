@@ -56,20 +56,21 @@ export function WorkspaceProvider({ projectId, selectedTicket, selectTicket, onA
 
   const refresh = useCallback(async () => {
     const ticketId = selected.current;
-    const mine = ++sequence.current.issued;
+    const order = sequence.current;
+    const mine = ++order.issued;
     try {
       const [nextBoard, nextMessages, nextDetail] = await Promise.all([
         api.board(projectId), api.messages(projectId), ticketId ? api.ticket(ticketId) : Promise.resolve(null),
       ]);
       // A slower, older response must never overwrite a newer one.
-      if (mine < sequence.current.issued) return;
-      sequence.current.applied = mine;
+      if (order !== sequence.current || mine < order.applied) return;
+      order.applied = mine;
       setBoard(nextBoard);
       setMessages(nextMessages.messages);
-      setDetail(nextDetail);
+      if (ticketId === selected.current) setDetail(nextDetail);
     } catch (failure) {
-      if (mine < sequence.current.issued) return;
-      if (failure instanceof ApiError && failure.status === 404 && ticketId) setDetail(null);
+      if (order !== sequence.current || mine < order.applied) return;
+      if (failure instanceof ApiError && failure.status === 404 && ticketId === selected.current) setDetail(null);
       report(failure);
     }
   }, [projectId, report]);

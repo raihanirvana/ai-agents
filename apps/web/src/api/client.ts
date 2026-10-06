@@ -61,44 +61,88 @@ export class ApiClient {
   watch(projectId: string, cursor: number, handlers: {
     open?: () => void;
     event: (event: StateEvent) => void;
-    snapshot: (snapshot: Board, reason: SnapshotRequired["reason"]) => void | Promise<void>;
+    snapshot: (snapshot: Board, reason: SnapshotRequired["reason"] | "stream_error") => void | Promise<void>;
     error: (error: unknown) => void;
   }): () => void {
     let source: EventSource | undefined;
     let closed = false;
+    let recovering = false;
+    let retryTimer: number | undefined;
+    let retryDelay = 1000;
+    const closeSource = () => { source?.close(); source = undefined; };
+    const authFailed = (error: unknown) => {
+      closed = true;
+      window.clearTimeout(retryTimer);
+      closeSource();
+      handlers.error(error);
+    };
+    const recover = async (reason: SnapshotRequired["reason"] | "stream_error") => {
+      if (closed || recovering) return;
+      recovering = true;
+      let retry = false;
+      try {
+        // EventSource cannot expose a reconnect response's HTTP status.
+        await this.session();
+        if (closed) return;
+        const snapshot = await this.board(projectId);
+        if (closed) return;
+        await handlers.snapshot(snapshot, reason);
+        if (closed) return;
+        cursor = snapshot.cursor;
+        open();
+      } catch (error) {
+        if (closed) return;
+        if (error instanceof ApiError && error.status === 401) authFailed(error);
+        else { handlers.error(error); retry = true; }
+      } finally {
+        recovering = false;
+        if (retry && !closed) scheduleRecovery(reason);
+      }
+    };
+    const scheduleRecovery = (reason: SnapshotRequired["reason"] | "stream_error", delay = retryDelay) => {
+      closeSource();
+      if (closed || recovering || retryTimer !== undefined) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = undefined;
+        void recover(reason);
+      }, delay);
+      retryDelay = Math.min(10000, retryDelay * 2);
+    };
     const open = () => {
-      source = new EventSource(`${this.base}/projects/${encodeURIComponent(projectId)}/events?cursor=${cursor}`, { withCredentials: true });
-      source.onopen = () => { if (!closed) handlers.open?.(); };
-      source.addEventListener("state", (raw: MessageEvent) => {
+      if (closed) return;
+      const stream = new EventSource(`${this.base}/projects/${encodeURIComponent(projectId)}/events?cursor=${cursor}`, { withCredentials: true });
+      source = stream;
+      const current = () => !closed && source === stream;
+      stream.onopen = () => { if (current()) { retryDelay = 1000; handlers.open?.(); } };
+      stream.addEventListener("state", (raw: MessageEvent) => {
+        if (!current()) return;
         try {
           const event = JSON.parse(raw.data) as StateEvent;
           if (event.cursor <= cursor) return;
           handlers.event(event); // Only acknowledge after the state update succeeds.
           cursor = event.cursor;
-        } catch (error) { source?.close(); handlers.error(error); }
+        } catch (error) { scheduleRecovery("stream_error"); handlers.error(error); }
       });
-      source.addEventListener("snapshot_required", async (raw: MessageEvent) => {
-        source?.close();
+      stream.addEventListener("snapshot_required", (raw: MessageEvent) => {
+        if (!current()) return;
         try {
           const reset = JSON.parse(raw.data) as SnapshotRequired;
-          const snapshot = await this.board(projectId);
-          if (closed) return;
-          await handlers.snapshot(snapshot, reset.reason);
-          if (closed) return;
-          cursor = snapshot.cursor;
-          open();
-        } catch (error) { handlers.error(error); }
+          scheduleRecovery(reset.reason, 0);
+        } catch (error) { scheduleRecovery("stream_error"); handlers.error(error); }
       });
-      source.addEventListener("session_expired", () => {
-        source?.close(); handlers.error(new ApiError(401, { code: "session_expired", message: "Authenticate again", details: {} }));
+      stream.addEventListener("session_expired", () => {
+        if (current()) authFailed(new ApiError(401, { code: "session_expired", message: "Authenticate again", details: {} }));
       });
       // Native reconnect sends Last-Event-ID, which the API prioritises over the original URL.
-      // Handler failures above close the stream so they cannot silently advance its cursor.
-      source.onerror = () => {
-        if (!closed) handlers.error(new Error("Event stream disconnected; reconnect using the last snapshot/cursor"));
+      // Permanently closed streams need a session check and fresh snapshot;
+      // parse failures use that same path without acknowledging a bad event.
+      stream.onerror = () => {
+        if (!current()) return;
+        if (stream.readyState === EventSource.CLOSED) scheduleRecovery("stream_error");
+        handlers.error(new Error("Event stream disconnected; reconnect using the last snapshot/cursor"));
       };
     };
     open();
-    return () => { closed = true; source?.close(); };
+    return () => { closed = true; window.clearTimeout(retryTimer); closeSource(); };
   }
 }

@@ -9,6 +9,15 @@ Kode: `apps/backend/app/agents/`, berkas peran `agents/<role>/{SOUL,instructions
 
 ## Komponen
 
+Perbaikan Batch 3 (2026-10-06): rekonsiliasi reply menyaring pesan pending di SQL
+dan memuat origin melalui join; tidak ada query per pesan historis yang sudah
+punya reply. Eligibility tetap diperiksa lagi saat enqueue. Context history
+memfilter proyek/tiket, runtime log dan kind/intent di SQL; ringkasan beserta digest
+sumber dan batas konteks tetap berlaku. Retry-After invalid/nonfinite memakai
+fallback 30 detik dan nilai yang diterima dibatasi 1–3600 detik. Perubahan belum
+melalui tes regresi atau benchmark pada sesi ini; bukti aktual adalah sintaks,
+kontrak API dan TypeScript, dicatat pada backlog Batch 3.
+
 | Modul | Tanggung jawab |
 | --- | --- |
 | `souls.py` | Memuat empat `SOUL.md` + `instructions.md`, divalidasi (ada, tidak kosong, <= 16 KiB, UTF-8, tanpa pola secret) dan diberi digest konten yang dicatat di setiap snapshot. SOUL hanya mengatur identitas/perilaku; ia tidak memberi izin. |

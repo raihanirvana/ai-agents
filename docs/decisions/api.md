@@ -59,6 +59,9 @@ expected/actual. Batch approval memeriksa semua tiket dalam satu transaksi.
 Creation tidak punya revision entity sebelumnya. Scope approval membawa revision
 per tiket. Scope/candidate/release/run mutation menggunakan expected revision;
 keputusan teknis mengacu pesan proposal append-only dan keputusan tunggal.
+Append chat `POST /projects/{id}/messages` tidak memeriksa revision proyek:
+`expected_revision` opsional diterima untuk kompatibilitas klien lama dan diabaikan.
+Receipt idempotent tetap melindungi retry; validasi proyek/tiket/task tidak berubah.
 Pertanyaan nonblocking mengacu identitas pesan immutable, scope/generation dan
 status open. Tidak ada endpoint arbitrary status setter. Payload schema strict,
 extra fields ditolak. Approval kandidat tetap mengikat build target dan evidence,
@@ -131,6 +134,14 @@ Content dikirim sebagai attachment/octet-stream dengan CSP sandbox, bukan HTML
 inline di host kontrol. Export Git belum tersedia pada endpoint content.
 
 ## SSE dan kontrak frontend
+
+Perbaikan Batch 3 (2026-10-06): stream yang CLOSED atau gagal parse/handler
+dipulihkan dengan pemeriksaan `/auth/session`, snapshot board, lalu subscribe
+dari cursor snapshot. HTTP 401 memicu login kembali; failure sementara di-retry
+dengan delay meningkat sampai 10 detik. Native reconnect pada CONNECTING tetap
+memakai Last-Event-ID. Stop/unmount menutup stream, membatalkan timer dan menolak
+callback stream lama; event gagal tidak diakui cursornya. Perilaku browser ini
+belum diuji ulang pada sesi perbaikan (TypeScript/syntax check saja).
 
 Event ID adalah `events.cursor` persisten, dengan urutan commit dari SQLite.
 `state` berisi cursor, project/type/entity/run, payload dan created_at. Replay

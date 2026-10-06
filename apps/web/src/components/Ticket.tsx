@@ -144,7 +144,7 @@ function AskPo({ ticketId }: { ticketId: string }) {
       e.preventDefault();
       if (!board || !body.trim()) return;
       const result = await command<"message">(`/projects/${board.project.id}/messages`, {
-        expected_revision: board.project.revision, body: body.trim(), task: "revise", ticket_id: ticketId });
+        body: body.trim(), task: "revise", ticket_id: ticketId });
       if (result) setBody("");
     }}>
       <label>Minta PO merevisi tiket ini
@@ -400,7 +400,10 @@ function UatSection({ detail }: { detail: TicketDetail }) {
   const target = useMemo(() => {
     for (const c of [...detail.candidates].reverse()) {
       if (c.status === "superseded" || c.status === "rejected" || c.scope_version !== ticket.scope_version) continue;
-      const v = [...c.verifications].reverse().find((x) => x.status === "passed" && x.target_digest === c.target_digest);
+      const pinnedId = c.preview && typeof c.preview === "object" && !Array.isArray(c.preview)
+        ? c.preview.verification_id : undefined;
+      const v = c.verifications.find((x) => x.id === pinnedId && x.status === "passed"
+        && x.target_digest === c.target_digest);
       if (v && c.target_artifact_id && c.target_digest) return { candidate: c, verification: v };
     }
     return null;

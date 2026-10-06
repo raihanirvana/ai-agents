@@ -50,7 +50,7 @@ export default function Chat() {
         e.preventDefault();
         if (!canSend) return;
         const result = await command<"message">(`/projects/${board.project.id}/messages`, {
-          expected_revision: board.project.revision, body: body.trim(), task, ticket_id: needsTicket ? ticketId : null });
+          body: body.trim(), task, ticket_id: needsTicket ? ticketId : null });
         if (result) setBody("");
       }}>
         <div className="composer-row">

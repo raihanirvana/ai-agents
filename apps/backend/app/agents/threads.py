@@ -14,7 +14,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import aliased
 
 from app.domain import Actor, Forbidden, Invalid
 from app.persistence import Database, EventSpec, NotFound, append_event, append_message
@@ -181,29 +182,33 @@ class Threads:
         """Reconcile: every open role-addressed request must have its reply job (crash between the two writes)."""
         created: list[str] = []
         with self.db.read() as s:
-            pending = [(m.id, m.recipient, m.meta, m.project_id, m.ticket_id) for m in s.scalars(
-                select(Message).where(Message.recipient.like("role:%")))]
-        for message_id, recipient, meta, project_id, ticket_id in pending:
-            with self.db.read() as s:
-                waiting = s.scalar(select(Job).where(Job.waiting_request_id == message_id, Job.status == "waiting_input"))
-                exists = s.scalar(select(Job.id).where(Job.project_id == project_id,
-                                                       Job.idempotency_key == f"reply:{message_id}"))
-                message = s.get(Message, message_id)
-                is_request = message.kind == "input_request"
-                if exists or (is_request and waiting is None):
-                    continue
-                if not is_request and not (meta.get("needs_reply") and meta.get("category") in REPLY_CATEGORIES):
-                    continue
-                origin = waiting if is_request else s.get(Job, meta.get("job_id"))
-                if origin is None:
-                    continue
-                sender = {"project_id": project_id, "ticket_id": ticket_id, "job_id": origin.id,
-                          "generation": meta.get("generation"), "role": origin.runtime_ref["role"],
-                          "fake": bool(origin.runtime_ref.get("fake"))}
-                expected = (meta.get("checkpoint", {}).get("reply_expected", "short") if is_request
-                            else meta.get("expected", "short"))
-            job_id = self._enqueue_reply(message_id, sender, recipient.split(":", 1)[1], expected,
-                                         request_id=message_id if is_request else None)
+            origin, reply = aliased(Job), aliased(Job)
+            reply_exists = select(reply.id).where(
+                reply.project_id == Message.project_id,
+                reply.idempotency_key == "reply:" + Message.id).exists()
+            stale_scope = select(Ticket.id).where(
+                Ticket.id == origin.ticket_id, Ticket.current_version != origin.scope_version).exists()
+            pending = list(s.execute(select(Message, origin).join(origin, and_(
+                origin.project_id == Message.project_id,
+                or_(and_(Message.kind == "input_request", origin.waiting_request_id == Message.id,
+                         origin.status == "waiting_input"),
+                    and_(Message.kind != "input_request",
+                         origin.id == func.json_extract(Message.meta, "$.job_id"),
+                         func.json_extract(Message.meta, "$.needs_reply") == 1,
+                         func.json_extract(Message.meta, "$.category").in_(REPLY_CATEGORIES)))
+            )).where(Message.recipient.in_([f"role:{role}" for role in ROLES]),
+                     ~reply_exists, ~stale_scope, origin.status.not_in(("cancelled", "stopped")))))
+        for message, origin in pending:
+            meta = message.meta
+            is_request = message.kind == "input_request"
+            sender = {"project_id": message.project_id, "ticket_id": message.ticket_id, "job_id": origin.id,
+                      "generation": meta.get("generation"), "role": origin.runtime_ref["role"],
+                      "fake": bool(origin.runtime_ref.get("fake"))}
+            expected = (meta.get("checkpoint", {}).get("reply_expected", "short") if is_request
+                        else meta.get("expected", "short"))
+            # Recheck eligibility under the write transaction before enqueueing.
+            job_id = self._enqueue_reply(message.id, sender, message.recipient.split(":", 1)[1], expected,
+                                         request_id=message.id if is_request else None)
             if job_id:
                 created.append(job_id)
         return created

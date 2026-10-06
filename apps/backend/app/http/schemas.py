@@ -75,7 +75,9 @@ class Decision(Body):
     accept: bool
 
 
-class MessageCreate(Revision):
+class MessageCreate(Body):
+    # Accepted for older clients, but append-only chat has no project revision precondition.
+    expected_revision: int | None = Field(default=None, ge=1)
     body: str = Field(min_length=1, max_length=8000)
     task: Literal["breakdown", "revise", "note"] = "breakdown"
     ticket_id: str | None = None

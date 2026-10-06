@@ -9,6 +9,7 @@ UNVERIFIED against a real provider until DEV-010/015.
 from __future__ import annotations
 
 import json
+import math
 import os
 import socket
 import urllib.error
@@ -228,6 +229,9 @@ class ChatCompletionsProvider:
                 retry = float(exc.headers.get("Retry-After", "") or 30)
             except ValueError:
                 retry = 30.0
+            if not math.isfinite(retry):
+                retry = 30.0
+            retry = min(3600.0, max(1.0, retry))
             raise ProviderQuota(retry, f"provider quota (HTTP 429): {detail}") from exc
         if exc.code >= 500:
             raise ProviderUnavailable(f"provider error HTTP {exc.code}: {detail}") from exc

@@ -23,6 +23,11 @@ class AlreadyAnswered(PersistenceError):
     pass
 
 
+def not_runtime_log():
+    """Conversation filter shared by API projections and agent context queries."""
+    return func.json_extract(Message.meta, "$.runtime_log").is_(None)
+
+
 def _canonical(value: Any) -> str:
     """JSON-normalised form, so tuples/lists and key order do not look like differences."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)

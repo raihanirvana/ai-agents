@@ -270,8 +270,7 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     @app.post("/projects/{project_id}/messages")
     def post_message(request: Request, project_id: str, body: b.MessageCreate):
         def action(s, svc, key, p):
-            project = q.row(s, Project, project_id)
-            revision(project, body.expected_revision)
+            q.row(s, Project, project_id)
             if body.task == "revise" and not body.ticket_id or body.task == "breakdown" and body.ticket_id:
                 raise Invalid("revise requires a ticket; breakdown is project scoped")
             limits = dict(DEFAULT_LIMITS)

@@ -16,10 +16,11 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 
 from app.persistence import ArtifactStore, Database
 from app.persistence.artifacts import canonical_json
+from app.persistence.messages import not_runtime_log
 from app.persistence.models import Approval, Dependency, Message, Project, Ticket, TicketVersion
 
 from .redaction import Redactor
@@ -257,7 +258,11 @@ class ContextBuilder:
     def _history(self, s, identity):
         """Relevant messages (oldest first), the summaries that match their sources, and the ids of those that do not."""
         ticket_id = identity["ticket_id"]
-        rows = list(s.scalars(select(Message).where(Message.project_id == identity["project_id"])
+        intent = func.json_extract(Message.meta, "$.intent")
+        rows = list(s.scalars(select(Message).where(
+            Message.project_id == identity["project_id"], Message.ticket_id == ticket_id, not_runtime_log(),
+            or_(intent == "summary", Message.kind.in_(CHAT_KINDS),
+                and_(Message.kind == "system", intent.in_(SYSTEM_INTENTS))))
                               .order_by(Message.created_at, Message.thread_id, Message.seq, Message.id)))
         messages = _Layer("recent_messages", "## Recent messages (history is kept in full; proposals are not decisions)",
                           cap=self.limits.messages_tokens, droppable="oldest")
