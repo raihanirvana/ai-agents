@@ -87,3 +87,27 @@ Untuk testing berikutnya, pengguna mengizinkan model berbayar murah dengan
 batas total USD 10 (2026-10-05), bukan per model/tiket. Usage dan biaya wajib
 dicatat serta budget request/token tetap finite. Izin ini tidak mengubah biaya
 atau hasil eksperimen DEV-006 historis dan tidak menjamin bebas timeout/rate limit.
+
+## Perbaikan review Batch 2 — 6 Oktober 2026
+
+Relay yang dipakai spike dan Hermes produk kini memeriksa hostname endpoint
+aktual. `usage: {include: true}` dan `provider: {allow_fallbacks: false}` hanya
+dikirim ke `openrouter.ai`; endpoint lain tidak menerima kedua ekstensi itu,
+termasuk jika payload Hermes menyertakannya. Jalur chat terstruktur menerapkan
+aturan yang sama untuk `usage`. Konfigurasi alias tidak mengubah aturan ini.
+Reservation, generation, credential, accounting, dan endpoint milik supervisor
+tetap menentukan akses. Perbaikan ini belum membuktikan kompatibilitas Hermes
+dengan provider lain; inference dan tes regresi tidak dijalankan pada sesi ini.
+
+Di workspace DEV-005, `SandboxError` saat probe smoke dianggap probe gagal dalam
+deadline sehingga laporan `healthy: false` dapat menyertakan log container dan
+diagnostik `probe_error`, dengan cleanup di `finally`. Error start/log/cleanup
+tetap error infrastruktur; tidak diubah menjadi hasil sehat. Install egress
+mencatat penolakan filesystem/lockfile sebagai hasil command gagal. Lockfile
+dapat dibaca hingga `max_snapshot_bytes`; batas byte, paket, registry dan
+integrity tetap berlaku. Onboarding menerima evidence tersebut lewat alur lama.
+
+Pemeriksaan aktual terbatas pada sintaks AST lima file Python dan whitespace
+diff. Modul eksperimen standalone yang hanya di-skim oleh reviewer tidak
+diklaim sudah melalui review penuh. Pemetaan file dan handoff regresi tercatat
+di log Batch 2 pada `IMPLEMENTATION-BACKLOG.md`.

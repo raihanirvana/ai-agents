@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .journal import AdmissionError
@@ -109,8 +110,14 @@ class Relay:
                     if limits.get('output_tokens') is not None:
                         body["max_tokens"] = limits["output_tokens"]
                     body.pop("max_completion_tokens", None)
-                    body["usage"] = {"include": True}
-                    body["provider"] = {"allow_fallbacks": False}
+                    if urlsplit(owner.ENDPOINT).hostname == "openrouter.ai":
+                        body["usage"] = {"include": True}
+                        body["provider"] = {"allow_fallbacks": False}
+                    else:
+                        # Routing and usage extensions belong to OpenRouter,
+                        # including fields supplied by the runtime itself.
+                        body.pop("usage", None)
+                        body.pop("provider", None)
                     if body.get("stream"):
                         body["stream_options"] = {"include_usage": True}
                     rid = owner.journal.reserve(owner.scope, owner.generation, "model", owner.model)

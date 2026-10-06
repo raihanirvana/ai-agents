@@ -65,7 +65,7 @@ def fetch_tarballs(source: Path, dest: Path, limits: ResourceLimits, *, deadline
                    is_cancelled) -> None:
     # Disable user-supplied proxy settings and redirects. TLS uses Python's trust store.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    lock = json.loads(read_file_beneath(source, "package-lock.json"))
+    lock = json.loads(read_file_beneath(source, "package-lock.json", max_bytes=limits.max_snapshot_bytes))
     remaining = limits.max_snapshot_bytes
     for index, (url, expected) in enumerate(registry_tarballs(lock)):
         if is_cancelled() or time.monotonic() >= deadline:

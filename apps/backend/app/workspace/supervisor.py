@@ -526,6 +526,7 @@ class WorkspaceSupervisor:
                                     artifact=artifact, build_output=manifest.build_output)
         url = f"http://127.0.0.1:{manifest.port}{manifest.health_path}"
         healthy, body = False, b""
+        probe_error = None
         deadline = time.monotonic() + min(wait_s, spec.limits.command_timeout_s, manifest.commands["start"].timeout_s)
         try:
             while time.monotonic() < deadline and not self._revoked(store, generation):
@@ -539,17 +540,24 @@ class WorkspaceSupervisor:
                     "r.on('end',()=>process.exit(0));"
                     "}).on('error',()=>process.exit(1));"
                 )
-                probe = self.sandbox.exec_probe(name, ["node", "-e", probe_script, url],
-                                               timeout=max(0.1, min(3, deadline-time.monotonic())))
-                if probe.returncode == 0:
-                    healthy, body = True, probe.stdout[:512]
-                    break
-                time.sleep(0.5)
+                try:
+                    probe = self.sandbox.exec_probe(name, ["node", "-e", probe_script, url],
+                                                   timeout=max(0.1, min(3, deadline-time.monotonic())))
+                except SandboxError as exc:
+                    # A failed probe (including the last, short Docker timeout)
+                    # must still produce health evidence and container logs.
+                    probe_error = str(exc)[:400]
+                else:
+                    if probe.returncode == 0:
+                        healthy, body = True, probe.stdout[:512]
+                        break
+                time.sleep(max(0, min(0.5, deadline - time.monotonic())))
             out, err = self.sandbox.logs(name, spec.limits.max_log_bytes)
         finally:
             self.sandbox.kill_and_remove(name)
         healthy = healthy and not self._revoked(store, generation)
         result = {"build_id": build_id, "target_id": target["target_id"], "healthy": healthy, "url_inside_container": url,
+                  "probe_error": probe_error if not healthy else None,
                   "body_prefix": body.decode(errors="replace"), "stdout_tail": out[-2000:].decode(errors="replace"),
                   "stderr_tail": err[-2000:].decode(errors="replace")}
         atomic_write_json(store.dir / "evidence" / f"smoke-{build_id}.json", result)

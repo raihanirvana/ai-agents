@@ -13,6 +13,7 @@ import os
 import socket
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
@@ -196,10 +197,13 @@ class ChatCompletionsProvider:
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
     def complete(self, request: ModelRequest, *, timeout_s: float) -> ProviderResponse:
-        body = json.dumps({"model": request.model, "max_tokens": request.max_output_tokens,
-                           "temperature": request.temperature, "usage": {"include": True},
-                           "messages": [{"role": "system", "content": request.system},
-                                        {"role": "user", "content": request.user}]}).encode()
+        payload = {"model": request.model, "max_tokens": request.max_output_tokens,
+                   "temperature": request.temperature,
+                   "messages": [{"role": "system", "content": request.system},
+                                {"role": "user", "content": request.user}]}
+        if urlsplit(self.base_url).hostname == "openrouter.ai":
+            payload["usage"] = {"include": True}
+        body = json.dumps(payload).encode()
         http = urllib.request.Request(self.base_url + "/chat/completions", data=body, method="POST", headers={
             "Authorization": "Bearer " + self._key, "Content-Type": "application/json"})
         try:

@@ -665,6 +665,43 @@ retry tidak menghapus usage sebelumnya, quota shared tampil sebagai waiting_quot
 
 ## DEV-005 — Workspace Git dan sandbox minimum
 
+### Review Claude Batch 2 DEV-005/006 — 2026-10-06
+
+Status perbaikan: DONE (implementasi). Pelaksana: Codex. Review perbaikan: NOT_REVIEWED.
+Tiga temuan dikonfirmasi dari kode dan jalur pemanggilnya:
+
+1. `WorkspaceSupervisor.smoke_target` menangkap `SandboxError` pada probe saja,
+   melanjutkan polling dalam deadline, mengambil log dan menulis smoke JSON.
+   Probe yang tidak pernah berhasil menghasilkan `healthy: false` dengan
+   `probe_error` terbatas 400 karakter; cleanup tetap berjalan di `finally`.
+   Onboarding dapat mencatat laporan start dan blocker health contract yang benar.
+2. Install egress mengubah `WorkspaceError` (termasuk `LimitExceeded` dan
+   `PathViolation`) menjadi `CommandResult` gagal sehingga `_execute`/build
+   mencatat evidence install. Validasi argv dan `.npmrc` juga melalui jalur ini.
+   Pembacaan lockfile memakai `max_snapshot_bytes`, bukan batas read broker 5 MB;
+   batas snapshot, jumlah paket, registry, integrity, dan jaringan tetap diterapkan.
+3. Relay hanya memasang `usage`/`provider` untuk hostname tepat `openrouter.ai`;
+   endpoint lain menghapus kedua field, termasuk jika berasal dari runtime.
+   Jalur chat terstruktur memiliki masalah `usage` yang sama dan diperbaiki dengan
+   pemeriksaan hostname yang sama. Alias provider tetap mengikuti endpoint aktual.
+
+File hasil: `apps/backend/app/workspace/{supervisor,sandbox,dependencies}.py`,
+`apps/backend/app/runtime_spike/relay.py`, `apps/backend/app/agents/models.py`,
+`docs/decisions/runtime.md`, dan log ini.
+Verifikasi aktual: `apps/backend/.venv/bin/python` dengan `ast.parse` pada lima
+file Python yang berubah — **5 file OK**; `git diff --check` — **lulus**.
+Self-check diff memetakan tiga temuan ke perubahan di atas; bukan review independen.
+Tes regresi tidak ditambah/dijalankan karena permintaan lanjutan ini tidak secara
+eksplisit meminta tes. Docker, aplikasi, worker, dan inference tidak dijalankan.
+Handoff: diff tracked tujuh file ini; regresi yang perlu diperiksa berikutnya ialah
+probe timeout dengan log tersimpan, lockfile >5 MB/dibatasi/symlink dengan evidence
+install gagal, dan payload relay/chat untuk OpenRouter versus endpoint lain.
+Keterbatasan: kegagalan Docker saat start, membaca log, atau cleanup masih dapat
+melempar exception; perubahan probe bukan jaminan pemulihan seluruh outage Docker.
+Kompatibilitas Hermes dengan provider selain OpenRouter tidak dikualifikasi ulang.
+Catatan reviewer tentang modul spike yang hanya di-skim adalah batas cakupan
+review, bukan bukti bahwa semua modul tersebut sudah direview penuh.
+
 ### Catatan pengerjaan
 Status: DONE
 Pelaksana/sesi: Claude (Sonnet 5.5), sesi 2026-10-04

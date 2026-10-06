@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .errors import SandboxError
+from .errors import SandboxError, WorkspaceError
 from .runspec import ResourceLimits, utcnow
 
 LABEL_MANAGED = "aiagent.managed"
@@ -135,14 +135,14 @@ class DockerSandbox:
         from .dependencies import fetch_tarballs
         started = time.monotonic()
         requested_argv = tuple(kwargs["argv"])
-        if requested_argv != ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"):
-            raise SandboxError("install egress only supports fixed npm ci")
-        # A project npmrc can override cache, proxies and install behaviour.
-        if (kwargs["source"] / ".npmrc").is_symlink() or (kwargs["source"] / ".npmrc").exists():
-            raise SandboxError("project .npmrc is unsupported by the offline installer")
         deadline = started + min(kwargs["timeout_s"], kwargs["limits"].command_timeout_s)
         cancelled = kwargs.get("is_cancelled", lambda: False)
         try:
+            if requested_argv != ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"):
+                raise SandboxError("install egress only supports fixed npm ci")
+            # A project npmrc can override cache, proxies and install behaviour.
+            if (kwargs["source"] / ".npmrc").is_symlink() or (kwargs["source"] / ".npmrc").exists():
+                raise SandboxError("project .npmrc is unsupported by the offline installer")
             with tempfile.TemporaryDirectory(prefix="aiagent-npm-") as temporary:
                 cache = Path(temporary)
                 cache.chmod(0o755)
@@ -157,7 +157,7 @@ class DockerSandbox:
                     'exec npm ci --offline --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org']
                 result = self._run(**offline)
                 return replace(result, argv=requested_argv, network="egress", duration_s=round(time.monotonic()-started, 3))
-        except (SandboxError, OSError, ValueError) as exc:
+        except (WorkspaceError, OSError, ValueError) as exc:
             return CommandResult(argv=requested_argv, exit_code=None if cancelled() else 1,
                 timed_out=time.monotonic() >= deadline, cancelled=cancelled(), oom_killed=False,
                 duration_s=round(time.monotonic()-started, 3), stdout=b"", stderr=str(exc).encode()[:kwargs["limits"].max_log_bytes],
