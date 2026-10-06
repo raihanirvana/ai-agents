@@ -3,6 +3,7 @@ import type { Run, Ticket } from "../../../../contracts/api/types";
 import { ACTIVE_RUN, PHASES, RUN_STATUS_LABEL, blockerLabel, byPriority } from "../format";
 import { useWorkspace } from "../workspace";
 import { Badge, ConfirmButton, FakeBadge } from "./ui";
+import DependencyNotice from "./DependencyNotice";
 
 export default function Board() {
   const { board, command, selectedTicket, selectTicket, connection } = useWorkspace();
@@ -121,6 +122,7 @@ export default function Board() {
                             </Badge>
                           ))}
                         </div>
+                        <DependencyNotice ticket={ticket} />
                         <div className="card-actions">
                           <button type="button" className="ghost small" aria-label={`Naikkan prioritas tiket ${ticket.number}`} disabled={index === 0}
                             onClick={() => void reorder(column, ticket.id, column[index - 1].id)}>▲</button>

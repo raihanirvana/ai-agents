@@ -62,15 +62,37 @@ def registry_tarballs(lock: dict) -> list[tuple[str, bytes]]:
 
 
 def fetch_tarballs(source: Path, dest: Path, limits: ResourceLimits, *, deadline: float,
-                   is_cancelled) -> None:
+                   is_cancelled, cache_root=None, progress=None) -> dict:
     # Disable user-supplied proxy settings and redirects. TLS uses Python's trust store.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     lock = json.loads(read_file_beneath(source, "package-lock.json", max_bytes=limits.max_snapshot_bytes))
+    from .dependency_cache import DependencyCache
+    cache = DependencyCache(cache_root) if cache_root is not None else None
+    try:
+        return _fetch(opener, registry_tarballs(lock), dest, limits, deadline, is_cancelled, cache, progress)
+    finally:
+        if cache is not None:
+            cache.close()
+
+
+def _fetch(opener, packages, dest, limits, deadline, is_cancelled, cache, progress):
     remaining = limits.max_snapshot_bytes
-    for index, (url, expected) in enumerate(registry_tarballs(lock)):
+    stats = {'packages': len(packages), 'cache_hits': 0, 'downloaded_bytes': 0}
+    def check():
+        if is_cancelled() or time.monotonic() >= deadline:
+            raise SandboxError('dependency acquisition cancelled or timed out')
+    for index, (url, expected) in enumerate(packages):
         if is_cancelled() or time.monotonic() >= deadline:
             raise SandboxError("dependency acquisition cancelled or timed out")
         target = dest / f"{index:05d}.tgz"
+        if progress:
+            progress({'phase': 'dependency', 'package': index + 1, **stats})
+        cached = cache.get(expected, max_bytes=remaining, check=check) if cache is not None else None
+        if cached is not None:
+            target.write_bytes(cached)
+            remaining -= len(cached)
+            stats['cache_hits'] += 1
+            continue
         for attempt in range(3):
             if is_cancelled() or time.monotonic() >= deadline:
                 raise SandboxError("dependency acquisition cancelled or timed out")
@@ -85,12 +107,15 @@ def fetch_tarballs(source: Path, dest: Path, limits: ResourceLimits, *, deadline
                             if not chunk:
                                 break
                             remaining -= len(chunk)
+                            stats['downloaded_bytes'] += len(chunk)
                             if remaining < 0:
                                 raise SandboxError("dependency download exceeds byte budget")
                             output.write(chunk)
                             digest.update(chunk)
                 if not hmac.compare_digest(digest.digest(), expected):
                     raise SandboxError("dependency tarball integrity mismatch")
+                if cache is not None and target.stat().st_size <= 50 * 1024 * 1024:
+                    cache.put(expected, target.read_bytes())
                 break
             except (OSError, http.client.IncompleteRead) as exc:
                 target.unlink(missing_ok=True)
@@ -98,3 +123,7 @@ def fetch_tarballs(source: Path, dest: Path, limits: ResourceLimits, *, deadline
                 if attempt == 2 or not transient:
                     raise
                 # No budget reset: previously read bytes and elapsed time still count.
+
+    if progress:
+        progress({'phase': 'dependency-complete', **stats})
+    return stats

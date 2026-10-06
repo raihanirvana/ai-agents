@@ -18,6 +18,7 @@ export interface Project {
 export interface Ticket {
   id: string; project_id: string; number: number; title: string; phase: Phase; revision: number;
   scope_version: number; priority: number; blocker: Json; repair_cycles: number; repair_limit: number | null;
+  dependency_waits?: { upstream_id: string; number: number; title: string; phase: Phase; state: string }[];
 }
 export interface Usage { [name: string]: number | string[] }
 export interface Run {

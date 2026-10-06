@@ -79,7 +79,7 @@ class WorkspaceSupervisor:
         if not id_file.exists():
             id_file.write_text(uuid.uuid4().hex)
         self.supervisor_id = id_file.read_text().strip()
-        self.sandbox = sandbox or DockerSandbox(supervisor_id=self.supervisor_id)
+        self.sandbox = sandbox or DockerSandbox(supervisor_id=self.supervisor_id, dependency_cache=self.root / ".dependency-cache")
         self._scratch_home = self.root / ".git-home"
 
     # -- paths ---------------------------------------------------------------
@@ -320,6 +320,51 @@ class WorkspaceSupervisor:
             fsutil.write_file_beneath(self.src_dir(ref), path, data)
 
     @serialized_operation
+    def change_file(self, ref: RunRef, credential: str, path: str, *, expected_digest: str,
+                    content: str | None = None, old_text: str | None = None,
+                    new_text: str | None = None) -> dict:
+        """Compare-and-swap under the same operation/state locks as target commands.
+
+        Empty expected_digest means create only; edits require a current SHA-256
+        and exactly one matching occurrence. No Git/symlink paths are trusted.
+        """
+        with self._store(ref).lock():
+            spec, manifest, _ = self.authorize(ref, credential, 'write_file')
+            if path.split('/', 1)[0] in manifest.exclude_from_sync:
+                raise WorkspaceError('path is managed by the runner')
+            if (not isinstance(expected_digest, str) or
+                    (expected_digest and (len(expected_digest) != 64 or
+                     any(c not in '0123456789abcdef' for c in expected_digest)))):
+                raise WorkspaceError('expected_digest must be a SHA-256 or empty for create only')
+            try:
+                current = fsutil.read_file_beneath(self.src_dir(ref), path,
+                                                 max_bytes=spec.limits.max_snapshot_bytes)
+            except FileNotFoundError:
+                current = None
+            actual = sha256_bytes(current) if current is not None else ''
+            if not hmac.compare_digest(actual, expected_digest):
+                raise WorkspaceError('file changed or exists; read_file and use its current digest')
+            if old_text is not None:
+                if current is None or not expected_digest or not old_text or not isinstance(new_text, str):
+                    raise WorkspaceError('edit requires existing file, digest, non-empty old_text and new_text')
+                text = current.decode('utf-8')
+                if text.count(old_text) != 1:
+                    raise WorkspaceError('old_text must match exactly once; read current file before editing')
+                content = text.replace(old_text, new_text, 1)
+            if content is None:
+                if current is None:
+                    raise WorkspaceError('cannot delete a missing file')
+                self.authorize(ref, credential, 'delete_file')
+                fsutil.remove_beneath(self.src_dir(ref), path)
+                return {'path': path, 'deleted': True, 'digest': None}
+            data = content.encode('utf-8')
+            if len(data) > min(50 * 1024 * 1024, spec.limits.max_snapshot_bytes):
+                raise WorkspaceError('file exceeds snapshot byte limit')
+            fsutil.write_file_beneath(self.src_dir(ref), path, data)
+            return {'path': path, 'digest': sha256_bytes(data), 'bytes': len(data),
+                    'operation': 'edit' if old_text is not None else 'write'}
+
+    @serialized_operation
     def delete_file(self, ref: RunRef, credential: str, path: str) -> None:
         with self._store(ref).lock():
             self.authorize(ref, credential, "delete_file")
@@ -347,12 +392,13 @@ class WorkspaceSupervisor:
         return worktree
 
     @serialized_operation
-    def inspect_diff(self, ref: RunRef, credential: str, *, stat_only: bool = False) -> str:
+    def inspect_diff(self, ref: RunRef, credential: str, *, stat_only: bool = False,
+                     path: str | None = None) -> str:
         spec, manifest, store = self.authorize(ref, credential, "inspect_diff")
         with store.lock():
             self.authorize(ref, credential, "inspect_diff")
             worktree = self._sync_to_worktree(ref, spec, manifest)
-            return self.broker(ref.project_id).diff_cached(worktree, stat_only=stat_only)
+            return self.broker(ref.project_id).diff_cached(worktree, stat_only=stat_only, path=path)
 
     @staticmethod
     def _assert_active(store: RunStore) -> None:

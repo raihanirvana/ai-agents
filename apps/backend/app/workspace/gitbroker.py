@@ -196,17 +196,42 @@ class GitBroker:
             raise GitBrokerError(f"unexpected ref changes during commit: {sorted(changed_refs)}")
         return self.head(worktree), True
 
-    def diff_cached(self, worktree: Path, *, stat_only: bool = False, max_bytes: int = 1024 * 1024) -> str:
+    def diff_cached(self, worktree: Path, *, stat_only: bool = False, max_bytes: int = 1024 * 1024,
+                    path: str | None = None) -> str:
         self.run(["add", "-A", "--", "."], cwd=worktree)
         args = ["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color"]
         if stat_only:
             args.append("--stat")
-        return self.run([*args, "HEAD"], cwd=worktree)[:max_bytes].decode(errors="replace")
+        if path is not None:
+            from .fsutil import validate_relpath
+            validate_relpath(path)
+        data = self.run([*args, 'HEAD', '--', *([path] if path is not None else [])], cwd=worktree)
+        if len(data) > max_bytes:
+            raise GitBrokerError('diff exceeds transport bound; request stat or an individual file')
+        return data.decode(errors='replace')
 
     def diff_commits(self, base: str, head: str, *, max_bytes: int = 4 * 1024 * 1024) -> str:
         if not (is_sha(base) and is_sha(head)):
             raise GitBrokerError("invalid sha")
-        return self._bare("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--binary", base, head)[:max_bytes].decode(errors="replace")
+        data = self._bare('diff', '--no-ext-diff', '--no-textconv', '--no-color', '--binary', base, head)
+        if len(data) > max_bytes:
+            raise GitBrokerError('commit diff exceeds byte bound; cannot silently truncate review evidence')
+        return data.decode(errors='replace')
+
+    def read_committed_file(self, sha: str, path: str, *, max_bytes: int = 50 * 1024 * 1024) -> bytes | None:
+        from .fsutil import validate_relpath
+        if not is_sha(sha):
+            raise GitBrokerError('invalid sha')
+        validate_relpath(path)
+        entry = self._bare('ls-tree', sha, '--', path)
+        if not entry:
+            return None
+        if entry.split(None, 1)[0] not in (b'100644', b'100755'):
+            raise GitBrokerError('committed file must be a regular blob')
+        data = self._bare('cat-file', 'blob', sha + ':' + path)
+        if len(data) > max_bytes:
+            raise GitBrokerError('committed file exceeds byte bound')
+        return data
 
     def export_commit(self, sha: str, dest: Path) -> None:
         """Materialise a commit into an empty directory using a throwaway index."""

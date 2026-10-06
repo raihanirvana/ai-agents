@@ -23,12 +23,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class Relay:
     ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
-    def __init__(self, journal, scope, generation, model, key, tools, *, transport=None, foreign_markers=(), interval_s=0):
+    def __init__(self, journal, scope, generation, model, key, tools, *, transport=None, foreign_markers=(), interval_s=0, request_projection=None):
         self.journal, self.scope, self.generation = journal, scope, generation
         self.model, self.key, self.tools = model, key, tools
         self.foreign_markers = tuple(foreign_markers)
         self.token = secrets.token_urlsafe(32)
         self.opener = transport or urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        self.request_projection = request_projection
         self.interval_s = interval_s
         self.pacing_lock = threading.Lock()
         previous = [r["started"] for r in journal.inspect(scope)["reservations"] if r["kind"] == "model" and r["name"] == model]
@@ -129,6 +130,10 @@ class Relay:
                         "foreign_canaries_present": leaked})
                     if leaked:
                         raise ValueError("foreign context canary found; request blocked")
+                    # Inspect the original context before projection can omit old
+                    # observations; compaction must never hide a cross-run canary.
+                    if owner.request_projection is not None:
+                        body = owner.request_projection(body)
                     owner.journal.event(owner.scope, owner.generation, "model.started", {"reservation": rid, "model": owner.model})
                     req = urllib.request.Request(owner.ENDPOINT, data=json.dumps(body).encode(), headers={
                         "Authorization": "Bearer " + owner.key, "Content-Type": "application/json",

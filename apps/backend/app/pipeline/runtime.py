@@ -159,9 +159,11 @@ class PipelineRuntime:
             'source_files': source_files, 'reference_bootstrap': bootstrap,
             'empty_source_guidance': ('The source snapshot is empty by design. Create the application and Node tests '
                 'for this approved scope here. There is no existing application in another directory; '
-                'never search host paths or /work. patch_file creates directories automatically.' if not source_files else None),
+                'never search host paths or /work. write_file creates directories automatically.' if not source_files else None),
             'qa_suite': suite.model_dump(), 'instructions': 'Implement the approved scope. Read/patch files with relative paths. '
-            'read_file accepts only path and never writes; patch_file accepts path and full content. '
+            'read_file is paged and never writes. write_file creates/replaces entire files; edit_file replaces one exact match. '
+            'Use current expected_digest from read_file for edits/replacements; empty digest creates only missing files. '
+            'Follow next_offset with expected_digest to read more. inspect_diff defaults to stat; pass path for file diff. '
             'read_file path "." lists source files. run_command selects bootstrap/install/test/build. '
             'For repository tests use node:test and node:assert/strict, with npm test running node --test. '
             'Create real .test.js/.test.cjs files that exercise application code; echo success and empty tests fail the gate. '
@@ -223,7 +225,15 @@ class PipelineRuntime:
         parameters = {'read_file': {'path': {'type': 'string'}}, 'patch_file': {'path': {'type': 'string'},
             'content': {'type': ['string', 'null'], 'description': 'Full new file contents; null deletes this file.'}},
             'run_command': {'phase': {'type': 'string', 'enum': ['bootstrap', 'install', 'test', 'build']}}, 'inspect_diff': {},
-            'submit_candidate': {'message': {'type': 'string'}}, 'request_decision': {'question': {'type': 'string'}}}
+            'submit_candidate': {'message': {'type': 'string', 'minLength': 1, 'maxLength': 2000}}, 'request_decision': {'question': {'type': 'string'}}}
+        if not self.fake:
+            from .source_tools import SourceTools
+            source = SourceTools(sup, started, self.redactor)
+            facade._handlers.update(source.handlers)
+            parameters.pop('patch_file')
+            parameters.update(source.parameters)
+        # Fake foundation drivers retain their legacy tool contract; real Hermes
+        # exposes only the explicit write/edit surface above.
         self.driver.run(ctx, identity, snapshot, self._tools(ctx, facade, parameters), parameters)
         return Outcome('succeeded', result) if result else Outcome('failed', error='developer finished without a broker candidate')
 
@@ -265,9 +275,39 @@ class PipelineRuntime:
         if not self.gates_eligible(identity, candidate, gates):
             return self._reject(ctx, identity, candidate, 'Required repository gate failed without an exact baseline waiver: ' + json.dumps(gates.get('gate'))[:1800])
         sup = FencedWorkspace(self.workspace.root, ctx)
-        diff = sup.broker(identity['project_id']).diff_commits(candidate.base_sha, candidate.commit_sha)
+        broker = sup.broker(identity['project_id'])
+        diff = broker.diff_commits(candidate.base_sha, candidate.commit_sha)
+        from .review_context import review_diff, gate_summary
+        from app.workspace.errors import WorkspaceError
+        try:
+            projected = review_diff(broker, candidate.base_sha, candidate.commit_sha, diff)
+        except (ValueError, WorkspaceError) as exc:
+            return self._reject(ctx, identity, candidate, 'Dependency lock inspection failed: ' + self.redactor.redact(str(exc)))
+        ctx.log('review.context ' + json.dumps({'full_diff_chars': len(diff),
+            'projected_source_chars': len(json.dumps(projected)), 'dependency_summary': projected['dependency_changes'] is not None}))
+        from app.persistence import append_message
+        from app.persistence.models import Message
+        with self.db.write() as s:
+            ctx.queue.verify_identity(s, identity)
+            evidence_key = 'review-full-diff:' + identity['job_id'] + ':' + candidate.id
+            saved = s.scalar(select(Message).where(Message.project_id == identity['project_id'],
+                                                    Message.idempotency_key == evidence_key))
+            if saved is not None:
+                self.store.read_bytes(s, saved.attachment_ids[0])
+                evidence = s.get(Artifact, saved.attachment_ids[0])
+            else:
+                evidence = self.store.put_bytes(s, project_id=identity['project_id'], kind='report',
+                    name='technical-review-full.diff', data=self.redactor.redact(diff).encode(), run_id=identity['job_id'],
+                    meta={'producer': 'review-diff', 'candidate_id': candidate.id, 'base_sha': candidate.base_sha,
+                          'commit_sha': candidate.commit_sha, 'generation': identity['generation']})
+                append_message(s, project_id=identity['project_id'], ticket_id=identity['ticket_id'],
+                    thread_id=f"job:{identity['job_id']}:g{identity['generation']}", sender='service:review',
+                    body='Full candidate diff archived before dependency/context projection.',
+                    idempotency_key=evidence_key, attachment_ids=[evidence.id],
+                    meta={'runtime_log': True, 'intent': 'review_diff'})
         output, meta, _ = self.structured._ask(ctx, identity, {'name': 'technical_review', 'candidate_id': candidate.id,
-            'diff': self.redactor.redact(diff), 'repo_gates': gates, 'schema': Review.model_json_schema(),
+            **self.redactor.redact_value(projected), 'repo_gates': gate_summary(gates),
+            'full_diff_artifact_id': evidence.id, 'gate_artifact_id': target['gate_artifact_id'],
             'instructions': 'Review the diff against approved scope, including all changes to repo tests and skip/removal. '
             'Return a Review JSON. Technical acceptance cannot approve user scope/UAT/release.'}, Review,
             context_limits=replace(self.structured.builder.limits, total_tokens=32768))
@@ -277,7 +317,7 @@ class PipelineRuntime:
             ctx.queue.verify_identity(s, identity)
             t = s.get(Ticket, identity['ticket_id'])
             self.workspace._post(s, identity, 'review:' + identity['root_job_id'], output.summary,
-                [meta['context_artifact_id'], target['gate_artifact_id']], 'technical_review', candidate_id=candidate.id)
+                [meta['context_artifact_id'], target['gate_artifact_id'], evidence.id], 'technical_review', candidate_id=candidate.id)
             bind_service(self.workflow, s).approve_review(ctx.actor(), t.id, t.revision,
                 Attempt(identity['job_id'], identity['generation'], identity['scope_version']), candidate.id)
             bind_service(ctx.queue, s).complete(ctx.lease, {'candidate_id': candidate.id, 'review': 'accepted',

@@ -104,7 +104,8 @@ class StructuredAgentRuntime:
             # A per-call builder keeps limits isolated from concurrent PO/reply contexts.
             builder = ContextBuilder(self.builder.db, self.builder.store, self.builder.agents,
                                      self.builder.redactor, limits=context_limits)
-        snapshot = builder.build(identity, task={**task, 'output_schema': TypeAdapter(union).json_schema()},
+        snapshot = builder.build(identity, task={**{k: v for k, v in task.items() if k not in ('schema', 'output_schema')},
+                                                  'output_schema': TypeAdapter(union).json_schema()},
                                  repo_refs=repo_refs, answer=ctx.answer,
                                  lease=ctx.lease, queue=ctx.queue)
         ctx.log(f"context {snapshot.sha256[:12]} ~{snapshot.estimated_tokens} tokens (estimate), "

@@ -23,7 +23,10 @@ This file defines the task contract; the structured PO/lead runtime does not run
    npm test must execute actual .test.js/.test.cjs files with node --test. Test imported application logic,
    not a duplicate implementation inside the test. An echo success script or zero tests is incomplete.
    Inspect repository_gate returned by run_command phase test before submitting the candidate.
-   read_file accepts only path; to create/update files call patch_file with path and full content.
+   read_file returns a digest and a page; follow next_offset with expected_digest.
+   write_file replaces an entire file (empty expected_digest creates only a missing file).
+   For small changes use edit_file with current digest and one unique old_text/new_text match.
+   Never send a fragment to write_file. inspect_diff returns stat by default; pass path for a file diff.
    Preserve existing repository tests and their assertions. Use the installed repository test framework; do not
    replace unit tests with browser tests or import a package that is not in the locked dependencies. QA's independent
    browser harness owns acceptance tests. A missing mandatory baseline test is a failure, even if your new test passes.

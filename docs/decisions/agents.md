@@ -191,3 +191,14 @@ Catatan: `app.config` memuat `.env.local`, sehingga key di berkas itu ikut terba
   terstruktur (tool facade tersedia untuk runtime yang akan memakainya, termasuk Hermes pada DEV-010).
 - Reply job berbagi budget scope dengan penanya: budget kecil bisa habis oleh percakapan; perpanjangan
   tetap keputusan pengguna (DEV-004).
+
+### Konteks runtime setelah audit demo
+
+Developer tetap menerima scope, feedback dan identitas run lengkap. Pengurangan
+histori dilakukan deterministik pada relay produk (`pipeline/transcript.py`),
+bukan melalui summary LLM berbayar atau compression Hermes. Log projection
+memuat ukuran/digest sebelum-sesudah; transcript asli tetap menjadi bukti lokal.
+Konteks review memakai dependency/gate summary dengan diff lengkap dipin.
+Instruksi developer menjelaskan write_file/edit_file, digest dan paging.
+Rincian kontrak, cache dan keterbatasan verifikasi ada pada keputusan pipeline.
+Penghematan token/waktu aktual belum diukur pada demo baru.

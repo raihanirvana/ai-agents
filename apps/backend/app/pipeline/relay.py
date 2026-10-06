@@ -74,6 +74,8 @@ class ProductAdmission:
                     counters = {**UNKNOWN, 'input_tokens': amount(usage.get('prompt_tokens')),
                         'output_tokens': amount(usage.get('completion_tokens')), 'total_tokens': amount(usage.get('total_tokens')),
                         'cost_usd': amount(result.get('cost'))}
+                    details = usage.get('prompt_tokens_details')
+                    counters['cached_tokens'] = amount(details.get('cached_tokens')) if isinstance(details, dict) else None
                     if counters['input_tokens'] is not None and counters['output_tokens'] is not None:
                         counters['total_tokens'] = max(counters['total_tokens'] or 0, counters['input_tokens'] + counters['output_tokens'])
                     bound = bind_service(self.ctx.queue, s)
@@ -92,6 +94,10 @@ class ProductAdmission:
     def event(self, scope, generation, kind, payload):
         # Persist hashes/audit metadata, never tool content or provider secrets.
         self.ctx.log(self.redactor.redact(f'{kind}: {digest_of(payload)}'))
+        if kind in ('tool.started', 'tool.completed'):
+            name = payload.get('name')
+            if isinstance(name, str) and name.replace('_', '').isalnum():
+                self.ctx.log(f'tool.metric name={name} event={kind}')
 
     def close(self):
         for rid in list(self.pending):

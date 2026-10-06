@@ -336,3 +336,56 @@ ia menyimpan bukti lokal thread attempt dan thread stop sudah selesai, owner/hos
 dan generation tepat, serta reaper membuktikan proses target sudah berhenti.
 Recovery worker lain tetap memerlukan bukti owner lama sudah mati. Tidak menghapus
 ledger cleanup atau membuka slot hanya berdasarkan status `succeeded`.
+
+## Optimasi berdasarkan audit demo catatan (2026-10-06)
+
+Implementasi, belum diukur pada demo ulang atau melalui tes regresi:
+
+- Developer nyata memakai `write_file` untuk isi penuh dan `edit_file` untuk
+  satu exact match. `expected_digest` SHA-256 diperiksa pada source di bawah
+  operation/state lock, dengan lease/role/path policy yang sama. Digest kosong
+  hanya boleh membuat file baru; null content menghapus file dengan digest saat
+  ini. `patch_file` lama dipertahankan hanya pada fake foundation driver.
+- `read_file` mengembalikan halaman (offset karakter, limit default 4000,
+  maksimum 6000), digest, truncated, next_offset. Continuation harus memakai
+  digest halaman pertama. `inspect_diff` default stat; path memilih diff file
+  yang dapat dipaginasi. Batas byte source/diff tetap berlaku, dan broker menolak
+  diff terlalu besar alih-alih memotongnya diam-diam. Submit schema menyebut
+  batas pesan 2000 karakter yang memang diwajibkan broker.
+- Relay produk developer memproyeksikan hanya exchanges tool yang telah selesai:
+  read/write usang serta hasil check lama diringkas menjadi metadata/hash dan
+  failure excerpt. Read/page dan mutasi terbaru serta enam messages terakhir
+  dipertahankan. Scope, user/system, feedback, keputusan, pending calls dan
+  tool error tidak dihilangkan. Histori Hermes asli tetap disimpan; compression
+  Hermes tetap off. Canary diperiksa pada request asli sebelum projection.
+  Projection dipakai hanya jika lebih kecil; metric chars/hash dicatat tanpa
+  source/reasoning. Ini pengurangan duplikasi, bukan cap token baru.
+- Review TL melihat seluruh source/test diff, ringkasan perubahan lock package
+  (versi, graph, flags dan hash seluruh entry), gate counts/failed IDs, serta ID
+  bukti lengkap. Lock URL/integrity diperiksa deterministik sebelum summary.
+  Format lock yang tidak cocok katalog summary tetap dikirim sebagai diff asli,
+  tanpa memberlakukan policy installer baru pada runner custom.
+  Diff lengkap diarsip dan dipin message; idempotensi per job/candidate menjaga
+  artefak tetap sama saat resume. Jika summary lebih panjang, gunakan diff asli.
+  Output schema hanya diberikan sekali. Reviewer terstruktur belum mempunyai
+  tool pembacaan bukti tambahan; kebutuhan inspeksi tambahan tetap dapat
+  menghasilkan penolakan/pertanyaan, tidak dianggap otomatis diterima.
+- Installer memakai `.dependency-cache` privat milik supervisor, terpisah dari
+  source target. Cache beralamat SHA-512; setiap hit di-hash ulang, corrupt
+  bytes dibuang lalu diunduh/validasi ulang. Penulisan atomik melalui dir-fd,
+  O_NOFOLLOW, lock dan eviction (512 MiB/10000 entry, maksimum entry 50 MiB).
+  Ini batas storage, bukan budget token. Cache berisi bytes tarball; unpack dan
+  npm tetap dalam container offline. Tidak ada reuse approval/QA untuk target
+  berbeda. Progress package/cache hit/download bytes tercatat, cache counters
+  dilampirkan pada command stdout evidence. Semua copy/download tetap dihitung
+  terhadap batas byte/waktu attempt.
+- Relay mencatat cached_tokens bila provider melaporkannya (selain token/cost
+  sebelumnya), serta tool name/event; angka yang tidak dilaporkan tetap unknown.
+
+Handoff: ulangi workload catatan yang sama pada proyek baru saat pengujian
+berikutnya diotorisasi, ukur model_calls/input/output/cached/cost, waktu tool,
+context.projection, review.context dan dependency.progress. Perlu regresi pada
+CAS stale/ambiguous edits, pagination unicode/digest, tool call pairing dan
+preservasi keputusan/feedback, cache corrupt/symlink/concurrency/cancel/eviction,
+serta review diff/gate/evidence resume. Jangan menyimpulkan persentase penghematan
+atau kompatibilitas provider hanya dari pemeriksaan sintaks/import.

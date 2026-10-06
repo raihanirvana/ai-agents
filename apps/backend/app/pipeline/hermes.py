@@ -11,6 +11,7 @@ from app.runtime_spike.relay import Relay
 from app.workers.runtime import WaitingForInput, reap_recorded_processes
 from .relay import ProductAdmission
 from .files import allocate_directory
+from .transcript import TranscriptProjection
 
 WORKER = Path(__file__).resolve().parents[1] / 'runtime_spike' / 'hermes_worker.py'
 
@@ -90,7 +91,8 @@ class HermesDriver:
                     return {'status': 'waiting_input'}
             return call
         relay = Relay(admission, ctx.lease.job_id, ctx.lease.generation, config.model, provider._key,
-                      {name: wrapped(name, handler) for name, handler in tools.items()})
+                      {name: wrapped(name, handler) for name, handler in tools.items()},
+                      request_projection=TranscriptProjection(ctx.log) if role == 'developer' else None)
         relay.ENDPOINT = provider.base_url + '/chat/completions'
         proc, thread = None, None
         try:
@@ -100,7 +102,9 @@ class HermesDriver:
                     'toolset': 'product_pipeline', 'max_iterations': ctx.job['limits']['model_calls'] or sys.maxsize,
                     'completion_tool': 'propose_tests' if role == 'qa' else 'submit_candidate',
                     'output_tokens': self.client.output_limit(role, ctx.job['limits'].get('output_tokens')),
-                    'session_id': ctx.tag, 'system': snapshot.system + '\nUse only pipeline tools. Paths are relative to the project source snapshot, never the private runtime cwd.',
+                    'session_id': ctx.tag, 'system': snapshot.system + '\nUse only pipeline tools. Paths are relative to the project source snapshot, never the private runtime cwd. Historical completed tool exchanges may be projected to digest summaries; '
+                    'these are old observations, not file contents. Current scope, feedback, user decisions and recent exchanges are preserved. '
+                    'Read current source if an archived detail is needed.',
                     'prompt': snapshot.user}
                 path = directory / 'worker.json'
                 path.write_text(json.dumps(worker_config))

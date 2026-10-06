@@ -53,9 +53,11 @@ def redact(data: bytes, secrets: Sequence[str]) -> bytes:
 
 
 class DockerSandbox:
-    def __init__(self, *, supervisor_id: str, docker_bin: str = "docker") -> None:
+    def __init__(self, *, supervisor_id: str, docker_bin: str = "docker", dependency_cache: Path | None = None) -> None:
         self.supervisor_id = supervisor_id
         self.docker = docker_bin
+        self.dependency_cache = dependency_cache
+        self.dependency_progress = None
 
     # -- docker CLI ----------------------------------------------------------
     def _docker(self, *args: str, timeout: float = 60, check: bool = True, input: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
@@ -146,7 +148,8 @@ class DockerSandbox:
             with tempfile.TemporaryDirectory(prefix="aiagent-npm-") as temporary:
                 cache = Path(temporary)
                 cache.chmod(0o755)
-                fetch_tarballs(kwargs["source"], cache, kwargs["limits"], deadline=deadline, is_cancelled=cancelled)
+                stats = fetch_tarballs(kwargs["source"], cache, kwargs["limits"], deadline=deadline, is_cancelled=cancelled,
+                                       cache_root=self.dependency_cache, progress=self.dependency_progress)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 or cancelled():
                     raise SandboxError("dependency acquisition cancelled or timed out")
@@ -156,7 +159,8 @@ class DockerSandbox:
                     'npm cache add /dependencies/*.tgz --offline --ignore-scripts --no-audit --no-fund || exit $?; fi; '
                     'exec npm ci --offline --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org']
                 result = self._run(**offline)
-                return replace(result, argv=requested_argv, network="egress", duration_s=round(time.monotonic()-started, 3))
+                return replace(result, argv=requested_argv, network="egress", duration_s=round(time.monotonic()-started, 3),
+                               stdout=(json.dumps({'dependency_acquisition': stats}) + '\n').encode() + result.stdout)
         except (WorkspaceError, OSError, ValueError) as exc:
             return CommandResult(argv=requested_argv, exit_code=None if cancelled() else 1,
                 timed_out=time.monotonic() >= deadline, cancelled=cancelled(), oom_killed=False,

@@ -67,7 +67,7 @@ def main():
     for name, params in selected.items():
         registry.register(name=prefix + name, toolset=toolset, handler=handler(name),
             schema={"description": "Supervisor-scoped " + name + "; no host shell or filesystem access.",
-                    "parameters": {"type": "object", "properties": params, "required": list(params), "additionalProperties": False}})
+                    "parameters": {"type": "object", "properties": params, "required": [k for k, v in params.items() if "default" not in v], "additionalProperties": False}})
     agent = AIAgent(model=config["model"], provider="custom", api_mode="chat_completions",
         base_url=config["relay_url"] + "/v1", api_key=config["relay_token"],
         enabled_toolsets=[toolset], max_iterations=config.get("max_iterations", 32), max_tokens=config["output_tokens"],

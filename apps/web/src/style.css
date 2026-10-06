@@ -195,3 +195,5 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
 .office-fallback strong { color: var(--ink); }
 .office-fallback div { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
 .office-fallback button { font-size: 11px; }
+
+.dependency-notice { margin-top: 8px; }

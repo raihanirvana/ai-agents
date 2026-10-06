@@ -30,6 +30,28 @@ def ticket(t):
             "repair_limit": None if t.workflow.get('unlimited_repairs') is True else t.workflow.get("repair_limit", 3)}
 
 
+def dependency_waits(s, tickets):
+    """Batch public dependency notices; their state comes from the scheduler DB."""
+    by_id = {t.id: t for t in tickets}
+    waits = {t.id: [] for t in tickets}
+    if not by_id:
+        return waits
+    deps = list(s.scalars(select(Dependency).where(Dependency.ticket_id.in_(by_id),
+                          Dependency.state != 'satisfied').order_by(Dependency.depends_on_ticket_id)))
+    missing = {d.depends_on_ticket_id for d in deps} - by_id.keys()
+    if missing:
+        by_id.update({t.id: t for t in s.scalars(select(Ticket).where(Ticket.id.in_(missing),
+                      Ticket.project_id.in_({t.project_id for t in tickets})))})
+    for d in deps:
+        upstream = by_id.get(d.depends_on_ticket_id)
+        owner = by_id[d.ticket_id]
+        if upstream is None or upstream.project_id != owner.project_id:
+            continue
+        waits[d.ticket_id].append({'upstream_id': upstream.id, 'number': upstream.number,
+            'title': upstream.title, 'phase': upstream.phase, 'state': d.state})
+    return waits
+
+
 def run(j, s, peers=None, usage_by_key=None):
     """peers/usage_by_key let a caller that renders many runs (the board) load them once."""
     from app.workers import JobQueue
@@ -100,8 +122,10 @@ def integration(op):
 
 def board(s, project_id):
     p = row(s, Project, project_id)
-    return {"project": project(p), "tickets": [ticket(t) for t in s.scalars(select(Ticket).where(
-            Ticket.project_id == project_id).order_by(Ticket.priority.desc(), Ticket.number))],
+    tickets = list(s.scalars(select(Ticket).where(Ticket.project_id == project_id)
+                            .order_by(Ticket.priority.desc(), Ticket.number)))
+    waits = dependency_waits(s, tickets)
+    return {"project": project(p), "tickets": [{**ticket(t), 'dependency_waits': waits[t.id]} for t in tickets],
             "runs": _runs(s, project_id),
             "preview": (lambda rows: previews.public(rows[0]) if rows else None)(previews.active(s, project_id)),
             "releases": [releases.public(r, s) for r in releases.releases(s, project_id)[:5]],
@@ -116,7 +140,7 @@ def _runs(s, project_id):
 
 def detail(s, ticket_id, threads):
     t = row(s, Ticket, ticket_id)
-    return {"ticket": ticket(t), "versions": [{"version": v.version, "title": v.title, "description": v.description,
+    return {"ticket": {**ticket(t), 'dependency_waits': dependency_waits(s, [t])[t.id]}, "versions": [{"version": v.version, "title": v.title, "description": v.description,
             "uac": v.uac, "scope": v.scope} for v in s.scalars(select(TicketVersion).where(TicketVersion.ticket_id == t.id)
                                                                     .order_by(TicketVersion.version))],
             "dependencies": [{"upstream_id": d.depends_on_ticket_id, "state": d.state,

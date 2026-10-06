@@ -43,6 +43,8 @@ class FencedWorkspace(WorkspaceSupervisor):
     def __init__(self, root, ctx, **kw):
         super().__init__(root, **kw)
         self.ctx = ctx
+        if hasattr(self.sandbox, 'dependency_progress'):
+            self.sandbox.dependency_progress = lambda stats: ctx.log('dependency.progress ' + json.dumps(stats))
 
     def authorize(self, *args, **kwargs):
         self.ctx.queue.verify(self.ctx.lease)

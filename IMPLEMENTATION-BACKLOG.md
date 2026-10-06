@@ -1028,6 +1028,68 @@ input; jangan mengklaim seluruh workflow produk sudah terimplementasi.
 **Verifikasi:** sertakan log tersanitasi, artifact test, candidate SHA, stop test,
 dan hasil recovery. Jangan memasukkan key atau kredensial ke dokumentasi.
 
+### Informasi dependency pada board — 2026-10-06
+
+Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.
+Assignment: tampilkan alasan tiket Siap belum dikerjakan, cek unduhan QA.
+Rencana: DTO board/detail menampilkan dependency belum terpenuhi dari DB;
+kartu/detail memberi alasan dan tautan upstream. Scheduler/approval tetap sama.
+Hasil: board/detail memakai dependency_waits dari DB, notice membedakan menunggu
+acceptance, integrasi, revalidasi dan upstream dibatalkan; tautan membuka tiket
+upstream. File: http/queries.py, contracts/api/types.ts, DependencyNotice.tsx,
+Board.tsx, Ticket.tsx, style.css. Verifikasi: AST/import queries, TypeScript
+--noEmit, git diff --check lulus; API health ok setelah restart backend.
+Tes regresi/browser tidak ditambahkan/dijalankan; pengguna belum meminta tes.
+Observasi demo test 2: QA-plan mencatat 115 cache hits/115 paket, downloaded_bytes
+0. Dependency #2 sudah satisfied setelah #1 accepted; notice memang kosong.
+Developer #2 ternyata berhenti karena pool pipeline default 200000 total_tokens.
+Sesuai izin unlimited demo sebelumnya, project pipeline budget_limits dan peer
+caps diubah ke null tanpa reset usage/histori. Archive run-6e25f57a69c8 diverifikasi
+checksum/provenance/base; 7 file dipulihkan ke checkpoint persisten, kemudian
+extend_budget membuat retry 4e527f9cfcd84a1697eb373547850aab. Status running,
+checkpoint dibawa dan unlimited_budgets true. Default proyek lain tetap finite.
+
+### Optimasi runtime berdasarkan audit demo catatan — 2026-10-06
+
+Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.
+Assignment: implementasikan temuan audit yang disetujui pengguna.
+Hasil: write_file/create/replace/delete dan edit_file exact-match memakai CAS digest
+pada operation/state lock; read/diff dipaginasi, submit message maxLength 2000.
+Relay developer memproyeksikan completed tool exchanges usang ke digest/metadata,
+mempertahankan source terbaru, scope/feedback/decisions/user/system dan transcript
+asli. Canary original tetap diperiksa sebelum projection. Review TL merangkum
+lock graph/flags/hash dan gate, mengarsipkan full diff dengan ID stabil saat
+resume; summary yang tidak membantu atau format lock custom memakai diff asli.
+Output schema duplikat dihapus. Cache tarball supervisor memverifikasi SHA-512
+setiap hit, penulisan atomik/ownership/NOFOLLOW/lock/eviction; target tetap offline.
+Metric projection/review/progress/tool dan cached_tokens ditambahkan.
+File hasil: pipeline/source_tools.py, transcript.py, review_context.py;
+workspace/dependency_cache.py; wiring runtime/relay/Hermes/supervisor/sandbox/Git,
+agent facade/runtime/instructions; keputusan agents/pipeline dan laporan audit.
+Verifikasi aktual: AST 16 file Python, import modul, git diff --check lulus.
+Tidak menambah/menjalankan tes regresi/model berbayar/rebuild/demo baru. Worker
+idle dihentikan tertib dan direstart memakai perubahan; BE/FE tetap berjalan.
+Batas verifikasi: correctness CAS/paging/projection/cache concurrency/eviction
+belum melalui tes regresi; penghematan token/waktu belum diukur pada demo ulang.
+Kompatibilitas tool lama dipertahankan hanya untuk fake foundation driver.
+Handoff: docs/decisions/pipeline.md bagian optimasi; review independen belum
+tersedia, perubahan belum commit/push.
+
+### Audit efisiensi demo catatan — 2026-10-06
+
+Status audit: DONE (audit saja). Pelaksana: Codex. Review: NOT_REVIEWED.
+Assignment: audit token, panggilan developer, konteks, tool dan waktu demo catatan.
+Hasil: docs/audits/notes-demo-efficiency-2026-10-06.md; rincian 46 calls developer,
+rekonsiliasi usage Job dengan relay, 33 calls dengan transcript, pertumbuhan
+context 7967→40670 input/call, full-file replacement yang dipakai sebagai partial
+edit, kegagalan tool transport, 74,2% review diff lockfile, tool wait dominan.
+Sumber: usage DB, context snapshots, conversation retry, job relay logs dan
+command evidence. Tiga failed TL calls unknown, transcript attempt developer
+awal tidak tersedia; tidak menganggap angka runtime final sebagai total relay.
+Verifikasi: laporan dihitung dari evidence lokal dan git diff --check; tidak
+menjalankan tes/model berbayar/rebuild. Runtime tidak diubah. Sisa: implementasi
+optimasi tool/context/cache dan pengukuran ulang belum dikerjakan.
+
 ## DEV-007 — Soul, context, model client, dan pesan antar-agent
 
 ### Output tanpa cap aplikasi untuk demo — 2026-10-06

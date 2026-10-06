@@ -6,6 +6,7 @@ import { asScope, diffScope, type ScopeDoc } from "../diff";
 import { RUN_STATUS_LABEL, blockerLabel, senderLabel, short, text, when } from "../format";
 import { useWorkspace } from "../workspace";
 import { Badge, ConfirmButton, FakeBadge } from "./ui";
+import DependencyNotice from "./DependencyNotice";
 
 export default function TicketPanel() {
   const { detail, board, selectedTicket, selectTicket } = useWorkspace();
@@ -26,6 +27,7 @@ export default function TicketPanel() {
           {fake && <FakeBadge />}
         </div>
         {blocker && <div className="blocker" role="alert"><strong>Blocker:</strong> {blocker}</div>}
+        <DependencyNotice ticket={ticket} />
       </header>
       <ScopeSection detail={detail} />
       <ProposalSection detail={detail} />
@@ -222,7 +224,7 @@ function Dependencies({ detail }: { detail: TicketDetail }) {
               <button type="button" className="link" onClick={() => selectTicket(d.upstream_id)}>
                 {upstream ? `#${upstream.number} ${upstream.title}` : short(d.upstream_id)}
               </button>{" "}
-              <Badge tone={d.state === "accepted" || d.state === "satisfied" ? "good" : "warn"}>{d.state}</Badge>
+              <Badge tone={d.state === "accepted" || d.state === "satisfied" ? "good" : "warn"}>{d.state === "satisfied" || d.state === "accepted" ? "Terpenuhi" : d.state === "needs_revalidation" ? "Perlu validasi ulang" : "Menunggu"}</Badge>
               {d.integration_sha && <span className="muted"> integrasi {short(d.integration_sha, 8)}</span>}
               {d.revalidation ? <Badge tone="bad" title={text(d.revalidation)}>perlu validasi ulang</Badge> : null}
             </li>
