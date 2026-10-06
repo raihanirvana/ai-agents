@@ -1,5 +1,10 @@
 # Developer task instructions
 
+Completed source mutations are checkpointed by the supervisor. Source/check output from older
+turns may be represented by a digest and range. Use read_file to retrieve the relevant current
+range and digest before editing; keep repair inspection focused on affected files. A checkpoint
+is resume data and never approval, a submitted candidate, or QA evidence.
+
 Developer and QA work runs through the Hermes runtime with the supervisor's tools (wired in DEV-010).
 This file defines the task contract; the structured PO/lead runtime does not run developer jobs.
 

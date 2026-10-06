@@ -1,6 +1,6 @@
 """Durable stage dispatch; multiple maintenance callers share the same DB transaction/key."""
 from sqlalchemy import select
-from app.persistence.models import Project, Ticket, Job
+from app.persistence.models import Project, Ticket, Job, Candidate, Artifact
 
 ACTIVE = ("queued", "running", "waiting_input", "waiting_quota")
 DEFAULT_LIMITS = {"model_calls": 48, "tool_calls": 120, "active_s": 1800, "output_tokens": 4096,
@@ -43,17 +43,30 @@ class PipelineScheduler:
                 cycle = t.workflow.get("repair_cycles", 0) if stage == "development" else 0
                 candidate = t.workflow.get("candidate_id") if stage in ("technical_review", "qa") else None
                 key = f"pipeline:{t.id}:v{t.current_version}:{stage}:{cycle}:{candidate or '-'}"
+                legacy_key = key
+                suite_repaired = False
+                if stage in ('technical_review', 'qa') and candidate:
+                    current = s.get(Candidate, candidate)
+                    if current and current.target_digest:
+                        key += '@target-' + current.target_digest
+                        target_row = s.get(Artifact, current.target_artifact_id)
+                        suite_repaired = bool(target_row and target_row.meta.get('qa_repair_job_id'))
                 if stage == "development":  # work on an older accepted base must be redone on the new one
                     key += "@" + p.workflow["accepted_tip"][:12]
                 existing = [j for j in jobs if j.idempotency_key == key]
+                if stage in ('technical_review', 'qa') and not suite_repaired:
+                    # Upgrading keys does not grant another attempt to a legacy
+                    # permanent failure. Explicit suite repair is a new target.
+                    existing += [j for j in jobs if j.idempotency_key == legacy_key]
                 # A permanent failure/budget stop is visible; never spin a new automatic job around it.
                 if existing:
                     continue
                 # Use the scope's already authorized pipeline caps (possibly extended through the user command).
                 # A PO/lead chat on this scope has its own pool and never sets the execution budget.
                 pool = [j for j in jobs if j.runtime_ref.get("budget_pool") == BUDGET_POOL]
+                from .budgets import project_limits
                 caps = ({k: v for k, v in pool[-1].limits.items() if k != "budget_key"} if pool else
-                        {**self.limits, **p.workflow['pipeline'].get('budget_limits', {})})
+                        {**project_limits(p, self.limits), **p.workflow['pipeline'].get('budget_limits', {})})
                 job = self.queue.enqueue(session=s, project_id=t.project_id, ticket_id=t.id, expected_scope=t.current_version,
                     lane="execution", role=role, stage=stage, runtime=self.runtime, idempotency_key=key, limits=caps,
                     budget_pool=BUDGET_POOL,

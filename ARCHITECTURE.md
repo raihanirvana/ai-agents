@@ -201,6 +201,10 @@ harus direkonsiliasi sebelum cancel/revisi baru; jangan mengubah ref setengah ja
 Default: maksimal tiga siklus review/QA/perbaikan per scope version; setelah itu
 blocked: needs_human. Satu retry transient per job terpisah dari batas siklus.
 Pengguna dapat melanjutkan setelah membaca kegagalan, tanpa menghapus attempt history.
+Kesalahan kontrak selector yang didiagnosis runner ditangani di QA. Koreksi
+selector yang konservatif membuat suite/target baru pada build yang sama dan
+menjalankan baseline/kandidat ulang. Ini tidak menaikkan repair_cycles aplikasi;
+ketidakjelasan diagnosis tetap incomplete/failed, bukan pass.
 
 Dependency mem-pin ticket/scope version, accepted candidate, dan integration SHA.
 Histori acceptance tersebut tidak dihapus ketika ada revisi/revert melalui tiket
@@ -467,7 +471,11 @@ Semantik eksekusi adalah at-least-once dengan operasi idempotent, bukan janji
 exactly-once. Untuk side effects seperti membuat commit, preview, atau card
 eksternal, simpan operation ID dan cari hasil sebelumnya sebelum mengulang.
 
-Timeout transient default satu retry dengan backoff dan reconciliation. Siklus
+Timeout transient default satu retry job dengan backoff dan reconciliation.
+Request model dapat mencoba ulang sebelum header respons diterima untuk error
+gateway transient, dengan jeda 5/15/30 detik dan reservation/accounting setiap
+percobaan. Respons parsial dan mutasi tool tidak diputar ulang melalui jalur ini.
+Kebijakan retry job dan request model adalah dua tingkat yang berbeda. Siklus
 perbaikan review/QA default tiga per scope version; needs_human setelah itu.
 Quota habis masuk waiting_quota; tidak berpindah ke provider berbayar tanpa
 konfigurasi pengguna. Pertanyaan produk masuk waiting_input dan worker tersedia

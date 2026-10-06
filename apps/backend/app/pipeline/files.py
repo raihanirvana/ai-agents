@@ -35,7 +35,7 @@ def _path(root, resource):
     generation = resource['generation']
     if (len(validate_relpath(job_id).parts) != 1 or type(generation) is not int or generation < 1
             or resource['owner'] != f'{job_id}:{generation}'
-            or resource['purpose'] not in ('verification', 'hermes')):
+            or resource['purpose'] not in ('verification', 'hermes', 'prefetch')):
         raise ValueError('invalid runtime directory descriptor')
     return Path(root) / job_id / str(generation)
 

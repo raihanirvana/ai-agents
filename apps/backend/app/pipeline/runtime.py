@@ -6,6 +6,7 @@ from pathlib import Path
 from sqlalchemy import select
 from app.agents.tools import ToolFacade
 from app.agents.context import ContextRefused, ContextTooLarge
+from app.agents.models import ModelError
 from app.agents.outputs import LeadPlanOutput, Clarification
 from app.domain import Actor, Attempt
 from app.persistence.models import Candidate, Job, Ticket, TicketVersion, Artifact, Verification, Approval
@@ -50,6 +51,10 @@ class PipelineRuntime:
             error = self.redactor.redact('pipeline context refused: ' + str(exc))[:500]
             ctx.log(error)
             return Outcome('failed', error=error, retryable=False)
+        except ModelError as exc:
+            error = self.redactor.redact(str(exc))[:500]
+            return Outcome('failed', {'failure_kind': 'provider', 'http_status': getattr(exc, 'http_status', None)},
+                error=error, retryable=exc.retryable)
 
     def _technical_plan(self, ctx, identity):
         from app.workspace import WorkspaceSupervisor
@@ -228,7 +233,8 @@ class PipelineRuntime:
             'submit_candidate': {'message': {'type': 'string', 'minLength': 1, 'maxLength': 2000}}, 'request_decision': {'question': {'type': 'string'}}}
         if not self.fake:
             from .source_tools import SourceTools
-            source = SourceTools(sup, started, self.redactor)
+            source = SourceTools(sup, started, self.redactor,
+                after_write=lambda: self.workspace.save_source_checkpoint(ctx, sup, started))
             facade._handlers.update(source.handlers)
             parameters.pop('patch_file')
             parameters.update(source.parameters)
@@ -358,6 +364,7 @@ class PipelineRuntime:
                 finish()
 
     def _verify_attempt(self, ctx, identity, finalizers):
+        from .qa_repair import classify_failure, repair_visible_alerts, MAX_SUITE_REPAIRS
         candidate = self._candidate(identity)
         self.structured.builder.build(identity, task={'name': 'trusted_verification', 'candidate_id': candidate.id}, lease=ctx.lease, queue=ctx.queue)
         with self.db.read() as s:
@@ -408,6 +415,8 @@ class PipelineRuntime:
         if self.fake and proof['status'] == 'passed':
             proof['status'], proof['infrastructure_failure'] = 'incomplete', True
             proof['error'] = 'FAKE provider: harness result cannot count as product QA pass'
+        failure_kind = classify_failure(proof) if proof['status'] != 'passed' else None
+        proof['failure_kind'] = failure_kind
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
             attachments = [target['gate_artifact_id']]
@@ -427,6 +436,7 @@ class PipelineRuntime:
                 evidence_id=proof['invocation_id'], suite_digest=suite.digest, expected_test_ids=[t.id for t in suite.tests],
                 counts=proof['counts'], uac_coverage=proof['coverage'], status=proof['status'], evidence_artifact_ids=attachments,
                 results={**{k: proof[k] for k in ('commands', 'infrastructure_failure')}, 'fake_provider': self.fake,
+                    'failure_kind': failure_kind,
                     'job_id': identity['job_id'], 'generation': identity['generation'], 'executed_test_ids': proof['executed']})
             s.add(v)
             s.flush()
@@ -445,11 +455,63 @@ class PipelineRuntime:
                 bind_service(ctx.queue, s).complete(ctx.lease, {'verification_id': v.id, 'evidence_artifact_ids': attachments,
                     'qa_status': 'passed', 'pipeline_completion': {'job_id': identity['job_id'], 'generation': identity['generation']}})
         if proof['status'] == 'failed':
+            if failure_kind == 'test_contract':
+                repaired = repair_visible_alerts(suite, proof)
+                repair_count = target.get('suite_repair_count', 0)
+                if repaired is not None and type(repair_count) is int and 0 <= repair_count < MAX_SUITE_REPAIRS:
+                    return self._repair_qa_target(ctx, identity, candidate, target, repaired, v.id, attachments)
+                return Outcome('failed', {'verification_id': v.id, 'evidence_artifact_ids': attachments,
+                    'qa_status': 'failed', 'failure_kind': 'test_contract'},
+                    error='QA selector contract needs diagnosis; application repair was not requested.')
             return self._reject(ctx, identity, candidate, 'Browser acceptance failed: ' + json.dumps(proof['report'])[:3000],
-                                verification_id=v.id, evidence_artifact_ids=attachments, qa_status='failed')
+                                verification_id=v.id, evidence_artifact_ids=attachments, qa_status='failed',
+                                failure_kind=failure_kind)
         return Outcome('succeeded' if proof['status'] == 'passed' else 'failed',
-            {'verification_id': v.id, 'evidence_artifact_ids': attachments, 'qa_status': proof['status']},
-            error=proof.get('error') or ('Incomplete harness execution' if proof['status'] == 'incomplete' else ''))
+            {'verification_id': v.id, 'evidence_artifact_ids': attachments, 'qa_status': proof['status'],
+             'failure_kind': failure_kind},
+            error=proof.get('error') or ('Incomplete harness execution' if proof['status'] == 'incomplete' else ''),
+            retryable=failure_kind == 'infrastructure')
+
+    def _repair_qa_target(self, ctx, identity, candidate, target, repaired, verification_id, attachments):
+        """New suite/target on the same reviewed bytes; old QA proof stays immutable."""
+        with self.db.write() as s:
+            ctx.queue.verify_identity(s, identity)
+            t = s.get(Ticket, identity['ticket_id'])
+            workflow = bind_service(self.workflow, s)
+            workflow._attempt(s, ctx.actor(), t,
+                Attempt(identity['job_id'], identity['generation'], identity['scope_version']), 'qa')
+            current = s.get(Candidate, candidate.id)
+            if (t.phase != 'qa' or t.workflow.get('candidate_id') != candidate.id or
+                    current.target_artifact_id != candidate.target_artifact_id or
+                    current.target_digest != candidate.target_digest or current.status != 'review_approved'):
+                raise ValueError('QA repair belongs to an obsolete candidate/target')
+            version = s.query(TicketVersion).filter_by(ticket_id=t.id, version=t.current_version).one()
+            repaired.check_criteria(version.uac)
+            suite_row = self.store.put_json(s, project_id=t.project_id, kind='report', name='qa-suite.json',
+                document=repaired.model_dump(), meta={'producer': 'qa-plan', 'fake': self.fake,
+                    'repair_verification_id': verification_id, 'previous_suite_artifact_id': target['suite_artifact_id']})
+            previous = s.get(Artifact, candidate.target_artifact_id)
+            new_target = self.store.put_json(s, project_id=t.project_id, kind='target_manifest', name='target.json',
+                document={**target, 'suite_artifact_id': suite_row.id, 'runner_manifest_digest': repaired.digest,
+                    'suite_repair_count': target.get('suite_repair_count', 0) + 1,
+                    'previous_target_artifact_id': previous.id, 'repair_verification_id': verification_id},
+                meta={**previous.meta, 'qa_repair_job_id': identity['job_id']})
+            # Reviewed source, build, config and runner are identical. Only the
+            # suite pin changes; every baseline/candidate assertion runs again.
+            workflow.attach_target(Actor('service:builder', 'builder', t.project_id), t.id, t.revision,
+                candidate.id, build_artifact_id=current.build_artifact_id,
+                target_artifact_id=new_target.id, target_digest=new_target.checksum)
+            self.workspace._post(s, identity, 'qa-selector-repair:' + identity['job_id'],
+                'QA qualified an ambiguous visible-alert selector. New suite/target require fresh baseline and '
+                'candidate execution; source/build unchanged.', [*attachments, suite_row.id], 'qa_plan',
+                candidate_id=candidate.id, suite_digest=repaired.digest,
+                previous_target_artifact_id=previous.id, target_artifact_id=new_target.id)
+            result = {'qa_status': 'suite_repaired', 'failure_kind': 'test_contract',
+                'verification_id': verification_id, 'target_artifact_id': new_target.id,
+                'evidence_artifact_ids': [*attachments, suite_row.id, new_target.id]}
+            bind_service(ctx.queue, s).complete(ctx.lease, {**result, 'pipeline_completion': {
+                'job_id': identity['job_id'], 'generation': identity['generation']}})
+        return Outcome('succeeded', result)
 
     def reconcile(self, snapshot):
         with self.db.read() as s:

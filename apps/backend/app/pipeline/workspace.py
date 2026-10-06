@@ -250,6 +250,25 @@ class ProductWorkspace:
                        'Workspace checkpoint saved', [artifact.id], 'checkpoint')
         return artifact.id
 
+    def save_source_checkpoint(self, ctx, sup, started):
+        files = {name: base64.b64encode(data).decode() for name, data in
+                 sup.checkpoint_files(started.ref, started.credential).items()}
+        with self.db.write() as s:
+            identity = ctx.queue.identity(s, ctx.lease)
+            artifact = self.store.put_json(s, project_id=identity['project_id'], kind='other', name='checkpoint.json',
+                document={**{k: identity[k] for k in ('project_id', 'ticket_id', 'scope_version')},
+                          'base_sha': started.spec.base_sha, 'files': files},
+                meta={'producer': 'supervisor-source-checkpoint'})
+            job = s.get(Job, identity['job_id'])
+            job.runtime_ref = {**job.runtime_ref, 'pipeline_checkpoint': artifact.id}
+            from app.persistence import append_message
+            append_message(s, project_id=identity['project_id'], ticket_id=identity['ticket_id'],
+                thread_id=f"job:{identity['job_id']}:g{identity['generation']}", sender='service:checkpoint',
+                body='Source mutation checkpoint saved', idempotency_key='source-checkpoint:' + artifact.id,
+                meta={'runtime_log': True, 'checkpoint_artifact_id': artifact.id,
+                      'checksum': artifact.checksum, 'generation': identity['generation']})
+        return artifact.id
+
     def _post(self, s, identity, key, body, attachments, intent, **metadata):
         message, _ = append_effect(s, project_id=identity['project_id'], ticket_id=identity['ticket_id'],
             thread_id='ticket:' + identity['ticket_id'], sender='agent:' + identity['role'], recipient='user',

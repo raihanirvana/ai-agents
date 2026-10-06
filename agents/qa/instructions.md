@@ -53,6 +53,12 @@ This file defines the task contract; the structured PO/lead runtime does not run
 - Suite corrections go through the authorized planning/repair workflow and require fresh evidence for
   the resulting suite and target. Do not edit immutable evidence, loosen an assertion to hide a real
   defect, waive a gate, or rerun an unchanged failure indefinitely.
+- Use a selector scoped to the specific form/alert, not a global `.error-message` visibility check.
+  The trusted runner can diagnose an ambiguous visibility assertion with exactly one visible alert
+  and hidden alternatives. The platform may qualify that assertion to its observed unique alert ID,
+  retaining all test IDs, actions, values, and UAC. It creates a new suite/target and executes baseline
+  and candidate again. Other ambiguity needs diagnosis; it does not justify rewriting the app.
+  Runner infrastructure failures stay in QA for retry and do not consume application repair cycles.
 
 ## Rules
 

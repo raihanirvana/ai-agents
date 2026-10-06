@@ -302,7 +302,9 @@ class ChatCompletionsProvider:
             retry = min(3600.0, max(1.0, retry))
             raise ProviderQuota(retry, f"provider quota (HTTP 429): {detail}") from exc
         if exc.code >= 500:
-            raise ProviderUnavailable(f"provider error HTTP {exc.code}: {detail}") from exc
+            error = ProviderUnavailable(f"provider error HTTP {exc.code}: {detail}")
+            error.http_status = exc.code
+            raise error from exc
         raise ProviderRejected(f"provider rejected the request HTTP {exc.code}: {detail}") from exc
 
     def _parse(self, raw: bytes, request: ModelRequest) -> ProviderResponse:
@@ -504,10 +506,23 @@ class ModelClient:
             except ModelError as exc:
                 error = type(exc)(self.redactor.redact(str(exc)))
                 error.usage_counters = getattr(exc, 'usage_counters', {})
+                error.http_status = getattr(exc, 'http_status', None)
                 raise error from None
             return response, response.usage.as_counters()
 
-        response = ctx.model_call(call)
+        for attempt in range(4):
+            try:
+                response = ctx.model_call(call)
+                break
+            except ProviderUnavailable as exc:
+                if provider.fake or getattr(exc, 'http_status', None) not in (502, 503, 504) or attempt == 3:
+                    raise
+                delay = (5, 15, 30)[attempt]
+                ctx.log(f'provider.retry attempt={attempt + 1} http_status={exc.http_status} delay_s={delay}')
+                deadline = time.monotonic() + delay
+                while time.monotonic() < deadline:
+                    ctx._check()
+                    ctx.cancelled.wait(min(0.1, max(0, deadline - time.monotonic())))
         return ModelResult(self.redactor.redact(response.text), response.usage,
                            self.redactor.redact(response.provider or provider.name),
                            self.redactor.redact(response.model or config.model), bool(provider.fake))

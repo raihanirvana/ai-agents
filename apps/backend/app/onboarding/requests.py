@@ -30,9 +30,10 @@ def request(s, services, store, actor, expected_revision, manifest, key, *, patc
         a = store.put_bytes(s, project_id=p.id, kind='other', name='explicit-source.patch', data=patch.encode(),
                             meta={'producer': 'user', 'source_sha': source_sha, 'explicit_patch': True})
         patch_id = a.id
+    from app.pipeline.budgets import project_limits
     job = services.queue.enqueue(session=s, project_id=p.id, ticket_id=None, lane='execution', role='technical-lead',
         stage='onboarding', runtime='onboarding', idempotency_key='onboarding:' + key,
-        limits={'model_calls': 1, 'tool_calls': 32, 'active_s': 1800}, actor=actor.id,
+        limits=project_limits(p, {'model_calls': 1, 'tool_calls': 32, 'active_s': 1800}), actor=actor.id,
         payload={'manifest': parsed.to_dict(), 'source_sha': source_sha, 'patch_artifact_id': patch_id})
     p = apply_change(s, Project, p.id, expected_revision=expected_revision,
         values={'workflow': {**p.workflow, 'onboarding': 'queued', 'onboarding_detail': {'job_id': job.id}}},

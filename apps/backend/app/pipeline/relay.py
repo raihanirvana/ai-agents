@@ -15,9 +15,12 @@ class ProductAdmission:
     def __init__(self, ctx, redactor):
         self.ctx, self.redactor = ctx, redactor
         self.pending, self.error = {}, None
+        self.provider_failure = None
         self.lock = threading.RLock()
 
     def inspect(self, scope):
+        if self.ctx.cancelled.is_set():
+            raise AdmissionError('run cancelled')
         identity = self.ctx.queue.verify(self.ctx.lease)
         return {'limits': self.ctx.job['limits'], 'generation': identity['generation'],
                 'status': 'running', 'active_s': 0, 'reservations': []}
@@ -59,6 +62,9 @@ class ProductAdmission:
     def finish(self, rid, result):
         with self.lock:
             kind = self.pending.pop(rid, None)
+            if kind == 'model':
+                self.provider_failure = ({'http_status': result.get('http_status'), 'status': result.get('status')}
+                    if result.get('status') in ('provider_error', 'transport_failure') else None)
         if kind is None:
             return  # a transport error after accounting cannot bill the same call twice
         try:
@@ -98,6 +104,8 @@ class ProductAdmission:
             name = payload.get('name')
             if isinstance(name, str) and name.replace('_', '').isalnum():
                 self.ctx.log(f'tool.metric name={name} event={kind}')
+        if kind == 'provider.retry':
+            self.ctx.log('provider.retry ' + str({k: payload.get(k) for k in ('attempt', 'http_status', 'delay_s')}))
 
     def close(self):
         for rid in list(self.pending):

@@ -1,5 +1,6 @@
 """Bounded source reads and unambiguous create/replace/edit operations."""
 import hashlib
+import threading
 from app.workspace.errors import WorkspaceError
 
 
@@ -29,8 +30,10 @@ DIGEST_FIELD = {'type': 'string', 'description': 'Current read_file SHA-256. Emp
 
 
 class SourceTools:
-    def __init__(self, sup, started, redactor):
+    def __init__(self, sup, started, redactor, *, after_write=None):
         self.sup, self.started, self.redactor = sup, started, redactor
+        self.after_write = after_write
+        self.mutation_lock = threading.RLock()
 
     def read(self, c, i, a):
         if set(a) - {'path', *PAGE_FIELDS} or 'path' not in a:
@@ -45,12 +48,20 @@ class SourceTools:
     def write(self, c, i, a):
         if set(a) != {'path', 'content', 'expected_digest'} or (a['content'] is not None and not isinstance(a['content'], str)):
             raise ValueError('write_file takes path, full content (null deletes), expected_digest')
-        return self.sup.change_file(self.started.ref, self.started.credential, **a)
+        with self.mutation_lock:
+            result = self.sup.change_file(self.started.ref, self.started.credential, **a)
+            if self.after_write:
+                result['checkpoint_id'] = self.after_write()
+            return result
 
     def edit(self, c, i, a):
         if set(a) != {'path', 'old_text', 'new_text', 'expected_digest'} or not all(isinstance(a[k], str) for k in a):
             raise ValueError('edit_file takes path, old_text, new_text, expected_digest strings')
-        return self.sup.change_file(self.started.ref, self.started.credential, **a)
+        with self.mutation_lock:
+            result = self.sup.change_file(self.started.ref, self.started.credential, **a)
+            if self.after_write:
+                result['checkpoint_id'] = self.after_write()
+            return result
 
     def diff(self, c, i, a):
         if set(a) - {'path', *PAGE_FIELDS}:

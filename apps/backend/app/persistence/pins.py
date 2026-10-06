@@ -53,6 +53,11 @@ _SELECTS = [
     f"SELECT context_artifact_id, 'job', id FROM jobs WHERE status IN ({_quoted(ACTIVE_JOB_STATUSES)}) "
     "OR json_extract(runtime_ref, '$.cleanup') IS NOT NULL",
     "SELECT j.value, 'job_log', b.id FROM jobs b, json_each(b.result, '$.evidence_artifact_ids') j",
+    # Only the latest automatic source snapshot is needed for resume. Historical
+    # checkpoint log metadata does not pin every full source copy forever.
+    "SELECT json_extract(runtime_ref, '$.pipeline_checkpoint'), 'job_checkpoint', id FROM jobs "
+    "WHERE status IN ('queued','running','waiting_input','waiting_quota','failed','stopped') "
+    "OR json_extract(runtime_ref, '$.cleanup') IS NOT NULL",
     # A preview that is starting, running or being stopped is serving these exact bytes.
     f"SELECT target_artifact_id, 'preview', id FROM previews WHERE status IN ({_quoted(ACTIVE_PREVIEW_STATUSES)})",
     f"SELECT json_extract(details, '$.bundle_artifact_id'), 'preview', id FROM previews WHERE status IN ({_quoted(ACTIVE_PREVIEW_STATUSES)})",

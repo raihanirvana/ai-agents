@@ -11,6 +11,7 @@ export type ProjectCreate = Body.ProjectCreate;
 export interface Project {
   id: string; name: string; mode: "new" | "existing"; brief: string; brief_version: number;
   revision: number; onboarding: string; accepted_tip: string | null;
+  demo_unlimited_budgets?: boolean;
   onboarding_detail?: { job_id: string; report_artifact_id?: string; source_sha?: string | null;
     baseline_sha?: string | null; dirty?: boolean; dirty_status?: string[]; dirty_total?: number; patch_applied?: boolean;
     blocker?: string | null; required_checks?: string } | null;

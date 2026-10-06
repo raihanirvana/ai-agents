@@ -4,7 +4,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import random
+import http.client
 import secrets
+import socket
 import threading
 import time
 import urllib.error
@@ -23,13 +26,17 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class Relay:
     ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
-    def __init__(self, journal, scope, generation, model, key, tools, *, transport=None, foreign_markers=(), interval_s=0, request_projection=None):
+    def __init__(self, journal, scope, generation, model, key, tools, *, transport=None, foreign_markers=(), interval_s=0, request_projection=None,
+                 provider_retry_delays=()):
         self.journal, self.scope, self.generation = journal, scope, generation
         self.model, self.key, self.tools = model, key, tools
         self.foreign_markers = tuple(foreign_markers)
         self.token = secrets.token_urlsafe(32)
         self.opener = transport or urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         self.request_projection = request_projection
+        self.provider_retry_delays = tuple(provider_retry_delays)
+        if any(type(delay) not in (int, float) or not 0 <= delay <= 45 for delay in self.provider_retry_delays) or len(self.provider_retry_delays) > 3:
+            raise ValueError('provider retries require at most three bounded delays')
         self.interval_s = interval_s
         self.pacing_lock = threading.Lock()
         previous = [r["started"] for r in journal.inspect(scope)["reservations"] if r["kind"] == "model" and r["name"] == model]
@@ -143,11 +150,13 @@ class Relay:
                     with owner.pacing_lock:
                         while time.time() < owner.next_request_at:
                             state = owner.journal.inspect(owner.scope)
-                            if state["generation"] != owner.generation or state["status"] != "running" or state["active_s"] >= state["limits"]["active_s"]:
+                            cap = state['limits'].get('active_s')
+                            if state["generation"] != owner.generation or state["status"] != "running" or (cap is not None and state["active_s"] >= cap):
                                 raise AdmissionError("inactive, stale or duration exhausted during quota wait")
                             time.sleep(max(0, min(0.1, owner.next_request_at - time.time())))
                         owner.next_request_at = time.time() + owner.interval_s
-                    with owner.opener.open(req, timeout=60) as upstream:
+                    upstream, rid = owner.open_model(req, rid)
+                    with upstream:
                         usage, count, error = None, 0, False
                         self.send_response(upstream.status)
                         self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
@@ -209,6 +218,46 @@ class Relay:
         self.server = Server(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = False
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def open_model(self, request, reservation):
+        """Retry only before receiving headers; every attempt has its own billable reservation."""
+        if not self.provider_retry_delays:
+            return self.opener.open(request, timeout=60), reservation
+        for attempt in range(len(self.provider_retry_delays) + 1):
+            try:
+                return self.opener.open(request, timeout=60), reservation
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
+                    ConnectionResetError, http.client.RemoteDisconnected) as exc:
+                code = exc.code if isinstance(exc, urllib.error.HTTPError) else None
+                reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                transient = code in (408, 502, 503, 504) or isinstance(reason,
+                    (TimeoutError, ConnectionResetError, ConnectionRefusedError, http.client.RemoteDisconnected))
+                if isinstance(reason, socket.gaierror) and reason.errno == socket.EAI_AGAIN:
+                    transient = True
+                if not transient or attempt == len(self.provider_retry_delays):
+                    self.journal.finish(reservation, {'http_status': code, 'status': 'provider_error',
+                        'usage': None, 'cost': None})
+                    raise
+                # No model/tool mutation is replayed. Unknown spend stays unknown.
+                self.journal.finish(reservation, {'http_status': code, 'status': 'provider_error',
+                    'usage': None, 'cost': None})
+                if isinstance(exc, urllib.error.HTTPError):
+                    exc.close()
+                delay = self.provider_retry_delays[attempt] + random.uniform(0, 1)
+                self.journal.event(self.scope, self.generation, 'provider.retry',
+                    {'attempt': attempt + 1, 'http_status': code, 'delay_s': round(delay, 2)})
+                deadline = time.monotonic() + delay
+                while time.monotonic() < deadline:
+                    state = self.journal.inspect(self.scope)  # product checks cancellation/lease
+                    cap = state['limits'].get('active_s')
+                    if (state['generation'] != self.generation or state['status'] != 'running' or
+                            (cap is not None and state['active_s'] >= cap)):
+                        raise AdmissionError('inactive/stale/duration exhausted during provider retry')
+                    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+                reservation = self.journal.reserve(self.scope, self.generation, 'model', self.model)
+                self.journal.event(self.scope, self.generation, 'model.started',
+                    {'reservation': reservation, 'model': self.model, 'retry': attempt + 1})
+        raise RuntimeError('provider retry loop exhausted')
 
     def redact(self, text):
         return text.replace(self.key, "[redacted]").replace(self.token, "[redacted]")

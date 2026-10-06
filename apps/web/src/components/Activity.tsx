@@ -74,6 +74,11 @@ function RunRow({ run }: { run: Run }) {
         </span>
       </div>
       {ticket && <div className="muted">Tiket <button type="button" className="link" onClick={() => selectTicket(ticket.id)}>#{ticket.number} {ticket.title}</button>{run.scope_version ? ` · scope v${run.scope_version}` : ""}</div>}
+      {run.result?.qa_status === "suite_repaired" && <p className="notice" role="status">Selector QA diperbaiki. Menunggu pengujian ulang pada target baru.</p>}
+      {run.result?.failure_kind === "test_contract" && run.status === "failed" && <p className="notice" role="status">Kontrak tes QA perlu diperiksa. Tiket tetap di QA.</p>}
+      {run.result?.failure_kind === "infrastructure" && run.status === "failed" && <p className="notice" role="status">Runner atau infrastruktur QA bermasalah. Lihat detail dan status retry.</p>}
+      {run.result?.failure_kind === "provider" && run.status === "failed" && <p className="notice" role="status">Permintaan ke provider model gagal. Lihat detail dan status retry.</p>}
+      {run.result?.qa_status === "failed" && run.result?.request_changes === true && <p className="notice" role="status">QA gagal; bukti kegagalan dikirim ke developer.</p>}
       {run.status === "waiting_quota" && <p className="notice" role="status">Menunggu kuota provider{run.available_at ? `; dicoba lagi sekitar ${when(run.available_at)}` : ""}. Run tidak gagal.</p>}
       {run.status === "waiting_input" && (
         <div className="notice" role="status">

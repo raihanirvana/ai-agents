@@ -42,6 +42,12 @@ DATA_DIR = _local_path("DATA_DIR", ROOT / "data")
 DATABASE_PATH = _local_path("DATABASE_PATH", DATA_DIR / "app.sqlite3")
 ARTIFACT_DIR = _local_path("ARTIFACT_DIR", DATA_DIR / "artifacts")
 
+# Explicit demo opt-in. Stored per project when created; never resets usage.
+_demo_setting = os.getenv('DEMO_UNLIMITED_BUDGETS', '0')
+if _demo_setting not in ('0', '1'):
+    raise ValueError('DEMO_UNLIMITED_BUDGETS must be 0 or 1')
+DEMO_UNLIMITED_BUDGETS = _demo_setting == '1'
+
 
 def pipeline_workspace_root(*, env=None) -> Path:
     """Same managed root for worker, pipeline, integrator and preview, regardless of cwd."""

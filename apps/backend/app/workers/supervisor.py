@@ -233,7 +233,8 @@ class Supervisor:
         if outcome.status == "succeeded":
             self._guard(handle, lambda: self.queue.complete(lease, outcome.result), "succeeded")
         else:
-            self._guard(handle, lambda: self.queue.fail(lease, outcome.error or "failed", retryable=outcome.retryable),
+            self._guard(handle, lambda: self.queue.fail(lease, outcome.error or "failed", retryable=outcome.retryable,
+                                                      result=outcome.result),
                         "failed")
 
     def _guard(self, handle: _Handle, action, state: str) -> None:

@@ -68,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
             from app.pipeline.setup import NewProjectSetup
             setup = NewProjectSetup(db, queue, root, runtime.redactor)
             runtimes[setup.name] = setup
+            from app.pipeline.prefetch import ReferencePrefetch
+            prefetch = ReferencePrefetch(db, store, root, runtime.redactor)
+            runtimes[prefetch.name] = prefetch
             maintenance.append(setup.tick)
             maintenance.append(scheduler.tick)
             from app.pipeline.wiring import build_integrator, build_preview

@@ -149,6 +149,8 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     def create_project(request: Request, body: b.ProjectCreate):
         def action(s, svc, key, principal):
             p = svc.workflow.create_project(user_actor(principal, new_id()), **request.app.state.api.redactor.redact_value(body.model_dump()))
+            from app.pipeline.budgets import install_demo_policy
+            install_demo_policy(s, p, principal.user_id)
             if p.mode == 'new':
                 from app.pipeline.setup import enqueue_setup
                 enqueue_setup(s, svc.queue, p)
@@ -273,10 +275,11 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     @app.post("/projects/{project_id}/messages")
     def post_message(request: Request, project_id: str, body: b.MessageCreate):
         def action(s, svc, key, p):
-            q.row(s, Project, project_id)
+            project = q.row(s, Project, project_id)
             if body.task == "revise" and not body.ticket_id or body.task == "breakdown" and body.ticket_id:
                 raise Invalid("revise requires a ticket; breakdown is project scoped")
-            limits = dict(DEFAULT_LIMITS)
+            from app.pipeline.budgets import project_limits
+            limits = project_limits(project, DEFAULT_LIMITS)
             if body.ticket_id:
                 ticket = q.row(s, Ticket, body.ticket_id, project_id)
                 budget_key = f'ticket:{ticket.id}:v{ticket.current_version}'

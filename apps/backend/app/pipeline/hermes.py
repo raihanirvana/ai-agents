@@ -92,7 +92,8 @@ class HermesDriver:
             return call
         relay = Relay(admission, ctx.lease.job_id, ctx.lease.generation, config.model, provider._key,
                       {name: wrapped(name, handler) for name, handler in tools.items()},
-                      request_projection=TranscriptProjection(ctx.log) if role == 'developer' else None)
+                      request_projection=TranscriptProjection(ctx.log) if role == 'developer' else None,
+                      provider_retry_delays=(5, 15, 30))
         relay.ENDPOINT = provider.base_url + '/chat/completions'
         proc, thread = None, None
         try:
@@ -172,5 +173,12 @@ class HermesDriver:
             raise RuntimeError('; '.join(collector_error))
         ctx.queue.verify(ctx.lease)
         if not runtime_result or runtime_result.get('error'):
+            if admission.provider_failure:
+                from app.agents.models import ProviderUnavailable, ProviderRejected
+                code = admission.provider_failure.get('http_status')
+                failure = ProviderRejected if type(code) is int and 400 <= code < 500 and code != 408 else ProviderUnavailable
+                error = failure('Hermes provider request failed' + (f' (HTTP {code})' if code is not None else ' (transport)'))
+                error.http_status = code
+                raise error
             raise RuntimeError('Hermes failed: ' + str(runtime_result.get('error', 'no final event'))[:500])
         return runtime_result

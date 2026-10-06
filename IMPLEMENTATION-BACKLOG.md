@@ -1028,6 +1028,43 @@ input; jangan mengklaim seluruh workflow produk sudah terimplementasi.
 **Verifikasi:** sertakan log tersanitasi, artifact test, candidate SHA, stop test,
 dan hasil recovery. Jangan memasukkan key atau kredensial ke dokumentasi.
 
+### Perbaikan berdasarkan perbandingan dua demo — 2026-10-06
+
+Status perubahan: DONE (implementasi 2026-10-07). Pelaksana: Codex. Review: NOT_REVIEWED.
+Assignment: implementasikan prioritas audit two-demo-comparison-2026-10-06.md.
+Rencana: diagnosis selector dari runner tepercaya + repair suite/target tanpa
+mutasi aplikasi; retry request provider dengan accounting/lease; policy demo
+persisten; projection working context; prefetch reference dependency terverifikasi.
+File terkait: contracts/verification, pipeline/runtime/scheduler/transcript/setup,
+runtime_spike/relay, config/http, agents/qa, keputusan agents/pipeline.
+Verifikasi: pemeriksaan statis dan konsistensi kontrak. Tidak menambah/menjalankan
+tes kecuali diminta pengguna; layanan/demo tidak dijalankan otomatis.
+Hasil: runner memberikan diagnosis strict selector; QA hanya memperbaiki
+visibility selector dengan satu alert terlihat/ID unik, membuat suite+target
+baru dan mengantrekan QA ulang pada build sama. Semua IDs/UAC/actions/values
+dipertahankan; kasus ambigu lain gagal eksplisit di QA. Legacy failed keys tidak
+memperoleh retry hanya karena key scheduler berubah. Infra incomplete memakai
+retry job; kategori/evidence failed outcome dipersist dan ditampilkan di UI.
+Relay/structured request mencoba gateway transient dengan jeda 5/15/30,
+accounting baru setiap request, cancel/lease checks, tanpa replay partial stream
+atau tool. Source mutation menyimpan checkpoint tanpa mengubah Git refs, latest
+checkpoint dipin, log snapshot lama tidak menahan semua salinan source selamanya.
+Projection mempertahankan read working set 16000 karakter di luar enam messages
+terbaru, digest/range menggantikan observasi/argument mutasi lama.
+Policy demo persist saat create dan diwariskan chat/pipeline/reply/setup/
+onboarding/release/prefetch; .env.example=0, .env.local ignored=1. Dua demo idle
+lama juga diberi policy sesuai izin unlimited sebelumnya, usage/histori tetap.
+Reference prefetch terpisah mengisi SHA512 cache tanpa npm/kode host; failure
+warming tidak memblokir proyek, directory/recovery memakai owner durable.
+Verifikasi akhir: AST 26 file Python, import 23 modul, TypeScript --noEmit,
+git diff --check lulus; 37 file perubahan diperiksa tanpa credential/runtime data.
+Tes regresi/browser/provider
+tidak ditambahkan/dijalankan; BE/FE/worker tetap berhenti. Known limits dan
+skenario regresi: docs/decisions/pipeline.md bagian perbaikan dua demo. Perbaikan
+selector otomatis masih konservatif; outage setelah retry tetap needs_human,
+prefetch race bisa mengunduh miss sama, benefit checkpoint/projection belum
+diukur pada demo ulang. Implementasi belum commit/push atau review independen.
+
 ### Informasi dependency pada board — 2026-10-06
 
 Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.

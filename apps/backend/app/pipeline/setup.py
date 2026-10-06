@@ -36,10 +36,11 @@ def enqueue_setup(s, queue, project):
     existing = s.scalar(select(Job).where(Job.project_id == project.id, Job.stage == 'project_setup'))
     if existing is not None:
         return existing
+    from .budgets import project_limits
     job = queue.enqueue(session=s, project_id=project.id, ticket_id=None, lane='execution',
         role='technical-lead', stage='project_setup', runtime='project-setup',
         idempotency_key='project-setup:reference-v1', actor='service:project-setup',
-        limits={'model_calls': 1, 'tool_calls': 8, 'active_s': 300},
+        limits=project_limits(project, {'model_calls': 1, 'tool_calls': 8, 'active_s': 300}),
         payload={'manifest': reference_manifest().to_dict()})
     apply_change(s, Project, project.id, expected_revision=project.revision,
         values={'workflow': {**project.workflow, 'onboarding': 'queued',
@@ -114,6 +115,8 @@ class NewProjectSetup:
                     'Implementation starts only after user scope approval.',
                     idempotency_key='project-setup-ready:' + identity['root_job_id'],
                     meta={'intent': 'project_setup', 'job_id': identity['job_id']})
+                from .prefetch import enqueue_prefetch
+                enqueue_prefetch(s, ctx.queue, project)
                 result = {'accepted_tip': base, 'reference_runner': True,
                           'pipeline_completion': {'job_id': identity['job_id'], 'generation': identity['generation']}}
                 bind_service(ctx.queue, s).complete(ctx.lease, result)

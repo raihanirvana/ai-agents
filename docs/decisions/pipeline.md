@@ -389,3 +389,83 @@ CAS stale/ambiguous edits, pagination unicode/digest, tool call pairing dan
 preservasi keputusan/feedback, cache corrupt/symlink/concurrency/cancel/eviction,
 serta review diff/gate/evidence resume. Jangan menyimpulkan persentase penghematan
 atau kompatibilitas provider hanya dari pemeriksaan sintaks/import.
+
+# Perbaikan alur dua demo — 7 Oktober 2026
+
+## QA contract recovery
+
+Runner independen melaporkan failed_step dan kategori strict selector failure.
+Untuk assert_visible ambigu, ia mencatat jumlah match/visible serta ID unik
+alert yang terlihat. Repair deterministik hanya mengubah selector tersebut:
+test IDs, UAC, purpose, urutan/actions/values/assertions dipertahankan.
+Kasus umum lain yang ambigu atau campuran kegagalan tetap memerlukan diagnosis;
+model/prose tidak dapat mengubahnya menjadi lulus. Tidak ada source rewrite.
+
+Verification failed lama dan targetnya tetap tersimpan. Jika diagnosis aman,
+QA membuat suite dan target_manifest baru pada candidate/build/source/config/
+runner yang sama, hanya saat candidate review_approved dan ticket masih QA.
+attach_target memakai validasi domain yang sama, fencing QA dan source-attempt
+builder lama diperiksa. Review kode/build tidak diulang karena bytes identik;
+seluruh candidate tests dan baseline bila applicable wajib dieksekusi lagi,
+UAT tetap pengguna.
+Maksimal dua koreksi otomatis per rantai target untuk mencegah loop diagnosis.
+
+Scheduler memasukkan target_digest dalam key review/QA, sehingga target baru
+mendapat job QA baru tanpa tahap development atau repair_cycles kode. Legacy
+failed keys dihormati saat upgrade; update format key bukan izin retry tambahan.
+Runner infrastructure incomplete mendapat retry job biasa; failed outcome
+metadata/evidence/category sekarang dipersist oleh Supervisor/JobQueue.
+Aktivitas menampilkan suite_repaired, contract error, infrastructure, provider
+dan QA gagal. Setelah retry request dan retry job habis, outage provider tetap
+needs_human; belum ada state baru waiting_provider/circuit breaker.
+
+## Demo policy dan dependency prefetch
+
+DEMO_UNLIMITED_BUDGETS=1 adalah opt-in konfigurasi lokal; .env.example default 0.
+Policy dan event authorization disimpan saat pengguna membuat proyek baru.
+Pool chat/pipeline/reply dan job setup/onboarding/release/prefetch mewarisinya.
+Pool yang sudah ada memakai cap authorized terakhir; flag sendiri tidak mengubah
+project lama atau mereset usage. .env.local di Mac ini diatur 1 sesuai izin demo
+sebelumnya. Policy dua proyek demo lama juga dipersist lewat keputusan lokal
+terpisah (prior user authorization, 7 Oktober), tanpa reset usage/approval/histori.
+Model setting/provider maximum, command timeout dan batas transport/memory/file
+tetap berbeda dari budget kumulatif. Tidak ada perubahan approval/isolasi.
+
+Reference setup mengantrekan reference-prefetch sebagai job execution terpisah
+yang tidak menghalangi scope/implementasi. Ia hanya mengunduh catalog registry
+tarball SHA512 tervalidasi ke cache supervisor, tidak menjalankan npm/kode target.
+Failure warming dicatat sebagai cache_status unavailable; install aktual tetap
+bertanggung jawab atas dependency dan evidence. Directory punya resource owner,
+cleanup/recovery durable dan cancel/deadline. Existing/custom repo tidak diprefetch.
+Prefetch dan install yang bersamaan masih dapat mengunduh cache miss yang sama;
+belum ada cache node_modules/environment mutable ataupun cache hasil QA.
+
+## Handoff dan batas verifikasi
+
+Scope implementasi: QA recovery, request retry + source checkpoints, demo policy,
+working context projection, reference prefetch. Full diff termasuk modul baru
+pipeline/qa_repair.py, budgets.py, prefetch.py dan laporan audit dua demo.
+Perintah statis: AST/import Python, TypeScript --noEmit, git diff --check.
+Hasil aktual: AST 26 file dan import 23 modul lulus; TypeScript/diff lulus,
+scan 37 file perubahan tidak menemukan credential atau data runtime.
+Tidak menambah/menjalankan tes regresi, browser, Docker ataupun provider berbayar;
+layanan/demo tetap berhenti sesuai keadaan awal. Review independen belum dilakukan.
+
+Regresi yang perlu diverifikasi sebelum mengandalkan produksi (gunakan
+DEMO_UNLIMITED_BUDGETS=0 untuk skenario default finite):
+
+- Ambiguous hidden+visible alert memperbaiki suite/target, bukan app; test/action/
+  UAC/purpose tetap; next QA mengeksekusi base dan candidate lalu UAT baru.
+- Ambiguitas tanpa ID unik, mixed/unknown failures, real assertion failure dan
+  limit diagnosis tidak menghasilkan pass; old-target proof tidak membuka UAT.
+- Race scope/lease/base/target, double publish, crash antara evidence dan repair,
+  cleanup lalu scheduler restart serta legacy failed keys.
+- Provider 504 lalu sukses menghitung semua reservations; auth/429/mid-stream,
+  cancel/backoff/limit dan gagal permanen tidak me-replay tool atau reset usage.
+- Parallel mutations/checkpoint/resume, checkpoint pin/cleanup dan source lebih
+  besar dari batas 64 MiB (harus gagal eksplisit, tanpa truncation).
+- Policy demo baru versus finite deployment, idempotent create, peer caps,
+  scope baru/reply/release serta environment restart tanpa mengubah project lama.
+- Working set projection menjaga pending/error/feedback; reread/CAS tetap benar.
+- Cold/warm prefetch, checksum corruption/cancel/crash/disk ownership; pengukuran
+  demo identik untuk memastikan benefit melebihi overhead checkpoint/prefetch.

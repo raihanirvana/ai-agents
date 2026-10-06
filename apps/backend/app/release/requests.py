@@ -28,9 +28,11 @@ def public(r: Release, s=None) -> dict:
 def _enqueue(s, services, actor, key, payload, kind):
     if active_release_job(s, actor.project_id):
         raise Conflict("a release operation is already running for this project")
+    from app.pipeline.budgets import project_limits
+    project = services.workflow._row(s, Project, actor.project_id, actor)
     return services.queue.enqueue(session=s, project_id=actor.project_id, ticket_id=None, lane="execution",
         role="technical-lead", stage="release", runtime="release", idempotency_key=f"release-{kind}:{key}",
-        limits=dict(LIMITS), actor=actor.id, payload={"task": kind, **payload})
+        limits=project_limits(project, LIMITS), actor=actor.id, payload={"task": kind, **payload})
 
 
 def request_freeze(s, services, actor, expected_revision, key):

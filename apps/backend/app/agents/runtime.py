@@ -65,7 +65,9 @@ class StructuredAgentRuntime:
         except InvalidOutput as exc:
             return self._failed(ctx, f"invalid structured output after one repair attempt: {exc}", retryable=False)
         except ModelError as exc:
-            return self._failed(ctx, f"model call failed: {exc}", retryable=exc.retryable)
+            outcome = self._failed(ctx, f"model call failed: {exc}", retryable=exc.retryable)
+            outcome.result = {'failure_kind': 'provider', 'http_status': getattr(exc, 'http_status', None)}
+            return outcome
         except DomainError as exc:
             return self._failed(ctx, f"domain refused the proposal: {exc}", retryable=False)
 

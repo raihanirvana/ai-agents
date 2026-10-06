@@ -97,7 +97,10 @@ Integrating → Accepted.
   perubahan kontrak pada base terbaru memerlukan revalidasi downstream.
   Tiket independen tetap boleh berjalan selama UAT.
 - Technical review yang meminta perubahan kembali ke Development.
-- QA gagal kembali ke Development dengan langkah reproduksi dan bukti.
+- QA menemukan kegagalan aplikasi kembali ke Development dengan langkah
+  reproduksi dan bukti. Kesalahan kontrak selector atau runner tetap di QA;
+  koreksi suite menghasilkan suite/target baru dan eksekusi baseline/kandidat
+  baru, tanpa menganggap hasil lama lulus atau memakai siklus perbaikan kode.
 - QA lulus dan kandidat lolos preview smoke test membuka UAT. Preview boleh
   stopped dan dinyalakan ketika pengguna mencoba; tidak harus selalu aktif.
 - UAT meminta perbaikan kembali ke Development, kemudian review dan QA ulang.

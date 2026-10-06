@@ -1,7 +1,8 @@
 """Deterministic provider projection; Hermes' original transcript remains intact.
 
 Only completed source/check tool exchanges are compacted. Scope, decisions,
-feedback, user/system messages and the pending/recent exchanges are untouched.
+feedback, user/system messages and pending/recent exchanges are untouched.
+Older source observations outside a bounded working set are available by reread.
 """
 import copy
 import hashlib
@@ -59,6 +60,17 @@ class TranscriptProjection:
                 if name == 'run_command':
                     latest_command[args.get('phase')] = idx
         compacted = 0
+        active_reads, active_chars = set(), 0
+        for idx, ri, call, name, args, message, result in reversed(exchanges):
+            if name != 'read_file' or result.get('error'):
+                continue
+            path = args.get('path')
+            if idx < latest_write.get(path, -1) or idx < latest_read.get((path, args.get('offset', 0)), idx):
+                continue
+            size = len(message.get('content') or '')
+            if active_chars + size <= 16000:
+                active_reads.add(call.get('id'))
+                active_chars += size
         for idx, ri, call, name, args, message, result in exchanges:
             # Pending calls, decision tools and recent results never lose detail.
             if ri >= len(projected) - 6 or result.get('error'):
@@ -69,12 +81,15 @@ class TranscriptProjection:
             obsolete_write = name in WRITES and idx < latest_write.get(path, idx)
             old_check = name == 'run_command' and idx < latest_command.get(args.get('phase'), idx)
             old_diff = name == 'inspect_diff'
-            if not (obsolete_read or obsolete_write or old_check or old_diff):
+            archived_read = name == 'read_file' and call.get('id') not in active_reads
+            archived_write = name in WRITES
+            if not (obsolete_read or obsolete_write or old_check or old_diff or archived_read or archived_write):
                 continue
             text = message.get('content') or ''
             summary = {'archived_tool_result': True, 'result_sha256': digest(text),
                        'original_chars': len(text), 'tool': name,
-                       'note': 'Historical observation, not current file contents. Original is retained in runtime diagnostics.'}
+                       'note': 'Executed observation archived. Reread path/range for current contents and digest before editing. '
+                               'Original retained in runtime diagnostics.'}
             for key in ('path', 'digest', 'bytes', 'deleted', 'operation', 'offset', 'next_offset',
                         'truncated', 'total_chars', 'exit_code', 'status'):
                 if key in result:
@@ -89,7 +104,7 @@ class TranscriptProjection:
                               ('not ok', 'error', 'expected', 'actual', 'not found', 'failed', 'timeout'))]
                     summary['failure_excerpt'] = '\n'.join(errors)[:2400]
             message['content'] = json.dumps(summary, ensure_ascii=False)
-            if obsolete_write:
+            if archived_write:
                 abbreviated = dict(args)
                 for key in ('content', 'old_text', 'new_text'):
                     value = abbreviated.get(key)
@@ -102,5 +117,6 @@ class TranscriptProjection:
             return body
         self.log('context.projection ' + json.dumps({'original_chars': len(original),
             'projected_chars': len(encoded), 'compacted_exchanges': compacted,
+            'active_read_chars': active_chars,
             'original_sha256': digest(original), 'projected_sha256': digest(encoded)}))
         return {**body, 'messages': projected}

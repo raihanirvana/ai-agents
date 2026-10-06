@@ -496,11 +496,13 @@ class JobQueue:
             self._release_lease(job)
             self._event(s, job, "succeeded", lease.owner)
 
-    def fail(self, lease: Lease, error: str, *, retryable: bool) -> str | None:
+    def fail(self, lease: Lease, error: str, *, retryable: bool, result: dict | None = None) -> str | None:
         """Failed attempt. A retryable failure with attempts left becomes a NEW attempt (job row)
         that shares the budget; otherwise the failure is marked as needing a human."""
         with self.db.write() as s:
             job = self._fenced(s, lease)
+            if result:
+                job.result = {**(job.result or {}), **result}
             job.status, job.finished_at = "failed", self.clock()
             job.lease_generation += 1
             self._release_lease(job)

@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -26,12 +27,13 @@ def main():
             page = context.new_page()
             page.set_default_timeout(3000)
             record = {'id': test['id'], 'uac': test['uac'], 'status': 'failed'}
+            step_index, step = None, None
             try:
                 response = page.goto(url, wait_until='networkidle', timeout=15000)
                 if not response or response.status != 200:
                     raise RuntimeError('pinned target health failed')
                 smoke = True
-                for step in test['steps']:
+                for step_index, step in enumerate(test['steps']):
                     if step['action'] == 'reload':
                         response = page.reload(wait_until='networkidle', timeout=15000)
                         if not response or response.status != 200:
@@ -49,6 +51,29 @@ def main():
                 record['status'] = 'passed'
             except Exception as exc:
                 record['error'] = str(exc)[:3000]
+                record['failure_kind'] = 'assertion_or_application'
+                record['failed_step'] = step_index
+                if 'strict mode violation' in str(exc):
+                    record['failure_kind'] = 'selector_contract'
+                # A narrow, observed contract defect: one visible alert and
+                # additional hidden matches. No application JavaScript is run
+                # to diagnose it, and no assertion is accepted as a pass.
+                if (step and step['action'] == 'assert_visible' and
+                        'strict mode violation' in str(exc)):
+                    try:
+                        loc = page.locator(step['selector'])
+                        count = loc.count()
+                        visible = [loc.nth(i) for i in range(count) if loc.nth(i).is_visible()] if count <= 100 else []
+                        if count > 1 and len(visible) == 1:
+                            item_id = visible[0].get_attribute('id')
+                            if (item_id and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,99}', item_id)
+                                    and visible[0].get_attribute('role') == 'alert'
+                                    and page.locator('#' + item_id).count() == 1):
+                                record['selector_diagnosis'] = {
+                                    'selector': step['selector'], 'matched_count': count,
+                                    'visible_count': 1, 'unique_visible_alert': '#' + item_id}
+                    except Exception:
+                        pass  # Unavailable diagnosis never authorizes a repair.
             finally:
                 # Binary diagnostics travel on runner stdout; there is no shared writable mount.
                 screenshot = page.screenshot()

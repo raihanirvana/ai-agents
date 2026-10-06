@@ -379,6 +379,18 @@ class WorkspaceSupervisor:
             return [e.rel for e in entries if e.kind != "dir"]
 
     # -- git via broker ------------------------------------------------------
+    @serialized_operation
+    def checkpoint_files(self, ref: RunRef, credential: str) -> dict[str, bytes]:
+        """Fenced source snapshot for durable resume; no Git ref or sandbox command."""
+        with self._store(ref).lock():
+            spec, manifest, _ = self.authorize(ref, credential, 'checkpoint')
+            entries = fsutil.scan_tree(self.src_dir(ref), exclude=manifest.exclude_from_sync,
+                limits=fsutil.TreeLimits(spec.limits.max_snapshot_files, min(spec.limits.max_snapshot_bytes, 64 * 1024 * 1024)))
+            if any(e.kind == 'symlink' for e in entries):
+                raise WorkspaceError('source checkpoint symlinks are unsupported')
+            return {e.rel: fsutil.read_file_beneath(self.src_dir(ref), e.rel,
+                    max_bytes=64 * 1024 * 1024) for e in entries if e.kind == 'file'}
+
     def _sync_to_worktree(self, ref: RunRef, spec: RunSpec, manifest: RunnerManifest) -> Path:
         """Freeze the sandbox, validate its tree, and mirror it into the supervisor worktree."""
         self._kill_run_containers(ref)

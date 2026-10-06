@@ -202,3 +202,20 @@ Konteks review memakai dependency/gate summary dengan diff lengkap dipin.
 Instruksi developer menjelaskan write_file/edit_file, digest dan paging.
 Rincian kontrak, cache dan keterbatasan verifikasi ada pada keputusan pipeline.
 Penghematan token/waktu aktual belum diukur pada demo baru.
+# Perbaikan efisiensi setelah dua demo — 7 Oktober 2026
+
+- Konteks developer mempertahankan user/system/decisions/feedback/error dan enam
+  messages terbaru. Completed read di luar working set 16.000 karakter dan
+  argument mutasi lama diganti digest/range. Transcript asli tetap diarsipkan;
+  tool read dapat mengambil source terbaru. Ini batas observasi lama, bukan
+  pembatas token provider. Penghematan aktual belum diukur pada demo ulang.
+- Relay Hermes mencoba HTTP 408/502/503/504 dan transport transient hanya
+  sebelum header respons diterima. Structured provider mencoba 502/503/504.
+  Backoff 5/15/30 detik (relay menambah jitter), maksimal tiga retries request;
+  quota 429 tetap memakai waiting_quota, error auth/config tidak dicoba berulang.
+  Setiap request punya reservation terpisah, usage gagal tetap unknown dan
+  lease/cancel diperiksa saat menunggu. Partial stream tidak diputar ulang.
+- Setelah mutasi source, supervisor menyimpan snapshot untuk resume tanpa
+  mengubah accepted/attempt Git ref. Checkpoint bukan kandidat atau bukti QA.
+  Latest checkpoint job resumable dipin; snapshot lama dapat dibersihkan jika
+  tidak dipin oleh referensi lain. Log menyimpan ID/checksum, tanpa membanjiri chat.
