@@ -30,5 +30,8 @@ const server = http.createServer((req, res) => {
     if (req.method === 'HEAD') res.end(); else fs.createReadStream(file).pipe(res);
   } catch { res.writeHead(404); res.end(); }
 });
-server.listen(socket, () => fs.chmodSync(socket, 0o666));
+// Set permissions at creation: Docker Desktop's shared filesystem rejects chmod
+// on a socket. Its parent is private to the supervisor on the host.
+process.umask(0o111);
+server.listen(socket);
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => server.close(() => process.exit(0)));

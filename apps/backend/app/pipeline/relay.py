@@ -79,7 +79,8 @@ class ProductAdmission:
                     bound = bind_service(self.ctx.queue, s)
                     bound.finalize_usage(job.id, self.ctx.lease.generation, counters)
                     output = counters['output_tokens']
-                    if output is not None and output > self.ctx.job['limits']['output_tokens']:
+                    cap = self.ctx.job['limits'].get('output_tokens')
+                    if output is not None and cap is not None and output > cap:
                         bound.cancel(job.id, reason='provider exceeded output token cap', actor='service:relay')
                     if result.get('http_status') == 429:
                         self.error = self.ctx.provider_quota(30, 'provider rate limit')

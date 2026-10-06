@@ -17,7 +17,7 @@ export interface Project {
 }
 export interface Ticket {
   id: string; project_id: string; number: number; title: string; phase: Phase; revision: number;
-  scope_version: number; priority: number; blocker: Json; repair_cycles: number; repair_limit: number;
+  scope_version: number; priority: number; blocker: Json; repair_cycles: number; repair_limit: number | null;
 }
 export interface Usage { [name: string]: number | string[] }
 export interface Run {
@@ -128,5 +128,5 @@ export interface Commands {
   syncRelease: { body: Revision; response: { job_id: string } };
   startPreview: { body: Empty; response: { preview: Preview } };
   stopPreview: { body: Empty; response: { preview: Preview } };
-  budget: { body: Revision & { additions: { [key: string]: number } }; response: { run: Run } };
+  budget: { body: Revision & { additions: { [key: string]: number }; unlimited_total_tokens?: boolean; unlimited_budgets?: boolean }; response: { run: Run } };
 }

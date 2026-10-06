@@ -12104,6 +12104,16 @@
             },
             "type": "object",
             "title": "Additions"
+          },
+          "unlimited_total_tokens": {
+            "type": "boolean",
+            "title": "Unlimited Total Tokens",
+            "default": false
+          },
+          "unlimited_budgets": {
+            "type": "boolean",
+            "title": "Unlimited Budgets",
+            "default": false
           }
         },
         "additionalProperties": false,

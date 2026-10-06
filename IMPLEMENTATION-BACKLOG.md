@@ -1265,6 +1265,72 @@ uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
 
+### Semua budget demo tanpa batas — 2026-10-06
+Status: DONE (scope konfigurasi demo dan resume). Pengguna meminta semua budget unlimited khusus demo.
+Rencana: otorisasi eksplisit untuk model/tool calls, waktu aktif, token total dan
+job output cap null; registry provider tetap menentukan ukuran respons teknis.
+Pertahankan usage, leases, cleanup, idempotency, serta approval. Terapkan policy
+hanya project demo, hilangkan batas siklus repair demo, lalu resume #1.
+File: workers/queue, http schemas/application, pipeline Hermes/relay, domain
+repair guard dan keputusan pipeline. Tes regresi belum dijalankan.
+Hasil: `unlimited_budgets:true` membutuhkan keputusan user pada command; semua
+cap job menjadi null. Project demo menerapkan policy ke pool baru, job existing
+memakai policy yang diotorisasi dengan event user:local, dan empat tiket demo
+memiliki unlimited_repairs. Usage/counter/history tidak direset. API menampilkan
+repair_limit null; OpenAPI/requests.ts dihasilkan ulang dengan
+`python -m app.http.contract`. Batas teknis model registry per respons, timeout,
+lease/sandbox dan approval tetap berlaku; default proyek lain tetap finite.
+
+Suite #1 diperbaiki sebagai artefak baru `40b1a2c9e66c4deabaf8e7ecc9c85231`,
+digest `cef2abd8d0c86b116da10bde05c9e63170a7012cb26dd20b05b28ef938de8d0d`:
+dua assert_text membaca `.item-name`, bukan seluruh baris beserta Delete.
+Suite/report lama tetap histori; belum dianggap QA lulus, target baru wajib.
+Retry API budget `6868427c813f439c86d78688d68dd003` gagal karena #4 sudah
+diterima user dan base accepted maju, sementara checkpoint #1 masih base kosong.
+Perbaikan `pipeline/workspace.py` menjaga checkpoint lama sebagai attachment
+histori, menolak scope berbeda, dan memakai jalur repair/rebase pada base terbaru.
+Tidak meng-overlay snapshot lama ke accepted tree atau memindahkan approval.
+
+Retry operator `5bd35bbc15464a9bae7e7f0456def67f` benar **running** memakai
+DeepSeek V4.1 Flash pada base accepted `bcdc0bb12bc9cc079057fd0bee1d209db323cad2`.
+Observasi 03:07 WIB: 4 model calls, 11 tool calls, 47.835 token; total histori
+#1 mencapai 204 model calls tanpa berhenti pada cap lama 200. Checkpoint lama
+`149a30969a784cf5bd733b8672d34762` tetap tersimpan, ditandai obsolete pada retry.
+Worker/API direstart tertib; #4 tetap accepted. `git diff --check` lulus.
+Tes regresi tidak ditambah/dijalankan (permintaan konfigurasi/resume demo);
+QA/UAT #1 belum lulus dan independent review NOT_REVIEWED. Handoff: diff
+queue, HTTP schemas/application/queries, pipeline Hermes/relay/workspace,
+runtime_spike relay, domain repair guard, kontrak API, log ini dan keputusan
+pipeline. Receipt operator ignored. Perubahan belum commit/push.
+
+### Budget total token demo tanpa batas — 2026-10-06
+Status: DONE (scope konfigurasi/command). Pengguna secara eksplisit
+meminta budget token unlimited, model DeepSeek V4.1 Flash, dan resume demo.
+Izin repair terpisah sudah tercatat: #1 cycles 5/8, #4 cycles 4/7. Kedua job
+latest stopped total_tokens, bukan repair limit. Rencana: parameter otorisasi
+pengguna pada budget command untuk total_tokens=null, scope peers memakai policy
+sama, histori tetap, fresh retry/lease. Project demo menurunkan policy null ke
+pool baru #2/#3; default project lain tetap finite. Model/tool/time/output caps
+tetap berlaku. Model developer/lead konfigurasi lokal ignored sudah DeepSeek.
+File: workers/queue, http schemas/application, pipeline scheduler, docs.
+Tidak mengubah accepted candidate/QA/UAT/release. Independent review NOT_REVIEWED.
+Hasil: API budget command `unlimited_total_tokens: true`, `additions: {}`
+diterapkan ke job latest yang token-exhausted, cleanup selesai, masih eligible.
+Keputusan null diberlakukan pada peers dalam pool scope; policy project demo
+`pipeline.budget_limits.total_tokens=null` untuk pool baru #2/#3, diubah dengan
+apply_change/revision + event actor user:local. Default project lain unchanged.
+Command nyata localhost/auth/CSRF/idempotency berhasil pada #1/#4; hasil retry
+`928d9965f85149c5ab5d690ed557f98b` / `85a0b02c63274c9f90944505e9d201af`.
+Pemeriksaan state sebelum/sesudah: usage identik, total_tokens null, caps lain
+identik. Receipt operator tersimpan ignored, model konfigurasi ignored.
+API dan worker direstart, dua job benar-benar diklaim. Review DeepSeek #1
+selesai 8,56 detik, output 2.234 tokens, request_changes pada kandidat lama;
+developer #4 runtime metadata terakhir DeepSeek V4.1 Flash, #1 repair antre.
+`git diff --check` pass. Tes regresi belum dijalankan untuk perubahan command
+ini (assignment konfigurasi/resume; tidak ada permintaan tes baru). Ini bukti
+operasi nyata, bukan independent review atau keberhasilan produk/QA/UAT.
+Handoff R10: diff enam file tracked di atas; belum commit/push.
+
 ### Perbaikan reload acceptance — 2026-10-06
 Status: DONE (scope fix), assignment monitoring platform. Suite baru #4
 mengklaim UAC-10 restore localStorage, tetapi hanya add/assert tanpa reload.
@@ -1560,6 +1626,36 @@ coverage/checksums), tanpa provider requests baru. Pengguna mengotorisasi commit
 setelah recheck; suite lengkap 722 tetap hasil run reviewer, bukan run ulang Codex.
 
 ## DEV-011 — Preview kandidat dan feedback UAT
+
+### Perbaikan path socket preview macOS — 2026-10-06
+
+Status: DONE (scope perbaikan preview demo). Path socket demo memakai temporary directory macOS yang
+mencapai 105 byte dan ditolak sebelum container dibuat. Rencana: pilih fallback
+`/tmp` jika path default melewati 100 byte; pertahankan direktori socket privat,
+isolasi container, serta identitas build/QA. File: `app/preview/service.py`,
+`docs/decisions/preview.md`. Buka ulang preview kandidat UAT melalui command yang
+ada setelah worker memuat perbaikan. Tes regresi belum dijalankan.
+Percobaan reopen menemukan error kedua: Docker Desktop macOS menolak chmod socket
+dengan EINVAL. Server preview tepercaya di `contracts/verification/preview-server.cjs`
+akan mengatur izin saat socket dibuat memakai umask, tanpa chmod sesudah listen.
+Percobaan berikutnya membuktikan socket shared filesystem tidak dapat dihubungi
+dari host (ConnectionRefusedError). `app/preview/proxy.py` dan `service.py` kini
+memakai relay Node tepercaya via Docker exec hanya pada macOS; socket tetap di
+tmpfs container tanpa jaringan. Guard host/credential/Origin, batas koneksi dan
+cleanup tetap dipakai; Linux/WSL memakai transport Unix langsung.
+
+Hasil aktual: reopen melalui API menghasilkan preview
+`0e43482c389449a6b27038fcde9789ba` berstatus **ready**, error kosong. Target tetap
+`b12ad96540f8e74fb1c4b076d14ebe933e114322666e24acef477ba912f0dac6`
+untuk kandidat tiket #4 `0d25f19c42294e948bbd8569315a9b2e`; tidak rebuild atau
+mengganti bukti QA. HTTP `http://localhost:5180/` 200 (385 bytes), asset JS
+`/assets/index-D3BMSkHh.js` 200 (145656 bytes); container preview berjalan.
+Worker dihentikan/restart secara tertib untuk memuat perubahan; job/history/usage
+dipertahankan. `git diff --check` lulus. Tes regresi tidak ditambah/dijalankan
+(permintaan saat ini diagnosis dan pemulihan demo); manual UAT belum dilakukan.
+Keterbatasan: Linux/WSL belum diverifikasi ulang; throughput relay belum diukur.
+Handoff: diff `preview/{service,proxy}.py`, `preview-server.cjs`, keputusan preview
+dan log ini; perbaikan belum commit/push. Review independen: NOT_REVIEWED.
 
 ### Catatan pengerjaan
 Status: DONE. Pelaksana: Claude (Sonnet 5.5), 2026-10-05. Review Codex menemukan bug dan memperbaikinya;

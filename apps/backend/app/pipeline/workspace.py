@@ -144,17 +144,23 @@ class ProductWorkspace:
             generation=identity['generation'], lease_id=identity['lease_owner'], manifest=manifest,
             run_id=run_id, allow_install_egress=True,
             provenance={'created_by': 'product-job-lease', 'job_id': identity['job_id']})
-        candidate, rebased = None, False
+        candidate, rebased, obsolete_checkpoint = None, False, None
         with self.db.read() as s:
             checkpoint = s.get(Job, identity['job_id']).runtime_ref.get('pipeline_checkpoint')
             if checkpoint:
                 saved = json.loads(self.store.read_bytes(s, checkpoint))
-                if any(saved.get(k) != identity[k] for k in ('project_id', 'ticket_id', 'scope_version')) or saved['base_sha'] != base:
-                    raise ValueError('checkpoint belongs to an obsolete scope/base')
-                # Each resume gets a fresh attempt ref and credential; copy only validated source bytes.
-                fsutil.clear_dir(sup.src_dir(ref))
-                unpack_tree(saved['files'], sup.src_dir(ref))
-            elif identity['role'] == 'developer':
+                if any(saved.get(k) != identity[k] for k in ('project_id', 'ticket_id', 'scope_version')):
+                    raise ValueError('checkpoint belongs to an obsolete scope')
+                if saved['base_sha'] != base:
+                    # An independent ticket can be accepted while this run waits.
+                    # Preserve the old checkpoint as history; never overlay old-base
+                    # files on the newly accepted tree.
+                    obsolete_checkpoint, checkpoint = checkpoint, None
+                else:
+                    # Each resume gets a fresh attempt ref and credential; copy only validated source bytes.
+                    fsutil.clear_dir(sup.src_dir(ref))
+                    unpack_tree(saved['files'], sup.src_dir(ref))
+            if not checkpoint and identity['role'] == 'developer':
                 # Repair/rebase starts from the last superseded immutable candidate; the accepted ref stays untouched.
                 feedback = next((m for m in s.scalars(select(Message).where(Message.ticket_id == identity['ticket_id'])
                     .order_by(Message.created_at.desc(), Message.seq.desc()))
@@ -171,6 +177,16 @@ class ProductWorkspace:
                     else:
                         rebased = rebase_onto(broker, candidate, base, sup.src_dir(ref))
                     sup._chmod_for_sandbox(sup.src_dir(ref))
+        if obsolete_checkpoint:
+            with self.db.write() as s:
+                ctx.queue.verify_identity(s, identity)
+                job = s.get(Job, identity['job_id'])
+                job.runtime_ref = {**job.runtime_ref, 'pipeline_checkpoint': None,
+                    'obsolete_checkpoints': [*job.runtime_ref.get('obsolete_checkpoints', []), obsolete_checkpoint]}
+                self._post(s, identity, 'checkpoint-base-changed:' + identity['job_id'] + ':' + str(identity['generation']),
+                    'Accepted base changed. The old checkpoint remains in history; this attempt uses the current base '
+                    'and the previous candidate repair/rebase path. New review, QA and UAT are required.',
+                    [obsolete_checkpoint], 'checkpoint_base_changed', new_base=base)
         if candidate is not None and candidate.base_sha != base and identity['role'] == 'developer' and not checkpoint:
             with self.db.write() as s:
                 self._post(s, identity, 'rebase:' + identity['job_id'] + ':' + str(identity['generation']),

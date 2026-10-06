@@ -26,7 +26,7 @@ from app.persistence import (Database, EventSpec, answer_input_request, append_e
 from app.persistence.columns import utcnow
 from app.persistence.models import ACTIVE_JOB_STATUSES, Artifact, Job, Message, Ticket
 
-LIMIT_KEYS = ("model_calls", "tool_calls", "active_s")  # always finite and required
+LIMIT_KEYS = ("model_calls", "tool_calls", "active_s")  # required; finite by default
 OPTIONAL_LIMIT_KEYS = ("output_tokens", "total_tokens")
 BIND_STAGES = ("development", "technical_review", "qa")
 TERMINAL_STATUSES = ("stopped", "failed", "cancelled", "succeeded")
@@ -66,14 +66,16 @@ class Lease:
 
 
 def _validate_limits(limits: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(limits, dict) or set(limits) - set(LIMIT_KEYS) - set(OPTIONAL_LIMIT_KEYS) - {"budget_key"}:
+    if not isinstance(limits, dict) or set(limits) - set(LIMIT_KEYS) - set(OPTIONAL_LIMIT_KEYS) - {"budget_key", "unlimited_budgets"}:
         raise ValueError(f"limits accept {LIMIT_KEYS + OPTIONAL_LIMIT_KEYS}")
+    if type(limits.get('unlimited_budgets', False)) is not bool:
+        raise ValueError('unlimited_budgets must be an explicit boolean policy')
     for key in LIMIT_KEYS:
         if key not in limits:
-            raise ValueError(f"finite limit {key} is required")
+            raise ValueError(f"limit {key} is required")
     for key in LIMIT_KEYS + OPTIONAL_LIMIT_KEYS:
         value = limits.get(key)
-        if value is None and key in OPTIONAL_LIMIT_KEYS:
+        if value is None and (key in OPTIONAL_LIMIT_KEYS or limits.get('unlimited_budgets') is True):
             continue
         integral = key != "active_s"
         if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
@@ -354,7 +356,7 @@ class JobQueue:
             except StaleLease:
                 return "revoked"
             record_usage(s, job.id, {"active_s": active_delta_s})
-            if self.budget_usage(s, job).get("active_s", 0) >= job.limits["active_s"]:
+            if job.limits['active_s'] is not None and self.budget_usage(s, job).get("active_s", 0) >= job.limits["active_s"]:
                 self._stop_for_budget(s, job, "active_s", lease.owner)
                 return "budget_exhausted"
             now = self.clock()
@@ -374,7 +376,7 @@ class JobQueue:
         with self.db.write() as s:
             job = self._fenced(s, lease)
             exhausted_limit = self._budget_limit(s, job, self.budget_usage(s, job))
-            if self.budget_usage(s, job).get(limit, 0) >= job.limits[limit]:
+            if job.limits[limit] is not None and self.budget_usage(s, job).get(limit, 0) >= job.limits[limit]:
                 exhausted_limit = limit
             if exhausted_limit:
                 limit = exhausted_limit
@@ -696,12 +698,24 @@ class JobQueue:
             self._event(s, retry, 'operator_retry', user, parent_job_id=job.id, authorization_id=authorization_id)
             return retry.id
 
-    def extend_budget(self, job_id: str, *, user: str, additions: dict[str, float], authorization_id: str) -> str:
-        """User decision after budget exhaustion: a new attempt with raised caps. Usage is kept."""
+    def extend_budget(self, job_id: str, *, user: str, additions: dict[str, float], authorization_id: str,
+                      unlimited_total_tokens: bool = False, unlimited_budgets: bool = False) -> str:
+        """Explicit user budget decision; usage stays cumulative even when limits are removed."""
         if not user.startswith("user:") or not authorization_id:
             raise QueueError("only an explicit user authorization can extend a budget")
-        if not additions:
+        if type(unlimited_total_tokens) is not bool or type(unlimited_budgets) is not bool:
+            raise QueueError('unlimited flags must be boolean user decisions')
+        if not additions and not unlimited_total_tokens and not unlimited_budgets:
             raise QueueError("budget extension requires a positive addition")
+        if unlimited_budgets and additions:
+            raise QueueError('cannot add budgets and remove all limits in the same decision')
+        if unlimited_total_tokens and 'total_tokens' in additions:
+            raise QueueError('cannot add tokens and remove the total token limit in the same decision')
+        authorization = {"user": user, "additions": additions, "id": authorization_id}
+        if unlimited_total_tokens:
+            authorization['unlimited_total_tokens'] = True
+        if unlimited_budgets:
+            authorization['unlimited_budgets'] = True
         with self.db.write() as s:
             job = s.get(Job, job_id)
             if job is None or job.status != "stopped" or (job.result or {}).get("reason") != "budget_exhausted":
@@ -709,23 +723,32 @@ class JobQueue:
             key = f"{job.idempotency_key}#budget-{authorization_id}"
             existing = s.scalar(select(Job).where(Job.project_id == job.project_id, Job.idempotency_key == key))
             if existing is not None:
-                if existing.runtime_ref.get("budget_authorization") != {
-                    "user": user, "additions": additions, "id": authorization_id}:
+                if existing.runtime_ref.get("budget_authorization") != authorization:
                     raise QueueError("authorization reused with a different decision")
                 return existing.id
+            if unlimited_total_tokens or unlimited_budgets:
+                if ((not unlimited_budgets and job.result.get('limit') != 'total_tokens') or self._cleanup(job)
+                        or s.scalar(select(Job.id).where(Job.parent_job_id == job.id))):
+                    raise QueueError('remove limits on the latest budget-exhausted job after cleanup')
+                if self._claimable(s, job) != 'ok':
+                    raise QueueError('budget-exhausted job is no longer eligible for its scope/stage')
             limits = dict(job.limits)
             for name, value in additions.items():
                 if (name not in LIMIT_KEYS + OPTIONAL_LIMIT_KEYS or limits.get(name) is None or isinstance(value, bool)
                         or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0):
                     raise QueueError("additions must be positive amounts of known limits")
                 limits[name] = limits[name] + value
+            if unlimited_total_tokens:
+                limits['total_tokens'] = None
+            if unlimited_budgets:
+                limits.update({k: None for k in LIMIT_KEYS + OPTIONAL_LIMIT_KEYS})
+                limits['unlimited_budgets'] = True
             _validate_limits(limits)
             retry = Job(project_id=job.project_id, ticket_id=job.ticket_id, scope_version=job.scope_version,
                         lane=job.lane, stage=job.stage, parent_job_id=job.id, attempt=job.attempt + 1,
                         idempotency_key=key, limits=limits,
                         context_artifact_id=job.context_artifact_id,
-                        runtime_ref={**self._retry_ref(job), "budget_authorization": {
-                            "user": user, "additions": additions, "id": authorization_id}})
+                        runtime_ref={**self._retry_ref(job), "budget_authorization": authorization})
             # The scope policy is shared, including concurrently queued stages.
             for peer in s.scalars(select(Job).where(Job.project_id == job.project_id,
                                   func.json_extract(Job.limits, "$.budget_key") == limits["budget_key"])):
@@ -733,5 +756,7 @@ class JobQueue:
             s.add(retry)
             s.flush()
             self._event(s, retry, "budget_extended", user, parent_job_id=job.id, additions=additions,
-                        authorization_id=authorization_id)
+                        authorization_id=authorization_id,
+                        **({'unlimited_budgets': True} if unlimited_budgets else {}),
+                        **({'unlimited_total_tokens': True} if unlimited_total_tokens else {}))
             return retry.id

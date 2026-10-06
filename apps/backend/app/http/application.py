@@ -105,6 +105,11 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     def command(request, body, action, runtime=False):
         principal = auth(request, runtime)
         data = body.model_dump() if body else {}
+        if isinstance(body, b.Budget) and not body.unlimited_total_tokens:
+            # Keep legacy budget command payloads stable for idempotent replay.
+            data.pop('unlimited_total_tokens', None)
+        if isinstance(body, b.Budget) and not body.unlimited_budgets:
+            data.pop('unlimited_budgets', None)
         result = clean(request, execute(request, principal, data, lambda s, svc, key: action(s, svc, key, principal)))
         status = result.pop("_status", 200)
         return JSONResponse(result, status_code=status)
@@ -351,7 +356,9 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
         def action(s, svc, key, p):
             j = q.row(s, Job, run_id)
             revision(j, body.expected_revision)
-            retry = svc.queue.extend_budget(j.id, user=p.user_id, additions=body.additions, authorization_id=key)
+            retry = svc.queue.extend_budget(j.id, user=p.user_id, additions=body.additions, authorization_id=key,
+                                           unlimited_total_tokens=body.unlimited_total_tokens,
+                                           unlimited_budgets=body.unlimited_budgets)
             return {"run": q.run(q.row(s, Job, retry), s)}
         return command(request, body, action)
     @app.get("/tickets/{ticket_id}/candidates/{candidate_id}")

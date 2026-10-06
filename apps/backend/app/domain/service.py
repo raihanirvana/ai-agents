@@ -83,6 +83,8 @@ class Workflow:
     @staticmethod
     def _repair_exhausted(t, workflow=None):
         state = t.workflow if workflow is None else workflow
+        if state.get('unlimited_repairs') is True:
+            return False
         return state.get("repair_cycles", 0) >= state.get("repair_limit", 3)
 
     def _work_blocker(self, t, dependency_pending, workflow=None):
@@ -659,7 +661,8 @@ class Workflow:
             self._invalidate(s, actor, t, "request_changes", keep_job_id=attempt.job_id if actor.role != "user" else None)
             return self._change(s, actor, t, "changes_requested", phase="development",
                 workflow={**t.workflow, "repair_cycles": cycles, "candidate_id": None, "attempts": {}, "feedback": reason},
-                blocker={"reason": "needs_human", "resolution": "user must authorize a bounded repair extension"} if cycles >= t.workflow.get("repair_limit", 3) else None)
+                blocker={"reason": "needs_human", "resolution": "user must authorize a bounded repair extension"}
+                    if self._repair_exhausted(t, {**t.workflow, 'repair_cycles': cycles}) else None)
 
     def authorize_repair(self, actor, ticket_id, expected_revision, additional_cycles=1):
         with self.db.write() as s:

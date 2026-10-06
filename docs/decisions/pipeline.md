@@ -28,6 +28,35 @@ reply lead untuk pertanyaan developer mewarisi pool pengirim. Perpanjangan
 hanya lewat command pengguna; tidak ada fallback model otomatis. Provider/model
 tetap dapat dipilih per role melalui `agents/models.json`.
 
+Untuk demo yang diotorisasi pengguna, budget command menerima
+`unlimited_total_tokens: true` dengan `additions: {}` untuk job latest yang
+stopped karena total_tokens, cleanup selesai, scope/stage masih eligible.
+Nilai total_tokens menjadi null di seluruh pool scope dan retry baru;
+usage, history, repair counter dan pin evidence tidak direset. Keputusan ini
+diaudit dengan actor user/idempotency key. Batas model calls/tool calls/active
+time dan output per request tetap finite. Policy project eksplisit
+`workflow.pipeline.budget_limits` berlaku untuk pool baru; pool existing memakai
+keputusan budget yang sudah tersimpan. Default proyek lain tetap 200.000 token.
+
+Otorisasi pengguna `unlimited_budgets: true` pada budget command menghapus semua
+cap job (`model_calls`, `tool_calls`, `active_s`, `output_tokens`, `total_tokens`
+menjadi null). Flag policy eksplisit dibutuhkan untuk null pada limit wajib;
+default proyek lain tetap finite. Usage seluruh attempt tetap dijumlahkan,
+retry memerlukan cleanup selesai dan scope/stage saat ini masih eligible.
+Hermes memakai representasi unlimited iterations bawaan (sys.maxsize), relay
+tidak menimpa output limit dengan null, dan batas teknis respons/timeout provider
+tetap mengikuti model registry. Demo ini juga memiliki otorisasi user untuk
+`ticket.workflow.unlimited_repairs=true`; API menampilkan repair_limit null.
+Counter repair dan usage tidak direset. Approval scope/UAT/release, lease fencing,
+sandbox limits dan timeout command tetap berlaku.
+
+Jika accepted base maju ketika run menunggu, checkpoint dengan scope yang sama
+dan base lama tetap menjadi artefak histori. Resume tidak menyalin source lama
+ke tree terbaru; gunakan jalur repair/rebase kandidat sebelumnya, atau mulai dari
+base terbaru jika konflik. Scope checkpoint yang berbeda tetap ditolak. Upaya
+baru memerlukan kandidat, target, review, QA dan UAT baru.
+Saldo provider tetap menentukan apakah request dapat dilayani.
+
 Technical review memakai builder khusus per call dengan batas estimasi 32.768
 token untuk scope, full diff (termasuk lockfile), dan gate evidence. Builder chat/
 planning tetap 8.000 secara default; tidak ada mutasi konfigurasi builder bersama.

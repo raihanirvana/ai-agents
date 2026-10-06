@@ -1,6 +1,7 @@
 """Pinned Hermes child with a private home, exact tool surface, and a product-owned relay."""
 import json
 import os
+import sys
 from pathlib import Path
 import subprocess
 import threading
@@ -83,9 +84,9 @@ class HermesDriver:
             with relay:
                 worker_config = {'relay_url': relay.url, 'relay_token': relay.token, 'model': config.model,
                     'tool_names': list(tools), 'tool_parameters': parameters, 'tool_prefix': 'pipeline_',
-                    'toolset': 'product_pipeline', 'max_iterations': ctx.job['limits']['model_calls'],
+                    'toolset': 'product_pipeline', 'max_iterations': ctx.job['limits']['model_calls'] or sys.maxsize,
                     'completion_tool': 'propose_tests' if role == 'qa' else 'submit_candidate',
-                    'output_tokens': min(config.max_output_tokens, ctx.job['limits']['output_tokens']),
+                    'output_tokens': min(config.max_output_tokens, ctx.job['limits'].get('output_tokens') or config.max_output_tokens),
                     'session_id': ctx.tag, 'system': snapshot.system + '\nUse only pipeline tools. Paths are relative to the project source snapshot, never the private runtime cwd.',
                     'prompt': snapshot.user}
                 path = directory / 'worker.json'

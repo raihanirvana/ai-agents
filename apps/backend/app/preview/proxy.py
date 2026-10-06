@@ -10,17 +10,37 @@ import threading
 from pathlib import Path
 
 
+# Trusted transport only: no command or socket address comes from an HTTP request.
+# Docker Desktop cannot forward a VM's Unix socket through a macOS bind mount.
+SOCKET_RELAY = """
+const s = require('node:net').connect(process.env.PREVIEW_SOCKET);
+s.setTimeout(30000);
+s.on('error', () => process.exit(1));
+s.on('timeout', () => s.destroy());
+s.on('close', () => process.stdin.destroy());
+// EOF on docker stdin must not close the HTTP socket before the server has
+// finished streaming its response. The guarded request asks for Connection: close.
+process.stdin.pipe(s, {end: false});
+s.pipe(process.stdout);
+"""
+
+
+def relay_command(docker: str, container: str) -> tuple[str, ...]:
+    return (docker, 'exec', '-i', container, 'node', '-e', SOCKET_RELAY)
+
+
 class ProxyError(RuntimeError):
     pass
 
 
 class UnixProxy:
     def __init__(self, port: int, socket_path: Path, *, host: str = "127.0.0.1", max_connections: int = 64,
-                 idle_s: float = 30.0):
+                 idle_s: float = 30.0, relay: tuple[str, ...] | None = None):
         if host != "127.0.0.1":
             raise ProxyError("preview proxy binds to loopback only")
         self.port, self.socket_path, self.host = port, str(socket_path), host
         self.max_connections, self.idle_s = max_connections, idle_s
+        self.relay = relay
         self._loop: asyncio.AbstractEventLoop | None = None
         self._server: asyncio.AbstractServer | None = None
         self._thread: threading.Thread | None = None
@@ -84,7 +104,13 @@ class UnixProxy:
                     writer.write(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
                     await asyncio.wait_for(writer.drain(), self.idle_s)
                     return
-                upstream_reader, upstream_writer = await asyncio.open_unix_connection(self.socket_path)
+                process = None
+                if self.relay is None:
+                    upstream_reader, upstream_writer = await asyncio.open_unix_connection(self.socket_path)
+                else:
+                    process = await asyncio.create_subprocess_exec(*self.relay, stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                    upstream_reader, upstream_writer = process.stdout, process.stdin
                 try:
                     # One request per connection: pipelined requests cannot bypass the header guard.
                     lines = head.split(b"\r\n")
@@ -94,6 +120,14 @@ class UnixProxy:
                     await self._pipe(upstream_reader, writer)
                 finally:
                     upstream_writer.close()
+                    if process is not None:
+                        # Bound the host CLI lifetime, including disconnect and proxy shutdown.
+                        if process.returncode is None:
+                            try:
+                                process.kill()
+                            except ProcessLookupError:
+                                pass
+                        await process.wait()
         except (OSError, asyncio.CancelledError, asyncio.TimeoutError, asyncio.IncompleteReadError,
                 asyncio.LimitOverrunError):
             pass

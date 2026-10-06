@@ -31,7 +31,7 @@ def ticket(t):
     return {"id": t.id, "project_id": t.project_id, "number": t.number, "title": t.title, "phase": t.phase,
             "revision": t.revision, "scope_version": t.current_version, "priority": t.priority,
             "blocker": t.blocker, "repair_cycles": t.workflow.get("repair_cycles", 0),
-            "repair_limit": t.workflow.get("repair_limit", 3)}
+            "repair_limit": None if t.workflow.get('unlimited_repairs') is True else t.workflow.get("repair_limit", 3)}
 
 
 def run(j, s, peers=None, usage_by_key=None):

@@ -52,7 +52,8 @@ class PipelineScheduler:
                 # Use the scope's already authorized pipeline caps (possibly extended through the user command).
                 # A PO/lead chat on this scope has its own pool and never sets the execution budget.
                 pool = [j for j in jobs if j.runtime_ref.get("budget_pool") == BUDGET_POOL]
-                caps = {k: v for k, v in pool[-1].limits.items() if k != "budget_key"} if pool else self.limits
+                caps = ({k: v for k, v in pool[-1].limits.items() if k != "budget_key"} if pool else
+                        {**self.limits, **p.workflow['pipeline'].get('budget_limits', {})})
                 job = self.queue.enqueue(session=s, project_id=t.project_id, ticket_id=t.id, expected_scope=t.current_version,
                     lane="execution", role=role, stage=stage, runtime=self.runtime, idempotency_key=key, limits=caps,
                     budget_pool=BUDGET_POOL,

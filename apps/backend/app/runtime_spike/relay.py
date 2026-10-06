@@ -106,7 +106,8 @@ class Relay:
                         self.reply(403, {"error": "model differs from supervisor configuration"})
                         return
                     limits = owner.journal.inspect(owner.scope)["limits"]
-                    body["max_tokens"] = limits["output_tokens"]
+                    if limits.get('output_tokens') is not None:
+                        body["max_tokens"] = limits["output_tokens"]
                     body.pop("max_completion_tokens", None)
                     body["usage"] = {"include": True}
                     body["provider"] = {"allow_fallbacks": False}

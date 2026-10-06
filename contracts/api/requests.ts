@@ -2,7 +2,7 @@
 export type ApprovalBatch = { "items": (ApprovalEntry)[]; };
 export type ApprovalEntry = { "expected_revision": number; "ticket_id": string; "scope_version": number; };
 export type Brief = { "expected_revision": number; "brief": string; };
-export type Budget = { "expected_revision": number; "additions": { [key: string]: number | number; }; };
+export type Budget = { "expected_revision": number; "additions": { [key: string]: number | number; }; "unlimited_total_tokens"?: boolean; "unlimited_budgets"?: boolean; };
 export type CandidateReview = { "expected_revision": number; "ticket_id": string; "accept": boolean; "reason"?: string; };
 export type CandidateSubmit = { "expected_revision": number; "commit_artifact_id": string; "commit_receipt_id": string; "base_sha": string; };
 export type Changes = { "expected_revision": number; "candidate_id": string; "reason": string; };

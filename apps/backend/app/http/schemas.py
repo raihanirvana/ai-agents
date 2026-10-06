@@ -105,6 +105,8 @@ class Repair(Revision):
 
 class Budget(Revision):
     additions: dict[str, int | float]
+    unlimited_total_tokens: bool = False
+    unlimited_budgets: bool = False
 
 
 class Uat(Revision):

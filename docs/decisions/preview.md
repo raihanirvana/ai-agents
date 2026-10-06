@@ -47,6 +47,23 @@ proses lama; pengguna membuka ulang dari artefak yang sama. Satu worker per host
 
 ## Isolasi
 
+Direktori socket memakai temporary directory sistem dengan parent privat milik
+user supervisor (mode 0700). Jika path socket lengkap melebihi 100 byte, misalnya
+TMPDIR macOS yang panjang, hanya socket preview berpindah ke
+`/tmp/aiagent-preview-<uid>`. Parent symlink atau milik user lain ditolak.
+Pemilihan lokasi ini tidak mengubah bundle build, target atau evidence QA.
+Server membuat socket dengan mode 0666 melalui umask 0111; parent host tetap
+privat. Ini menghindari chmod socket yang ditolak shared filesystem Docker Desktop.
+Pada macOS, socket dibuat di tmpfs container `/tmp/preview.sock`, tanpa bind mount
+socket ke host. Proxy supervisor menggunakan relay Node tepercaya melalui
+`docker exec -i` ke socket tersebut karena socket VM tidak dapat dihubungi dari
+host lewat shared filesystem. Relay menerima request hanya setelah guard HTTP
+proxy, memiliki timeout 30 detik, dan CLI dibersihkan ketika koneksi berakhir atau
+proxy berhenti. Jumlah koneksi tetap dibatasi. Health check memakai relay yang
+sama dan membandingkan checksum halaman dengan build teruji. Container tetap
+`--network none` tanpa published port, credential, DB kontrol atau Docker socket.
+Linux/WSL memakai koneksi Unix socket langsung seperti sebelumnya.
+
 - **Target tanpa jaringan.** Container berjalan `--network none` (tanpa interface selain loopback, tanpa port
   terpublikasi, tanpa host gateway), root filesystem read-only, `--cap-drop ALL`, `no-new-privileges`, user 1000,
   memori 256 MB, 128 PID, tanpa env selain `PREVIEW_SOCKET`, tanpa secret/DB. Mount: situs (baca-saja), server
@@ -93,3 +110,6 @@ permintaannya 409).
   test menunggu forwarding itu (bukan perilaku produk).
 - Satu worker per host; dua worker di host sama dapat saling menghentikan preview saat recovery.
 - Proses preview tidak diuji terhadap kegagalan Docker di tengah operasi selain jalur inspect/cleanup di atas.
+- Relay macOS dibuktikan lewat reopen kandidat demo dan HTTP halaman/asset nyata;
+  tes regresi otomatis untuk transport ini belum dijalankan. Docker exec per
+  request menambah overhead; belum ada pengukuran throughput.

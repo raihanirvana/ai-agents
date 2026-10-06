@@ -11,6 +11,8 @@ import json
 import os
 import shutil
 import socket
+import stat
+import sys
 import tempfile
 import threading
 import time
@@ -28,7 +30,7 @@ from app.pipeline.workspace import unpack_tree
 from app.workspace import fsutil
 from app.workspace.sandbox import DockerSandbox, LABEL_MANAGED, LABEL_ROLE, SandboxError
 from . import requests as pr
-from .proxy import ProxyError, UnixProxy, fetch_via_socket
+from .proxy import ProxyError, UnixProxy, fetch_via_socket, SOCKET_RELAY, relay_command
 
 SUITE_DIR = Path(__file__).resolve().parents[4] / "contracts" / "verification"
 ROLE_PREVIEW = "preview"
@@ -47,9 +49,14 @@ class PreviewService:
         self.base = Path(root).resolve() / ".previews"
         # Unix socket paths are limited to ~104 bytes, so sockets live under a short, private temp directory.
         self.sockets = Path(tempfile.gettempdir()) / f"aiagent-preview-{os.getuid()}"
+        if len(os.fsencode(self.sockets / ('0' * 16) / 'preview.sock')) > 100:
+            # macOS TMPDIR can already consume most of the AF_UNIX path limit.
+            # Keep other temporary files in their configured location.
+            self.sockets = Path('/tmp') / f"aiagent-preview-{os.getuid()}"
         self.owner = owner or f"preview:{socket.gethostname()}"
         self.sandbox = sandbox or DockerSandbox(supervisor_id=self.owner)
         self.health_timeout_s = health_timeout_s
+        self._docker_relay = sys.platform == 'darwin'
         self._proxies: dict[str, UnixProxy] = {}
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="preview")
         self._busy = threading.Lock()
@@ -182,8 +189,12 @@ class PreviewService:
         site, run = directory / "site", self._socket_dir(row.id)
         if directory.exists():
             shutil.rmtree(directory)
-        shutil.rmtree(run, ignore_errors=True)
         self.sockets.mkdir(mode=0o700, exist_ok=True)
+        socket_root = self.sockets.lstat()
+        if not stat.S_ISDIR(socket_root.st_mode) or socket_root.st_uid != os.getuid():
+            raise PreviewFailed('socket directory must be a directory owned by the supervisor user')
+        self.sockets.chmod(0o700)
+        shutil.rmtree(run, ignore_errors=True)
         run.mkdir(mode=0o777)
         run.chmod(0o777)  # the container user must be able to create its socket here; nothing else is mounted writable
         unpack_tree(files, site)
@@ -194,7 +205,7 @@ class PreviewService:
             raise PreviewFailed("build has no index.html to serve")
         image = self.sandbox.image_id(row.details.get("node_image_id") or target["node_image_id"])
         sock = run / "preview.sock"
-        if len(str(sock)) > 100:
+        if len(os.fsencode(sock)) > 100:
             raise PreviewFailed("socket path is too long; set TMPDIR to a shorter directory")
         labels = {LABEL_MANAGED: "1", LABEL_ROLE: ROLE_PREVIEW, LABEL_PREVIEW: row.id, "aiagent.supervisor": self.owner}
         args = ["create", "--name", container, "--user", "1000:1000", "--read-only", "--cap-drop", "ALL",
@@ -202,10 +213,11 @@ class PreviewService:
                 "--pids-limit", "128", "--ulimit", "nofile=1024:1024", "--ulimit", "core=0",
                 "--tmpfs", "/tmp:rw,nosuid,size=32m", "--network", "none",
                 "--log-driver", "json-file", "--log-opt", "max-size=1m", "--log-opt", "max-file=1",
-                "-e", "PREVIEW_SOCKET=/run/preview/preview.sock",
+                "-e", "PREVIEW_SOCKET=" + ('/tmp/preview.sock' if self._docker_relay else '/run/preview/preview.sock'),
                 "--mount", f"type=bind,source={site},target=/site,readonly",
-                "--mount", f"type=bind,source={run},target=/run/preview",
                 "--mount", f"type=bind,source={SUITE_DIR / 'preview-server.cjs'},target=/server.cjs,readonly"]
+        if not self._docker_relay:
+            args += ["--mount", f"type=bind,source={run},target=/run/preview"]
         for key, value in sorted(labels.items()):
             args += ["--label", f"{key}={value}"]
         self.sandbox._docker(*args, image, "node", "/server.cjs")
@@ -215,16 +227,23 @@ class PreviewService:
         last = "no response"
         while time.monotonic() < deadline:
             try:
-                status, body = fetch_via_socket(sock, "/")
+                if self._docker_relay:
+                    response = self.sandbox._docker('exec', '-i', container, 'node', '-e', SOCKET_RELAY,
+                        input=b'GET / HTTP/1.0\r\nHost: preview\r\n\r\n', timeout=3, check=False)
+                    head, _, body = response.stdout.partition(b'\r\n\r\n')
+                    status = int(head.split(b' ', 2)[1]) if response.returncode == 0 else 0
+                else:
+                    status, body = fetch_via_socket(sock, "/")
                 if status == 200 and hashlib.sha256(body).hexdigest() == expected:
                     break
                 last = f"HTTP {status}" if status != 200 else "served page differs from the tested build"
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, IndexError, SandboxError) as exc:
                 last = type(exc).__name__
             time.sleep(0.2)
         else:
             raise PreviewFailed(f"smoke health check failed: {last}")
-        proxy = UnixProxy(row.port, sock)
+        proxy = UnixProxy(row.port, sock,
+            relay=relay_command(self.sandbox.docker, container) if self._docker_relay else None)
         try:
             proxy.start()
         except ProxyError as exc:
