@@ -31,8 +31,8 @@ CORS_ORIGINS = [
 ]
 
 
-def _local_path(name: str, default: Path) -> Path:
-    raw = os.getenv(name, "").strip()
+def _local_path(name: str, default: Path, *, env=None) -> Path:
+    raw = (os.environ if env is None else env).get(name, "").strip()
     path = Path(raw).expanduser() if raw else default
     return path if path.is_absolute() else ROOT / path
 
@@ -41,3 +41,8 @@ def _local_path(name: str, default: Path) -> Path:
 DATA_DIR = _local_path("DATA_DIR", ROOT / "data")
 DATABASE_PATH = _local_path("DATABASE_PATH", DATA_DIR / "app.sqlite3")
 ARTIFACT_DIR = _local_path("ARTIFACT_DIR", DATA_DIR / "artifacts")
+
+
+def pipeline_workspace_root(*, env=None) -> Path:
+    """Same managed root for worker, pipeline, integrator and preview, regardless of cwd."""
+    return _local_path('PIPELINE_WORKSPACE_ROOT', DATA_DIR / 'pipeline-workspaces', env=env).resolve()

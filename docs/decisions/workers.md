@@ -19,6 +19,33 @@ Kode: `apps/backend/app/workers/`, `apps/backend/app/adapters/runtime/fake.py`,
 
 ## Aturan yang ditegakkan
 
+Review Claude Batch 1 (6 Oktober 2026): extension budget menghasilkan satu anak
+retry per parent. Replay authorization yang sama mengembalikan ID anak itu;
+authorization baru pada parent yang sudah memiliki retry ditolak sebelum cap
+ditambah. Chat tiket berikutnya mengambil policy terbaru dari pool interaktif
+scope yang sama, tanpa mengambil policy pool execution atau versi scope lain.
+Loop worker melaporkan tipe exception tick dan menunggu poll sebelum mencoba lagi;
+shutdown berada dalam finally, termasuk ketika loop terinterupsi. Pesan exception
+mentah tidak dicetak karena dapat memuat data request/credential.
+Kegagalan snapshot/bind/start sebelum thread runtime hidup mengembalikan claim
+ke antrean dengan backoff dan menutup intent cleanup kosong attempt itu; tidak
+menunggu lease expiry untuk claim yang tidak memiliki executor.
+
+Recovery tetap memeriksa owner/resource setiap lease interval agar resource yang
+kemudian berhenti bisa direkonsiliasi. Error `reconcile_failed` yang sama pada
+generation cleanup yang sama hanya menghasilkan satu event `job.needs_human`;
+error baru atau generation berbeda dapat menghasilkan event baru. Ledger dan pin
+cleanup tetap menahan slot sampai penghentian resource terbukti. Edit scope
+mempertahankan creation_key tiket sehingga retry breakdown tidak menduplikasi
+tiket yang sudah diedit, tanpa mempertahankan approval/attempt scope lama.
+
+`pipeline_workspace_root` di config dipakai worker, pipeline, integrator dan
+preview. Path relatif `PIPELINE_WORKSPACE_ROOT` di-resolve terhadap root repository,
+default `<DATA_DIR>/pipeline-workspaces`; path absolut tetap dipakai. Perubahan ini
+tidak memindahkan workspace lama secara otomatis: instalasi yang sudah memakai
+workspace relatif-CWD perlu mengatur path absolut ke lokasi itu atau memindahkannya
+secara eksplisit ketika seluruh runtime berhenti.
+
 - **Lease adalah capability.** `Lease(job, owner, generation)` wajib cocok dengan job berstatus
   `running` dan lease yang belum kedaluwarsa untuk complete/fail/reserve/input/register/release.
   Setiap claim menaikkan generation; cancel, release, wait quota, budget habis dan recovery juga

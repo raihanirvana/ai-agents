@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from app.agents import Redactor, Threads
 from app.agents.tools import NotWired
@@ -274,14 +274,22 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
             revision(project, body.expected_revision)
             if body.task == "revise" and not body.ticket_id or body.task == "breakdown" and body.ticket_id:
                 raise Invalid("revise requires a ticket; breakdown is project scoped")
-            if body.ticket_id: q.row(s, Ticket, body.ticket_id, project_id)
+            limits = dict(DEFAULT_LIMITS)
+            if body.ticket_id:
+                ticket = q.row(s, Ticket, body.ticket_id, project_id)
+                budget_key = f'ticket:{ticket.id}:v{ticket.current_version}'
+                peer = s.scalar(select(Job).where(Job.project_id == project_id,
+                    func.json_extract(Job.limits, '$.budget_key') == budget_key)
+                    .order_by(Job.created_at.desc(), Job.id.desc()))
+                if peer is not None:
+                    limits = {k: v for k, v in peer.limits.items() if k != 'budget_key'}
             text = request.app.state.api.redactor.redact(body.body)
             m, _ = append_message(s, project_id=project_id, thread_id=f"chat:{project_id}", ticket_id=body.ticket_id,
                                    sender=p.user_id, recipient="role:po", body=text)
             job_id = None
             if body.task != "note":
                 j = svc.queue.enqueue(project_id=project_id, role="po", stage="chat", lane="interactive", runtime=runtime,
-                    limits=DEFAULT_LIMITS, ticket_id=body.ticket_id, idempotency_key=f"api-chat:{m.id}",
+                    limits=limits, ticket_id=body.ticket_id, idempotency_key=f"api-chat:{m.id}",
                     payload={"task": body.task, "request": text, "message_id": m.id})
                 job_id = j.id
             append_event(s, project_id, EventSpec("message.created", p.user_id, {"message_id": m.id, "job_id": job_id}, entity_type="messages", entity_id=m.id))

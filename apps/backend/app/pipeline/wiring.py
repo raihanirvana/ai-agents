@@ -1,7 +1,7 @@
 """Production wiring; POSIX/Docker required only when opting into the pipeline worker."""
 import os
-from pathlib import Path
 from .scheduler import PipelineScheduler
+from app.config import pipeline_workspace_root
 
 
 def build_pipeline(structured, store, workflow, queue, *, env=None):
@@ -13,7 +13,7 @@ def build_pipeline(structured, store, workflow, queue, *, env=None):
     from .harness import DockerHarness
     from .hermes import HermesDriver
     from .runtime import PipelineRuntime
-    root = Path(env.get('PIPELINE_WORKSPACE_ROOT', 'data/pipeline-workspaces')).resolve()
+    root = pipeline_workspace_root(env=env)
     supervisor = WorkspaceSupervisor(root)
     harness = DockerHarness(supervisor.sandbox, image=env.get('PIPELINE_RUNNER_IMAGE', 'aiagent-verification:1.63.0'))
     if not supervisor.sandbox.available():
@@ -32,7 +32,7 @@ def build_integrator(db, store, workflow, *, env=None):
     if os.name != 'posix':
         raise ValueError('integration requires Linux/macOS; use WSL on Windows')
     from app.integration.integrator import Integrator
-    root = Path(env.get('PIPELINE_WORKSPACE_ROOT', 'data/pipeline-workspaces')).resolve()
+    root = pipeline_workspace_root(env=env)
     return Integrator(db, store, workflow, root)
 
 
@@ -42,7 +42,7 @@ def build_preview(db, store, *, env=None):
     if os.name != 'posix':
         raise ValueError('previews require Linux/macOS; use WSL on Windows')
     from app.preview.service import PreviewService
-    root = Path(env.get('PIPELINE_WORKSPACE_ROOT', 'data/pipeline-workspaces')).resolve()
+    root = pipeline_workspace_root(env=env)
     service = PreviewService(db, store, root)
     if not service.sandbox.available():
         raise ValueError('Docker engine is unavailable')

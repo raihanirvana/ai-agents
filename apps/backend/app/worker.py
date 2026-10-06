@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lease-s", type=float, default=float(os.getenv("WORKER_LEASE_S", "30")))
     args = parser.parse_args(argv)
 
-    from app.config import ARTIFACT_DIR, DATABASE_PATH
+    from app.config import ARTIFACT_DIR, DATABASE_PATH, pipeline_workspace_root
     from app.domain import Workflow
     from app.persistence import ArtifactStore, Database, migrate
     from app.workers import JobQueue, ProviderLimiter, Supervisor, WorkerConfig
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError('onboarding execution requires Linux/macOS; use WSL on Windows')
         from app.onboarding.runtime import OnboardingRuntime
         from app.agents import Redactor
-        root = Path(os.getenv('PIPELINE_WORKSPACE_ROOT', 'data/pipeline-workspaces')).resolve()
+        root = pipeline_workspace_root()
         redactor = Redactor([v for k, v in os.environ.items() if any(
             marker in k.upper() for marker in ('API_KEY', 'SECRET', 'TOKEN', 'PASSWORD'))])
         runtimes['onboarding'] = OnboardingRuntime(db, store, root, redactor)

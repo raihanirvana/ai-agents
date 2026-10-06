@@ -100,10 +100,17 @@ class Supervisor:
                 self._start(lease)
 
     def run_forever(self, stop: threading.Event) -> None:
-        while not stop.is_set():
-            self.tick()
-            stop.wait(self.config.poll_s)
-        self.shutdown()
+        try:
+            while not stop.is_set():
+                try:
+                    self.tick()
+                except Exception as exc:
+                    # Do not log exception payloads that may contain request
+                    # data/credentials. Lease fencing still governs every retry.
+                    print(f'worker tick failed: {type(exc).__name__}; retrying', flush=True)
+                stop.wait(self.config.poll_s)
+        finally:
+            self.shutdown()
 
     def running(self, lane: str | None = None) -> int:
         return sum(1 for h in self._handles.values() if lane is None or h.job["lane"] == lane)
@@ -146,6 +153,23 @@ class Supervisor:
         return False
 
     def _start(self, lease: Lease) -> None:
+        try:
+            self._start_attempt(lease)
+        except Exception:
+            handle = self._handles.get(lease.job_id)
+            if handle is not None and handle.thread is not None and handle.thread.is_alive():
+                raise  # a running attempt owns its resources; normal supervision cleans it
+            self._handles.pop(lease.job_id, None)
+            # No runtime thread started: return the claim immediately rather
+            # than leave an untracked running job until lease expiry.
+            try:
+                self.queue.release(lease, 'worker_start_failed', backoff_s=self.config.bind_backoff_s)
+            except StaleLease:
+                pass
+            self.queue.finish_cleanup(lease.job_id, lease.generation)
+            raise
+
+    def _start_attempt(self, lease: Lease) -> None:
         job, answer = self._snapshot(lease.job_id)
         try:
             if job["ticket_id"] and job["stage"] in BIND_STAGES and not self._bind(lease, job):

@@ -656,8 +656,14 @@ class JobQueue:
             if not self._cleanup(job) or self._cleanup(job).get("recovery_token") != token:
                 return None  # another reconciler/finishing owner superseded this operation
             if not reconciled:
-                job.result = {**(job.result or {}), "needs_human": True, "error": "could not verify/stop old processes"}
-                self._event(s, job, "needs_human", actor, error="reconcile_failed")
+                already_reported = ((job.result or {}).get('needs_human') is True and
+                    job.result.get('error') == 'could not verify/stop old processes' and
+                    job.result.get('reconcile_error_generation') == cleanup['generation'])
+                job.result = {**(job.result or {}), "needs_human": True,
+                    "error": "could not verify/stop old processes",
+                    'reconcile_error_generation': cleanup['generation']}
+                if not already_reported:
+                    self._event(s, job, "needs_human", actor, error="reconcile_failed")
                 return None
         return self.finish_cleanup(job_id, cleanup["generation"], recovery_token=token)
 
@@ -726,9 +732,12 @@ class JobQueue:
                 if existing.runtime_ref.get("budget_authorization") != authorization:
                     raise QueueError("authorization reused with a different decision")
                 return existing.id
+            # Same authorization replays above; another key cannot create a
+            # second continuation from an already extended parent.
+            if s.scalar(select(Job.id).where(Job.parent_job_id == job.id)):
+                raise QueueError('job already has a retry; operate on the latest attempt')
             if unlimited_total_tokens or unlimited_budgets:
-                if ((not unlimited_budgets and job.result.get('limit') != 'total_tokens') or self._cleanup(job)
-                        or s.scalar(select(Job.id).where(Job.parent_job_id == job.id))):
+                if (not unlimited_budgets and job.result.get('limit') != 'total_tokens') or self._cleanup(job):
                     raise QueueError('remove limits on the latest budget-exhausted job after cleanup')
                 if self._claimable(s, job) != 'ok':
                     raise QueueError('budget-exhausted job is no longer eligible for its scope/stage')

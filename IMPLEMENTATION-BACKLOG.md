@@ -468,6 +468,45 @@ serta pembatasan aktor dan fingerprint waiver baseline.
 
 ## DEV-004 — Worker persisten, dua lane, dan recovery
 
+### Review Claude Batch 1 DEV-001–004 — 2026-10-06
+
+Status: DONE (scope perbaikan review). Perubahan demo sebelumnya sudah
+commit/push `cfee58d`. Keenam temuan dikonfirmasi pada kode terbaru: double
+extension budget biasa; chat tiket memakai cap default setelah extension;
+exception tick melewati shutdown; event cleanup gagal berulang; creation_key
+hilang saat edit scope; path workspace bergantung CWD. Rencana: guard latest
+retry untuk seluruh budget decision, cap chat dari pool scope yang sama,
+recovery loop dengan shutdown finally, dedup event tanpa menghentikan recheck,
+preserve creation_key, dan resolve workspace terhadap root repository.
+File: workers queue/supervisor, HTTP application, domain service, config,
+worker/pipeline wiring dan keputusan worker. App/demo tetap dihentikan.
+Hasil review/fix:
+1. Authorization berbeda ditolak jika parent stopped sudah memiliki anak retry;
+   replay authorization identik tetap mengembalikan ID retry semula.
+2. post_message memakai cap peer dengan budget key tiket/scope/pool interaktif
+   yang persis sama; default baru tidak menimpa extension atau pool pipeline.
+3. run_forever menangkap exception tick, mencetak tipe saja, retry dengan poll,
+   shutdown via finally. Exception sebelum thread hidup mengembalikan claim dengan
+   backoff dan mengakhiri intent cleanup kosong milik generation itu.
+4. needs_human reconcile_failed didedup per alasan dan generation cleanup;
+   recheck tetap setiap lease interval, ledger/pin/slot tidak dilepas prematur.
+5. creation_key dipertahankan saat reset workflow scope; approval/attempt lama
+   tidak dipertahankan dan counter scope baru tetap direset sesuai domain.
+6. worker, pipeline, integrator, preview memakai pipeline_workspace_root;
+   path relatif terhadap ROOT, default DATA_DIR/pipeline-workspaces, env injection
+   tetap didukung. Workspace lama tidak dipindah otomatis; config Mac saat ini
+   sudah memakai absolute root sehingga data demo tidak berpindah.
+
+Verifikasi: inspeksi jalur transaksi/fencing dan diff aktual; AST syntax parse
+**7 file Python lulus**, `git diff --check` lulus. Tes regresi tidak ditambah atau
+dijalankan (tidak ada permintaan eksplisit menjalankan tes); suite Docker lengkap
+juga tidak dijalankan. Tidak menjalankan provider/Docker atau menyalakan kembali
+BE/FE/worker. Pemeriksaan proses menunjukkan layanan proyek tetap mati.
+Handoff: diff sembilan file pada log ini termasuk keputusan worker, keenam
+mapping di atas; independent re-review NOT_REVIEWED. Risiko/keterbatasan:
+perilaku concurrency/recovery perlu tes regresi; instalasi lama yang memakai
+workspace relatif-CWD perlu config absolut atau migrasi eksplisit saat idle.
+
 ### Perbaikan macOS — 2026-10-06
 Status: DONE. Pelaksana: Codex, assignment pengguna memperbaiki cleanup
 dan memulihkan antrean proyek Daftar Belanja. Cleanup sebelumnya memakai `/proc`

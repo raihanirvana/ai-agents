@@ -193,7 +193,8 @@ class Workflow:
         return self._change(s, actor, t, "scope_revised", title=doc["title"], current_version=version,
             phase="scope_review", blocker={"reason": "dependency_revalidation",
                 "resolution": "required checks must pass for current scope/base"} if pending else None,
-            workflow={"repair_cycles": 0, "attempts": {}})
+            workflow={"repair_cycles": 0, "attempts": {},
+                **({'creation_key': t.workflow['creation_key']} if 'creation_key' in t.workflow else {})})
 
     def create_ticket(self, actor, document, *, idempotency_key=None):
         """Create a ticket proposal. With an idempotency key a retried command returns the ticket the first
