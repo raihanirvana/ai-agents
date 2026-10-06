@@ -154,8 +154,10 @@ dapat di-waive; browser UAC tetap wajib. Evidence menampilkan `required_checks:
 
 ## Suite dan evidence authoritative
 
-QA melalui Hermes hanya menyusun DSL browser yang tervalidasi: click/fill/press/reload dan
-assert_text/count/visible/value. Ada 1–24 mandatory tests, setiap test punya assertion,
+QA melalui Hermes hanya menyusun DSL browser yang tervalidasi. Operasi awal
+click/fill/press/reload dan assert_text/count/visible/value diperluas pada revisi 2
+untuk select, checkbox/radio, state/attribute, upload/download/CSV dan dialog;
+lihat [kontrak DSL browser](qa-browser-dsl.md). Ada 1–24 mandatory tests, setiap test punya assertion,
 ID unik, tujuan feature/bug/regression/smoke, dan pemetaan UAC. Semua automated UAC
 harus tercakup; manual UAC tetap checklist pengguna dalam domain/API/GUI yang ada.
 Suite disimpan sebagai artifact supervisor di luar mount developer. Tool schema
@@ -312,8 +314,9 @@ DEV-010 juga dibangun dan diuji terpisah. Image build baru memiliki ID baru; evi
 lama tidak otomatis menjadi approval untuk image baru.
 
 Batas minimum: static React/Vite, Node TAP, fixture stateless, migrations `none`.
-DSL belum mendukung arbitrary browser scripts, upload, auth flows, atau backend DB
-target. Custom manifest `start`/port/health dicatat sebagai identity, tetapi acceptance
+DSL belum mendukung arbitrary browser scripts, binary upload, external auth flows,
+atau backend DB target. Upload fixture teks terbatas tersedia pada revisi 2.
+Custom manifest `start`/port/health dicatat sebagai identity, tetapi acceptance
 minimum menggunakan trusted static server pada internal 4173 dan health `/`.
 Preview GUI, integration accepted ref dan existing-repo onboarding tersedia melalui
 DEV-011/012/013. Release dan pilot tetap DEV-014/015. Artifact besar, DB, serta private Hermes

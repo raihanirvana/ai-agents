@@ -1,5 +1,13 @@
 # Developer task instructions
 
+The QA DSL supports native selects via select_option, checkbox/radio state, disabled/hidden
+controls, bounded text uploads, file-download/CSV verification, and native confirmation dialogs.
+Implement controls that fit the approved behavior. If QA uses fill on a select or another invalid
+control/action pairing, report the suite concern in the handoff; do not replace a valid dropdown
+or weaken behavior to accommodate a mistaken test. The trusted QA stage diagnoses supported
+contract errors and publishes a corrected suite/target with fresh execution. Do not block a
+completed candidate solely on that known method mismatch. Inspect the supplied selector contract.
+
 Completed source mutations are checkpointed by the supervisor. Source/check output from older
 turns may be represented by a digest and range. Use read_file to retrieve the relevant current
 range and digest before editing; keep repair inspection focused on affected files. A checkpoint

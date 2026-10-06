@@ -2504,6 +2504,38 @@ dicatat terpisah jika host/kredensial belum tersedia.
 
 ## Format catatan pengerjaan
 
+### Perluasan DSL browser QA dan diagnosis kontrak — 2026-10-07
+
+Status: DONE (implementasi 2026-10-07). Review: NOT_REVIEWED.
+Rencana: audit operasi DSL, tambahkan select/checkbox/radio, state/attribute/text
+assertions, navigasi internal, fixture upload dan download/CSV yang dibatasi.
+Pisahkan operasi tes yang salah dari bug aplikasi, koreksi fill-select hanya
+dengan bukti DOM spesifik dan target baru. Sertakan capability pada planning.
+Pertahankan digest suite lama, identitas target/runner, bukti dan approval.
+File relevan: contracts acceptance runner, pipeline contracts/harness/runtime/
+qa_repair, instruksi agent, dokumentasi. Verifikasi statis; tes belum diminta.
+Sesudah implementasi restart API/web/worker; tidak melanjutkan siklus repair
+proyek yang sudah diblokir tanpa authorization baru.
+Hasil: 28 action tervalidasi dan didispatch runner; select/checkbox/radio/state,
+attribute/text, internal navigation, text upload, download exact text/CSV dan
+native dialog didukung. Salah kontrol diberi action_contract. Koreksi fill-select
+memerlukan bukti satu visible/enabled select dan satu opsi enabled dengan nilai
+persis, target/suite baru dan eksekusi penuh; tidak menghasilkan pass langsung.
+Serialisasi field baru yang kosong tidak menambah key pada suite legacy.
+Runner identity mismatch ditandai infrastruktur tanpa application repair.
+File hasil tambahan: `apps/web/src/components/Activity.tsx`,
+`docs/decisions/{pipeline,qa-browser-dsl}.md`; instruksi QA/TL/developer selaras.
+Verifikasi aktual: AST 4 file Python, import/schema 3 modul, inlined tool schema,
+coverage dispatcher statis 28/28, TypeScript --noEmit, dan git diff --check lulus.
+Tes regresi/browser/Docker/provider dan review independen belum dilakukan;
+hasil operasional DSL baru belum terbukti. Tidak menambah/menjalankan tes.
+Regresi lanjutan: digest suite lama, select single/multiple/by-label, radio/check,
+wrong/absent control, mixed failure/no unsafe repair, quote/newline/BOM CSV,
+disabled export, upload fixture/no host path, dialogs, URL isolation, target pins.
+Handoff dan daftar keterbatasan tersedia di keputusan DSL browser.
+Restart aktual: API health ok, frontend HTTP 200, worker pipeline siap; mode
+unlimited demo tetap aktif. Tiket Kas #1 tetap needs_human pada batas repair.
+
 ### Perbaikan konteks TL dan bootstrap dependency — 2026-10-07
 
 Status: DONE (implementasi 2026-10-07). Review: NOT_REVIEWED.

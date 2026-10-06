@@ -32,6 +32,28 @@ This file defines the task contract; the structured PO/lead runtime does not run
    `{"action":"press","selector":"input selector","value":"Enter"}` and assert the result.
    Never substitute a newline or literal `\\n` for a keyboard event. `press` accepts only the named keys
    listed in the tool schema; it does not execute JavaScript or arbitrary commands.
+   Read browser_capabilities and the Step schema before planning interactions. The DSL supports:
+   - `select_option` for native select controls; `value` is one string or a list for select[multiple],
+     `select_by` is `value` (default) or `label`. Never use fill on select; custom dropdowns use clicks.
+   - `check`/`uncheck` for checkboxes, `check` for radios, and `assert_checked`/`assert_unchecked`.
+     Radio deselection means selecting a different radio, never uncheck.
+   - `assert_enabled`, `assert_disabled`, `assert_hidden`, `assert_contains_text`, `assert_attribute`
+     (attribute name plus exact string value), and `assert_values` for multiple selects.
+   - `hover`, `double_click`, `focus`, and `navigate`/`assert_url` with same-origin paths only.
+   - `click_dialog` with an exact `dialog` object: type alert/confirm/prompt, message, accept boolean,
+     optional prompt_text for an accepted prompt. Assert the resulting application behavior too.
+   - `upload_file` with an inline `file` object: name, mime_type text/plain/text/csv/application/json,
+     content at most 10000 characters. Never supply a host file path or secret data.
+   - `download` clicks the given selector and captures one file. A later `assert_download` has no
+     selector/value and requires a `download` expectation object with filename, exact text,
+     contains_text and/or exact csv_rows (including header). CSV comparison uses parsed cells,
+     so quoted commas, quotes and newlines are checked correctly. Downloads are capped at 1 MiB;
+     each test starts with no captured download. Do not substitute clicking Export for verifying its file.
+   Every test still requires an explicit assert_* step. Mandatory UAC coverage cannot be dropped.
+   The DSL does not support arbitrary JS, regex/code expressions, iframe/popup, drag/drop,
+   external authentication/API integration, binary uploads or backend DB access. If a UAC needs
+   an unavailable capability, raise a runner capability blocker during planning; do not invent an
+   action, mislabel it manual, omit the UAC, or change the application to make the test easier.
    For persistence, create/change state, assert it, use `{"action":"reload"}`, then assert
    the restored items and states in the same test. Reload has no selector/value and preserves
    that test's browser storage. Adding an item and checking it before reload does not test restoration.
@@ -59,6 +81,12 @@ This file defines the task contract; the structured PO/lead runtime does not run
   retaining all test IDs, actions, values, and UAC. It creates a new suite/target and executes baseline
   and candidate again. Other ambiguity needs diagnosis; it does not justify rewriting the app.
   Runner infrastructure failures stay in QA for retry and do not consume application repair cycles.
+- Wrong-control operations are action_contract errors, not proof of an application bug. A trusted
+  runner observation can replace fill with select_option only when the same selector resolves to
+  one visible enabled native select with exactly one enabled option of the requested value.
+  IDs, UAC, selector/value and all assertions stay unchanged; the old failure is retained, a new
+  suite/target is pinned, and the full candidate/baseline execution is required again. Other
+  action mistakes and mixed failures stay in QA for diagnosis; never rewrite valid controls.
 
 ## Rules
 

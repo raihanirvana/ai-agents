@@ -12,7 +12,7 @@ from app.domain import Actor, Attempt
 from app.persistence.models import Candidate, Job, Ticket, TicketVersion, Artifact, Verification, Approval
 from app.workers.runtime import Outcome
 from app.persistence.transactions import bind_service
-from .contracts import QaPlan, Review, tool_schema
+from .contracts import QaPlan, Review, tool_schema, browser_capabilities
 from .relay import reconcile_accounting
 from .workspace import FencedWorkspace, unpack_tree, cleanup_workspace
 from .files import allocate_directory, cleanup_directory
@@ -65,6 +65,7 @@ class PipelineRuntime:
         output, meta, snapshot = self.structured._ask(ctx, identity,
             {'name': 'technical_plan', 'ticket_id': identity['ticket_id'], 'source_files': files,
              'runner_manifest': manifest.to_dict(),
+             'browser_capabilities': browser_capabilities(),
              'reference_bootstrap': bootstrap_contract() if self.workspace.bootstrap_available(identity) else None,
              'onboarding': self._onboarding_context(identity['project_id'])}, LeadPlanOutput)
         if isinstance(output, Clarification):
@@ -109,6 +110,7 @@ class PipelineRuntime:
                 'Adding an item and asserting it before reload does not test persistence. '
                 'reload takes no selector or value. Every test starts with a fresh browser context.',
             'schema': QaPlan.model_json_schema(), 'source_files': source_files,
+            'browser_capabilities': browser_capabilities(),
             'empty_source_guidance': ('The accepted base is empty; this is expected for a new project. '
                 'There is no DOM or other folder to inspect. Plan feature tests from approved UAC and technical plan, '
                 'and declare stable selectors/text as a contract for the developer. Do not request user input '
@@ -165,6 +167,7 @@ class PipelineRuntime:
         bootstrap = bootstrap_contract() if self.workspace.bootstrap_available(identity) else None
         snapshot = self.structured.builder.build(identity, task={'name': 'implement', 'runner_manifest': manifest.to_dict(),
             'repair_feedback': repair,
+            'browser_capabilities': browser_capabilities(),
             'source_files': source_files, 'reference_bootstrap': bootstrap,
             'empty_source_guidance': ('The source snapshot is empty by design. Create the application and Node tests '
                 'for this approved scope here. There is no existing application in another directory; '
@@ -321,6 +324,7 @@ class PipelineRuntime:
             **self.redactor.redact_value(projected), 'repo_gates': gate_summary(gates),
             'dependency_manifest': self.redactor.redact_value(dependency_manifest),
             'runner_manifest': current_manifest.to_dict(), 'qa_selector_contract': suite.model_dump(),
+            'browser_capabilities': browser_capabilities(),
             'full_diff_artifact_id': evidence.id, 'gate_artifact_id': target['gate_artifact_id'],
             'instructions': 'Review the diff against approved scope, including all changes to repo tests and skip/removal. '
             'Return a Review JSON. Technical acceptance cannot approve user scope/UAT/release.'}, Review,
@@ -372,7 +376,7 @@ class PipelineRuntime:
                 finish()
 
     def _verify_attempt(self, ctx, identity, finalizers):
-        from .qa_repair import classify_failure, repair_visible_alerts, MAX_SUITE_REPAIRS
+        from .qa_repair import classify_failure, repair_contract_errors, MAX_SUITE_REPAIRS
         candidate = self._candidate(identity)
         self.structured.builder.build(identity, task={'name': 'trusted_verification', 'candidate_id': candidate.id}, lease=ctx.lease, queue=ctx.queue)
         with self.db.read() as s:
@@ -391,6 +395,10 @@ class PipelineRuntime:
                 'New technical review, QA and UAT are required.', runner_changed=True)
         if not self.gates_eligible(identity, candidate, gates):
             return self._reject(ctx, identity, candidate, 'Required gates/waiver no longer eligible')
+        if self.workspace.harness.identity() != target['runner']:
+            return Outcome('failed', {'failure_kind': 'infrastructure', 'runner_changed': True},
+                error='Browser runner identity differs from the pinned target. A new target and fresh QA '
+                      'are required; the existing target cannot be silently revalidated with another runner.')
         directory = allocate_directory(ctx, self.workspace.root / '.verification', 'verification',
                                        store=self.store, redactor=self.redactor, finalizers=finalizers)
         site = directory / 'site'
@@ -464,13 +472,13 @@ class PipelineRuntime:
                     'qa_status': 'passed', 'pipeline_completion': {'job_id': identity['job_id'], 'generation': identity['generation']}})
         if proof['status'] == 'failed':
             if failure_kind == 'test_contract':
-                repaired = repair_visible_alerts(suite, proof)
+                repaired = repair_contract_errors(suite, proof)
                 repair_count = target.get('suite_repair_count', 0)
                 if repaired is not None and type(repair_count) is int and 0 <= repair_count < MAX_SUITE_REPAIRS:
                     return self._repair_qa_target(ctx, identity, candidate, target, repaired, v.id, attachments)
                 return Outcome('failed', {'verification_id': v.id, 'evidence_artifact_ids': attachments,
                     'qa_status': 'failed', 'failure_kind': 'test_contract'},
-                    error='QA selector contract needs diagnosis; application repair was not requested.')
+                    error='QA action/selector contract needs diagnosis; application repair was not requested.')
             return self._reject(ctx, identity, candidate, 'Browser acceptance failed: ' + json.dumps(proof['report'])[:3000],
                                 verification_id=v.id, evidence_artifact_ids=attachments, qa_status='failed',
                                 failure_kind=failure_kind)
@@ -510,7 +518,7 @@ class PipelineRuntime:
                 candidate.id, build_artifact_id=current.build_artifact_id,
                 target_artifact_id=new_target.id, target_digest=new_target.checksum)
             self.workspace._post(s, identity, 'qa-selector-repair:' + identity['job_id'],
-                'QA qualified an ambiguous visible-alert selector. New suite/target require fresh baseline and '
+                'QA corrected a runner-observed action/selector contract error. New suite/target require fresh baseline and '
                 'candidate execution; source/build unchanged.', [*attachments, suite_row.id], 'qa_plan',
                 candidate_id=candidate.id, suite_digest=repaired.digest,
                 previous_target_artifact_id=previous.id, target_artifact_id=new_target.id)
