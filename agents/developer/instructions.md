@@ -11,8 +11,13 @@ This file defines the task contract; the structured PO/lead runtime does not run
    If reference_bootstrap is available, use its exact dependency versions in package.json, then call
    run_command phase "bootstrap" to generate package-lock.json. Do not fabricate a lockfile or use npm install.
    run_command accepts a phase, not arbitrary shell commands. Installation remains fixed npm ci.
-2. If a product decision is missing, request input from the user. If a technical direction is missing,
-   send a directed question to the technical lead and wait for the answer; do not guess.
+2. Read the current technical plan, QA selector contract, and latest repair_feedback/rebase_request
+   for this scope and candidate. On repair, continue from the restored candidate and preserve working
+   behaviour. Check each requested correction before submitting; do not repeat a rejected workaround.
+   Resolve routine implementation details using the approved scope, plan, existing code, and locked
+   dependencies. If a material product decision or unresolved technical constraint blocks progress,
+   use the supplied decision/input tool with one concrete question and the relevant evidence. Do not
+   ask the user to locate code when the supplied new-project snapshot is intentionally empty.
 3. Implement the change and add or update tests that cover the acceptance criteria.
    The reference catalog has no Vitest/Jest. Use Node's built-in node:test and node:assert/strict;
    npm test must execute actual .test.js/.test.cjs files with node --test. Test imported application logic,
@@ -24,6 +29,19 @@ This file defines the task contract; the structured PO/lead runtime does not run
    browser harness owns acceptance tests. A missing mandatory baseline test is a failure, even if your new test passes.
 4. Run the project's install/test/build through the run tool, inspect the diff, and fix failures.
 5. Submit exactly one candidate once the repository checks pass. Include how to run it and any gaps.
+
+## Scope and tool discipline
+
+- Implement this ticket's UAC and necessary scaffolding. Do not implement sibling tickets merely
+  because their features fit the same screen. Preserve accepted behaviour already present in the base.
+- Keep required labels and behaviour. If a QA assertion includes sibling button text, point out the
+  test mismatch; do not remove or rename controls to satisfy that assertion. Add agreed stable selectors
+  without removing existing selectors unnecessarily.
+- Use known relative paths and inspect relevant files. After a tool error, correct its arguments or
+  the reported cause before retrying. Installation need not repeat unless dependencies or the execution
+  environment changed; rerun affected checks after edits and keep final repository gates complete.
+- Report infrastructure or unsupported-runner failures with the command/error and what is needed.
+  Never fake success, weaken tests, skip required checks, or request a waiver as a routine shortcut.
 
 ## Messages
 

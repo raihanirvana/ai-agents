@@ -1030,6 +1030,35 @@ dan hasil recovery. Jangan memasukkan key atau kredensial ke dokumentasi.
 
 ## DEV-007 — Soul, context, model client, dan pesan antar-agent
 
+### Penyempurnaan empat peran — 2026-10-06
+
+Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.
+Assignment pengguna: perbarui seluruh soul setelah diskusi tentang tiket terlalu
+kecil dan putaran kerja berulang. Rencana: selaraskan empat `SOUL.md` dan
+`instructions.md` agar PO menggabungkan satu alur pengguna, lead memberi rencana
+proporsional dan feedback konkret, developer menjaga scope serta memakai feedback
+repair terbaru, dan QA menguji perilaku tanpa menambah persyaratan DOM.
+File: `agents/{po,technical-lead,developer,qa}/{SOUL,instructions}.md`,
+`docs/decisions/agents.md`, dan log ini. Perubahan adalah kebijakan prompt;
+tidak mengganti scheduler, kontrak output, approval, atau bukti QA independen.
+Hasil: PO memilih sedikit tiket dengan batas scope yang jelas dan alasan split
+di field kontrak existing; contoh daftar belanja menjadi satu tiket dengan empat
+perilaku. Lead membedakan blocker dan saran, developer memakai feedback terbaru
+dan menjaga scope, QA memilih assertion perilaku serta membedakan defect aplikasi,
+suite, dan runner. Instruksi teknis rutin tidak lagi meminta klarifikasi otomatis.
+Verifikasi aktual: dari `apps/backend`, `.venv/bin/python -c` memanggil
+`app.agents.souls.load_agents()` — **4 peran berhasil dimuat**, UTF-8/ukuran/secret
+guard loader lulus dan digest terbentuk; seluruh file di bawah batas 16 KiB.
+`git diff --check` — **lulus**. Konsistensi role, field output, tools, approval,
+dan mandatory QA ditinjau melalui self-check diff, bukan review independen.
+Tidak menambah/menjalankan tes atau inference provider karena assignment tidak
+meminta tes. Perubahan prompt belum membuktikan jumlah tiket keluaran model nyata
+atau pengurangan durasi. Worker memuat definisi saat runtime dibuat; perlu start
+baru agar memakai versi ini. Snapshot lama dan tiket disetujui tetap histori.
+Layanan tetap dihentikan. Handoff: diff delapan file peran, dokumen keputusan,
+dan log ini; evaluasi berikutnya perlu brief kecil/besar, scope repair, serta
+kegagalan selector/runner dengan provider nyata. Belum commit/push pada assignment ini.
+
 ### Review Claude Batch 3 DEV-007/008/009 — 2026-10-06
 
 Status perbaikan: DONE (implementasi). Pelaksana: Codex. Review perbaikan: NOT_REVIEWED.

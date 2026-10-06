@@ -9,6 +9,31 @@ Kode: `apps/backend/app/agents/`, berkas peran `agents/<role>/{SOUL,instructions
 
 ## Komponen
 
+Penyempurnaan prompt empat peran (2026-10-06):
+
+- PO memilih jumlah tiket paling sedikit yang masih mudah diimplementasikan dan
+  diterima sebagai hasil utuh. Aplikasi daftar belanja sederhana dengan add,
+  check, delete, dan penyimpanan lokal menjadi satu tiket dengan beberapa UAC.
+  Pemisahan pekerjaan besar tetap tersedia; alasan pemisahan memakai `summary`
+  dan batas scope memakai `description`, tanpa field kontrak baru. Tiket yang
+  sudah disetujui tidak digabung otomatis.
+- Lead membuat rencana proporsional, menjawab pilihan teknis rutin, dan memberi
+  blocker konkret beserta lokasi/koreksi. Saran gaya atau abstraksi opsional
+  tidak menjadi alasan repair. Required gates dan waiver spesifik tetap berlaku.
+- Developer membaca feedback repair terbaru, melanjutkan kandidat yang dipulihkan,
+  menjaga scope tiket, serta memperbaiki penyebab error sebelum mengulang tools.
+- QA memetakan seluruh UAC ke tes yang diperlukan, memilih selector sesuai
+  perilaku, dan membedakan defect aplikasi, suite, serta runner. Koreksi suite
+  tetap membutuhkan jalur resmi dan bukti baru; kontrol UI yang valid tidak
+  dihapus agar memenuhi assertion teks seluruh baris yang keliru.
+
+Kebijakan berada di delapan file `SOUL.md`/`instructions.md`. Loader membaca
+definisi ketika runtime dibuat, dan digest tetap masuk context snapshot. Worker
+yang sudah berjalan perlu dibuat ulang untuk memuat file baru; snapshot/job
+historis tidak ditulis ulang. Perubahan prompt tidak mengurangi tahap pipeline,
+mengubah izin, memindahkan approval, atau menjamin perilaku model/harga/durasi.
+Evaluasi dengan provider nyata belum dijalankan untuk revisi ini.
+
 Perbaikan Batch 3 (2026-10-06): rekonsiliasi reply menyaring pesan pending di SQL
 dan memuat origin melalui join; tidak ada query per pesan historis yang sudah
 punya reply. Eligibility tetap diperiksa lagi saat enqueue. Context history
