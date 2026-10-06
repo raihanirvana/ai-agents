@@ -20,13 +20,15 @@ def reference_catalog():
 def bootstrap_contract():
     versions, lock = reference_catalog()
     return {'kind': 'react-vite-reference-v1', 'versions': versions, 'catalog_digest': digest_of(lock),
-            'instructions': 'Create package.json with these exact dependency versions. Then call '
+            'instructions': 'Create package.json using only the dependencies needed by the app and runner, '
+            'at these exact versions. React and its plugin are optional for vanilla JS; the configured '
+            'Vite build/preview still requires Vite. Then call '
             'run_command phase bootstrap to generate package-lock.json; do not write a lockfile by hand. '
             'Next call install, test and build. Additional packages/versions need a qualified runner catalog.'}
 
 
 def generate_lock(package):
-    """Adapt the vetted lock root; retain the bounded reference closure and integrity pins."""
+    """Adapt the vetted root and prune unreachable packages; preserve integrity pins."""
     versions, template = reference_catalog()
     if not isinstance(package, dict):
         raise ValueError('package.json must be an object')
@@ -50,6 +52,48 @@ def generate_lock(package):
         if deps:
             root[section] = deps
     lock = copy.deepcopy(template)
+    entries = lock['packages']
+
+    def resolve(owner, name):
+        # npm's nearest installed dependency, including nested/scoped packages.
+        prefix = owner
+        while prefix:
+            candidate = prefix + '/node_modules/' + name
+            if candidate in entries:
+                return candidate
+            prefix = prefix.rpartition('/node_modules/')[0] if '/node_modules/' in prefix else ''
+        candidate = 'node_modules/' + name
+        return candidate if candidate in entries else None
+
+    pending = [resolve('', name) for section in ('dependencies', 'devDependencies')
+               for name in root.get(section, {})]
+    reachable = set()
+    while pending:
+        path = pending.pop()
+        if path is None:
+            raise ValueError('required dependency is missing from the reference catalog')
+        if path in reachable:
+            continue
+        reachable.add(path)
+        entry = entries[path]
+        optional = entry.get('optionalDependencies', {})
+        required = set(entry.get('dependencies', {})) - set(optional)
+        peer_meta = entry.get('peerDependenciesMeta', {})
+        for name in entry.get('peerDependencies', {}):
+            if not peer_meta.get(name, {}).get('optional', False):
+                required.add(name)
+            elif resolve(path, name) is not None:
+                pending.append(resolve(path, name))
+        for name in required:
+            dependency = resolve(path, name)
+            if dependency is None:
+                raise ValueError(f'reference catalog is missing required dependency {name} of {path}')
+            pending.append(dependency)
+        for name in optional:
+            dependency = resolve(path, name)
+            if dependency is not None:
+                pending.append(dependency)
+    lock['packages'] = {path: entry for path, entry in entries.items() if path in reachable}
     lock['packages'][''] = root
     for key in ('name', 'version'):
         lock.pop(key, None)

@@ -469,3 +469,38 @@ DEMO_UNLIMITED_BUDGETS=0 untuk skenario default finite):
 - Working set projection menjaga pending/error/feedback; reread/CAS tetap benar.
 - Cold/warm prefetch, checksum corruption/cancel/crash/disk ownership; pengukuran
   demo identik untuk memastikan benefit melebihi overhead checkpoint/prefetch.
+
+## Koreksi konteks Technical Lead dan bootstrap — 2026-10-07
+
+Demo Kas mengungkap review yang menolak kandidat meskipun root dependency cocok,
+install kandidat exit 0, build kandidat exit 0, dan gate terakhir 15/15 lulus.
+`gate_summary` sebelumnya menghilangkan array `commands`, sehingga model tidak
+menerima bukti install/build. Bootstrap juga mempertahankan seluruh closure
+React/Vite walaupun manifest hanya memilih Vite; paket ekstra bukan bukti
+bahwa npm ci gagal, tetapi memperbesar dependency dan konteks review.
+
+Generator sekarang menelusuri dependency yang dipilih dari katalog pinned,
+termasuk dependency transitif, optional platform packages, dan peer dependencies
+yang tersedia. Paket yang tidak terjangkau dihapus; resolved/integrity tidak
+diubah, dependency/version baru tetap ditolak. Dependency wajib yang hilang
+dari katalog menghasilkan error. Tidak menjalankan npm di host atau mengubah
+lockfile/kandidat proyek yang sudah disubmit secara diam-diam.
+
+Planning menerima manifest runner dan bootstrap contract. Instruksi TL membedakan
+vanilla JS sebagai kode aplikasi dengan Vite sebagai toolchain build/preview.
+Review menerima perbandingan declared/root dependency dari SHA kandidat,
+semua ringkasan command termasuk label, exit code, status timeout/cancel/OOM/
+truncation, generation/run/image/manifest identity, checksum output dan evidence
+artifact IDs. Hasil command gagal sebelumnya tetap terlihat bersama perbaikan
+dan command build kandidat. Fakta root sama tidak menggantikan install atau QA.
+Selector contract berasal dari suite yang dipin target, bukan suite terbaru
+yang tidak terikat kandidat. Bukti penuh tetap tersimpan di artifact awal.
+
+Handoff: perubahan bootstrap, review_context, runtime dan instruksi TL/developer.
+Pemeriksaan AST/import Python dan git diff --check; tes regresi, npm ci terhadap
+hasil pruning baru, browser/provider serta review independen belum dijalankan.
+Regresi yang diperlukan: subset Vite tanpa React, katalog penuh, empty dependency,
+optional platform/peer packages, missing required dependency, bukti install/build
+gagal versus berhasil pada kandidat yang sama, dan kontrak QA target lama/baru.
+Batas repair, usage, approval, scope dan histori proyek tetap mengikuti domain;
+restart sendiri tidak memulihkan tiket yang sudah needs_human.

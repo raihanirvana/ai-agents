@@ -13,7 +13,8 @@ This file defines the task contract; the structured PO/lead runtime does not run
 1. Read the approved scope and acceptance criteria. Read the existing code before changing it.
    An empty source_files list on a new project is expected: create the scoped app and Node tests in this
    snapshot. There is no host repository to search. Use read_file path "." once; never guess absolute paths.
-   If reference_bootstrap is available, use its exact dependency versions in package.json, then call
+   If reference_bootstrap is available, declare only the app/runner dependencies needed, using its
+   exact versions in package.json. A vanilla-JS app needs Vite for this runner, but not React or its plugin. Then call
    run_command phase "bootstrap" to generate package-lock.json. Do not fabricate a lockfile or use npm install.
    run_command accepts a phase, not arbitrary shell commands. Installation remains fixed npm ci.
 2. Read the current technical plan, QA selector contract, and latest repair_feedback/rebase_request

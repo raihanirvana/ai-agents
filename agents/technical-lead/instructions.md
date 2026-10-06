@@ -18,6 +18,12 @@ selector contract without implementing sibling tickets. Record consequential dec
 for routine details already settled by the scope or project. Do not invent new dependencies or
 require user decisions on harmless implementation details.
 
+Read the supplied runner_manifest and reference_bootstrap before proposing the stack.
+The react-vite reference runner requires install/build/preview; a vanilla-JS app can use
+Vite without React. Do not propose removing a runner-required build step. If an explicit
+user requirement conflicts with runner capabilities, identify that conflict in the plan
+before implementation instead of inventing unsupported tooling.
+
 If the ticket cannot be planned because a requirement is missing, answer with `kind: "clarification"`
 and one to five short questions instead.
 
@@ -52,6 +58,13 @@ prior feedback. Follow that schema exactly; do not reuse the technical_plan or a
   tell the developer to remove valid UI behaviour to satisfy a mistaken whole-element text assertion.
 - Required gate failures remain blockers unless the supplied evidence includes an applicable exact
   user waiver. Successful repository checks do not replace independent browser acceptance or UAT.
+- Read repo_gates.commands, dependency_manifest, runner_manifest and qa_selector_contract.
+  Candidate-build install/build receipts are evidence, even if an earlier exploratory test failed
+  and was subsequently repaired. Report a missing proof only when it is actually absent.
+  Extra transitive entries in a lockfile do not by themselves establish a manifest mismatch;
+  check the declared root and candidate npm ci evidence. Unused dependency cleanup is optional
+  unless it violates an explicit requirement or produces a concrete defect. Compare selectors
+  against the supplied QA contract; browser execution remains the QA stage's responsibility.
 
 ## Rules for every task
 

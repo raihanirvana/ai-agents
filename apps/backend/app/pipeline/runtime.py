@@ -58,10 +58,14 @@ class PipelineRuntime:
 
     def _technical_plan(self, ctx, identity):
         from app.workspace import WorkspaceSupervisor
+        from .bootstrap import bootstrap_contract
+        manifest, base = self.workspace.configuration(identity)
         broker = WorkspaceSupervisor(self.workspace.root).broker(identity['project_id'])
-        files = broker._bare('ls-tree', '-r', '--name-only', broker.accepted_sha()).decode().splitlines()
+        files = broker._bare('ls-tree', '-r', '--name-only', base).decode().splitlines()
         output, meta, snapshot = self.structured._ask(ctx, identity,
             {'name': 'technical_plan', 'ticket_id': identity['ticket_id'], 'source_files': files,
+             'runner_manifest': manifest.to_dict(),
+             'reference_bootstrap': bootstrap_contract() if self.workspace.bootstrap_available(identity) else None,
              'onboarding': self._onboarding_context(identity['project_id'])}, LeadPlanOutput)
         if isinstance(output, Clarification):
             ctx.request_input(output.as_text(), {}, 'pipeline-clarify:' + identity['root_job_id'] + ':' + str(identity['generation']))
@@ -272,6 +276,7 @@ class PipelineRuntime:
         with self.db.read() as s:
             target = json.loads(self.store.read_bytes(s, candidate.target_artifact_id))
             gates = json.loads(self.store.read_bytes(s, target['gate_artifact_id']))
+            suite = QaPlan.model_validate(json.loads(self.store.read_bytes(s, target['suite_artifact_id'])))
         current_manifest, current_base = self.workspace.configuration(identity)
         from app.workspace.manifest import parse_manifest
         if current_manifest.digest != parse_manifest(target['execution_manifest']).digest or current_base != candidate.base_sha:
@@ -283,10 +288,11 @@ class PipelineRuntime:
         sup = FencedWorkspace(self.workspace.root, ctx)
         broker = sup.broker(identity['project_id'])
         diff = broker.diff_commits(candidate.base_sha, candidate.commit_sha)
-        from .review_context import review_diff, gate_summary
+        from .review_context import review_diff, gate_summary, dependency_manifest_summary
         from app.workspace.errors import WorkspaceError
         try:
             projected = review_diff(broker, candidate.base_sha, candidate.commit_sha, diff)
+            dependency_manifest = dependency_manifest_summary(broker, candidate.commit_sha)
         except (ValueError, WorkspaceError) as exc:
             return self._reject(ctx, identity, candidate, 'Dependency lock inspection failed: ' + self.redactor.redact(str(exc)))
         ctx.log('review.context ' + json.dumps({'full_diff_chars': len(diff),
@@ -313,6 +319,8 @@ class PipelineRuntime:
                     meta={'runtime_log': True, 'intent': 'review_diff'})
         output, meta, _ = self.structured._ask(ctx, identity, {'name': 'technical_review', 'candidate_id': candidate.id,
             **self.redactor.redact_value(projected), 'repo_gates': gate_summary(gates),
+            'dependency_manifest': self.redactor.redact_value(dependency_manifest),
+            'runner_manifest': current_manifest.to_dict(), 'qa_selector_contract': suite.model_dump(),
             'full_diff_artifact_id': evidence.id, 'gate_artifact_id': target['gate_artifact_id'],
             'instructions': 'Review the diff against approved scope, including all changes to repo tests and skip/removal. '
             'Return a Review JSON. Technical acceptance cannot approve user scope/UAT/release.'}, Review,

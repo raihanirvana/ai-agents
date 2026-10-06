@@ -12,8 +12,9 @@ def package_facts(package):
     if not isinstance(package, dict):
         raise ValueError('invalid dependency package facts')
     canonical = json.dumps(package, sort_keys=True, separators=(',', ':')).encode()
-    return {'version': package.get('version'), 'sha256': hashlib.sha256(canonical).hexdigest(),
+    return {'name': package.get('name'), 'version': package.get('version'), 'sha256': hashlib.sha256(canonical).hexdigest(),
             'dependencies': package.get('dependencies', {}),
+            'devDependencies': package.get('devDependencies', {}),
             'optionalDependencies': package.get('optionalDependencies', {}),
             'peerDependencies': package.get('peerDependencies', {}),
             'hasInstallScript': package.get('hasInstallScript', False),
@@ -61,7 +62,43 @@ def review_diff(broker, base, head, diff):
     return projected
 
 
+def dependency_manifest_summary(broker, head):
+    """Report declared/root equality separately from extra lockfile entries."""
+    documents = []
+    for path in ('package.json', 'package-lock.json'):
+        raw = broker.read_committed_file(head, path)
+        if raw is None:
+            return {'status': 'unavailable', 'missing': path}
+        try:
+            documents.append(json.loads(raw))
+        except (ValueError, TypeError):
+            return {'status': 'unavailable', 'invalid': path}
+    package, lock = documents
+    if not isinstance(package, dict) or not isinstance(lock, dict) or not isinstance(lock.get('packages'), dict):
+        return {'status': 'unavailable', 'reason': 'unsupported package/lock structure'}
+    root = lock['packages'].get('')
+    if not isinstance(root, dict):
+        return {'status': 'unavailable', 'reason': 'lock root missing'}
+    sections = ('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies')
+    declared = {k: package.get(k, {}) for k in sections}
+    locked = {k: root.get(k, {}) for k in sections}
+    if any(not isinstance(section, dict) or any(not isinstance(v, str) for v in section.values())
+           for section in (*declared.values(), *locked.values())):
+        return {'status': 'unavailable', 'reason': 'invalid dependency declarations'}
+    return {'status': 'inspected', 'source_sha': head, 'declared': declared, 'lock_root': locked,
+            'root_matches': declared == locked, 'lock_package_count': len(lock['packages']) - 1,
+            'note': 'Root equality checks declared dependencies only. Extra lock entries alone do not '
+                    'prove npm ci incompatibility. Consult the pinned candidate install/build command evidence.'}
+
+
 def gate_summary(gates):
+    command_fields = ('label', 'argv', 'exit_code', 'timed_out', 'cancelled', 'oom_killed', 'truncated',
+                      'image_id', 'manifest_digest', 'run_id', 'generation', 'seq',
+                      'stdout_sha256', 'stderr_sha256', 'stdout_file_artifact_id', 'stderr_file_artifact_id')
+
+    def command_summary(command):
+        return {k: command[k] for k in command_fields if k in command}
+
     def summarize(value):
         if not isinstance(value, dict):
             return value
@@ -71,8 +108,9 @@ def gate_summary(gates):
         result = {k: value[k] for k in wanted if k in value}
         command = value.get('command')
         if isinstance(command, dict):
-            result['command'] = {k: command[k] for k in ('argv', 'exit_code', 'timed_out', 'cancelled',
-                'oom_killed', 'image_id', 'manifest_digest', 'run_id', 'generation', 'seq',
-                'stdout_sha256', 'stderr_sha256') if k in command}
+            result['command'] = command_summary(command)
         return result
-    return {k: summarize(v) for k, v in gates.items() if k in ('gate', 'build', 'baseline', 'status', 'build_error')}
+    result = {k: summarize(v) for k, v in gates.items() if k in ('gate', 'build', 'baseline', 'status', 'build_error')}
+    result['commands'] = [command_summary(command) for command in gates.get('commands', [])
+                          if isinstance(command, dict)]
+    return result

@@ -2504,6 +2504,27 @@ dicatat terpisah jika host/kredensial belum tersedia.
 
 ## Format catatan pengerjaan
 
+### Perbaikan konteks TL dan bootstrap dependency — 2026-10-07
+
+Status: DONE (implementasi 2026-10-07). Review: NOT_REVIEWED.
+Rencana: generator lockfile mempertahankan hanya dependency yang dapat dijangkau
+dari manifest; konteks TL menyertakan runner saat planning, kecocokan root lock,
+bukti install/build dari kandidat, dan kontrak selector QA saat review.
+File relevan: `app/pipeline/{bootstrap,review_context,runtime}.py`, instruksi TL,
+dan `docs/decisions/pipeline.md`. Approval, kandidat lama, batas repair dan
+histori proyek tidak diubah. Setelah implementasi: pemeriksaan statis,
+commit/push, lalu restart API/web/worker sesuai instruksi pengguna.
+Tes regresi belum diminta, sehingga tidak ditambah/dijalankan.
+Hasil: closure lock dibatasi dependency yang dipilih; hash integrity katalog tetap.
+Planning menerima runner; review menerima root manifest/lock, command receipts
+install/build dan suite selector yang dipin target. Tidak membuat approval baru.
+Verifikasi aktual: AST dan import 3 modul Python lulus; `git diff --check` lulus.
+Keterbatasan: npm ci untuk lock hasil pruning baru, tes regresi/browser/provider
+belum dijalankan; keberhasilan demo setelah perubahan belum dibuktikan.
+Handoff/diff: 3 modul Python, instruksi TL/developer, backlog dan keputusan pipeline.
+Tiket Kas yang mencapai batas repair tetap needs_human; restart tidak menghapus
+blocker atau riwayat dan bukan persetujuan siklus tambahan.
+
 Ubah status pada tabel dan tambahkan catatan di bagian ini per tiket. Jika ada
 beberapa AI/percakapan, jangan mengerjakan tiket `IN_PROGRESS` yang sama tanpa
 handoff; catat siapa/sesi mana yang mengerjakan. Backlog Markdown belum memiliki
