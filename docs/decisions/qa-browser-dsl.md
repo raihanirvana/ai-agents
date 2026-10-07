@@ -84,6 +84,12 @@ Tidak menambahkan credentials ataupun shared writable mount dengan target.
 
 ## Diagnosis dan koreksi
 
+Runner juga merekam alternatif editable ketika selector `fill` tidak ditemukan.
+Diagnosis QA boleh mengusulkan indeks kontrol yang diamati dan sesuai source,
+untuk memperbaiki hanya selector fill pada suite/target baru. Assertions dan input
+tetap; eksekusi penuh wajib. Ini observability/repair supervisor, bukan action DSL
+baru atau izin model menjalankan JavaScript. Rincian ada di qa-policy.md.
+
 Kesalahan native-control/action yang diamati runner adalah `action_contract`.
 Strict locator ambiguity tetap `selector_contract`. Keduanya menjadi kategori
 `test_contract`; aplikasi tidak otomatis diminta berubah atau dihitung repair.

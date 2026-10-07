@@ -12,7 +12,7 @@ from app.domain import Actor, Attempt
 from app.persistence.models import Candidate, Job, Ticket, TicketVersion, Artifact, Verification, Approval
 from app.workers.runtime import Outcome
 from app.persistence.transactions import bind_service
-from .contracts import QaPlan, QaDiagnosis, QaSetupRepair, QaOptionRepair, Review, tool_schema, browser_capabilities
+from .contracts import QaPlan, QaDiagnosis, QaSetupRepair, QaOptionRepair, QaSelectorRepair, Review, tool_schema, browser_capabilities
 from .qa_policy import policy_context, preflight
 from .relay import reconcile_accounting
 from .hermes import RelayContextError
@@ -105,10 +105,21 @@ class PipelineRuntime:
         baseline = self.workspace.base_build(ctx)
         sup, started, manifest = self.workspace.start(ctx)
         source_files = sup.list_files(started.ref, started.credential)
+        baseline_ui, remaining = {}, 20000
+        for path in source_files:
+            if (not path.endswith(('.html', '.js', '.jsx', '.ts', '.tsx', '.mjs'))
+                    or set(Path(path).parts).intersection(('tests', 'test', '__tests__', 'node_modules'))
+                    or Path(path).stem.endswith(('.test', '.spec'))):
+                continue
+            content = self.redactor.redact(sup.read_file(started.ref, started.credential, path).decode(errors='replace'))
+            baseline_ui[path] = content[:remaining]
+            remaining -= len(baseline_ui[path])
+            if remaining <= 0:
+                break
         from app.agents.context import ContextBuilder
         builder = self.structured.builder
         planning_builder = ContextBuilder(builder.db, builder.store, builder.agents, builder.redactor,
-            limits=replace(builder.limits, total_tokens=max(16384, builder.limits.total_tokens)))
+            limits=replace(builder.limits, total_tokens=max(32768, builder.limits.total_tokens)))
         snapshot = planning_builder.build(identity, task={
             'name': 'qa_plan', 'instruction': 'Create mandatory browser assertions from approved UAC and the technical plan. '
             'Use CSS selectors. Every automated UAC must be covered. feature/bug cases must fail on the base when applicable; '
@@ -121,6 +132,11 @@ class PipelineRuntime:
                 'Adding an item and asserting it before reload does not test persistence. '
                 'reload takes no selector or value. Every test starts with a fresh browser context.',
             'schema': QaPlan.model_json_schema(), 'source_files': source_files,
+            'baseline_ui_source': baseline_ui,
+            'existing_control_guidance': 'Reuse selectors declared in the supplied accepted baseline UI source for '
+                'existing prerequisite flows. Never invent IDs for controls already implemented by another ticket. '
+                'For generated IDs prefer an existing class scoped to the fixture record. Use inspect_app for '
+                'files not shown or truncated here. Define new selectors only for the new feature.',
             'browser_capabilities': browser_capabilities(),
             'verification_policy': policy_context(),
             'empty_source_guidance': ('The accepted base is empty; this is expected for a new project. '
@@ -665,9 +681,39 @@ class PipelineRuntime:
         if output.fault == 'test':
             from .qa_repair import (repair_csv_inputs, repair_unsupported_text_selectors,
                                     passed_setup_prefixes, repair_test_setup, MAX_SUITE_REPAIRS,
-                                    option_binding_candidates, repair_option_bindings)
+                                    option_binding_candidates, repair_option_bindings,
+                                    fill_selector_candidates, repair_fill_selectors)
             count = target.get('suite_repair_count', 0)
             if type(count) is int and 0 <= count < MAX_SUITE_REPAIRS:
+                selectors = fill_selector_candidates(suite, proof, source)
+                if selectors and set(selectors) == {test['id'] for test in failed}:
+                    ctx.log('QA selector repair: choosing an observed editable control for the failed fill.')
+                    proposal, selector_meta, _ = self.structured._ask(ctx, identity, {
+                        'name': 'qa_selector_repair', 'candidate_id': candidate.id,
+                        'verification_id': verification_id, 'approved_criteria': criteria,
+                        'diagnosis': output.model_dump(), 'suite': suite.model_dump(), 'source': source,
+                        'selector_candidates': selectors,
+                        'instructions': 'Return QaSelectorRepair. For each failed fill choose only a supplied '
+                            'candidate_index whose actual control serves the SAME intended input, based on source, '
+                            'label, fixture and approved criteria. Do not select a different field just to make a test '
+                            'pass. If intent cannot be established, return empty bindings and explain why. '
+                            'You cannot change inputs, assertions, other actions, test IDs or UAC. '
+                            'This proposes a selector correction only; the full suite will run again.'
+                    }, QaSelectorRepair, context_limits=replace(self.structured.builder.limits, total_tokens=32768))
+                    repaired = repair_fill_selectors(suite, proof, source, proposal)
+                    with self.db.write() as s:
+                        ctx.queue.verify_identity(s, identity)
+                        row = self.store.put_json(s, project_id=identity['project_id'], kind='report',
+                            name='qa-selector-repair.json', document=proposal.model_dump(),
+                            meta={'producer': 'qa-selector-repair', 'verification_id': verification_id,
+                                  'target_digest': candidate.target_digest, 'fake': self.fake})
+                    attachments += [selector_meta['context_artifact_id'], row.id]
+                    if repaired is not None:
+                        return self._repair_qa_target(ctx, identity, candidate, target, repaired,
+                            verification_id, attachments, repair_kind='observed_fill_selector')
+                    return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id,
+                        'evidence_artifact_ids': attachments, 'diagnosis_artifact_id': diagnosis.id},
+                        error='No selector correction was supported by source, input intent and observed editable controls.')
                 for repair_kind, repair in (('csv_input_encoding', repair_csv_inputs),
                                             ('text_selector_contract', repair_unsupported_text_selectors)):
                     repaired = repair(suite, proof)

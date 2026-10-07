@@ -19,6 +19,10 @@ This file defines the task contract; the structured PO/lead runtime does not run
    with explicit assertions and mapping for each. Preserve required regression coverage; do not add
    redundant cases, cosmetic requirements, or tests for sibling features absent from approved scope.
    For `qa_plan`, inspect the baseline source/DOM with `inspect_app` before choosing selectors and expected text.
+   Read baseline_ui_source supplied in the task first. Existing prerequisite controls belong to the accepted
+   baseline: reuse their real IDs/classes, scoped to the record created by this test. Do not invent a new ID
+   for a field merely because its purpose is familiar. For dynamic IDs, inspect their generation or use an
+   existing class scoped by fixture text. Inspect omitted/truncated source through inspect_app.
    If source_files is empty, the new-project base intentionally has no DOM. Plan feature tests from approved
    UAC and the technical plan, defining selectors/text as an explicit contract for the developer. Do not
    repeatedly search other paths or ask the user for code that does not exist. Do not create regression cases

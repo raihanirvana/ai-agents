@@ -56,6 +56,39 @@ def internal_url(base, path):
     return destination
 
 
+def missing_fill_controls(page, step):
+    """Observe alternatives only; absence is not a diagnosis or a passing test."""
+    if step.get('action') != 'fill' or page.locator(step['selector']).count() != 0:
+        return None
+    controls = page.locator('input, textarea')
+    if controls.count() > 80:
+        return None
+    candidates = []
+    for control in controls.all():
+        if not control.is_visible() or not control.is_enabled() or not control.is_editable():
+            continue
+        facts = control.evaluate('''el => ({tag: el.tagName.toLowerCase(),
+            type: (el.getAttribute('type') || 'text').toLowerCase(), id: el.id,
+            classes: [...el.classList], name: el.getAttribute('name') || '',
+            label: [...(el.labels || [])].map(x => x.textContent).join(' '),
+            placeholder: el.getAttribute('placeholder') || ''})''')
+        if facts['tag'] == 'input' and facts['type'] not in ('text', 'search', 'email', 'tel', 'url', 'number'):
+            continue
+        selectors = ['#' + facts['id']] + ['.' + value for value in facts['classes'][:8]]
+        for selector in selectors:
+            if (not re.fullmatch(r'[.#][A-Za-z_][A-Za-z0-9_-]{0,99}', selector)
+                    or page.locator(selector).count() != 1):
+                continue
+            candidates.append({'selector': selector, 'tag': facts['tag'], 'type': facts['type'],
+                'label': facts['label'][:200], 'name': facts['name'][:100],
+                'placeholder': facts['placeholder'][:200], 'matched_count': 1,
+                'visible': True, 'enabled': True, 'editable': True})
+            if len(candidates) >= 160:
+                return None
+    return {'contract': 'missing_fill_selector', 'selector': step['selector'],
+            'matched_count': 0, 'candidates': candidates}
+
+
 def control_contract(loc, step):
     """Fixed runner-owned DOM reads, never an expression supplied by the model."""
     action = step['action']
@@ -255,6 +288,12 @@ def main():
                 record['error'] = str(exc)[:3000]
                 record['failure_kind'] = 'assertion_or_application'
                 record['failed_step'] = step_index
+                try:
+                    missing = missing_fill_controls(page, step) if step else None
+                    if missing is not None:
+                        record['selector_diagnosis'] = missing
+                except Exception:
+                    pass  # Missing/ambiguous facts never authorize correction.
                 if isinstance(exc, BrowserContractError):
                     record['failure_kind'] = 'action_contract'
                     if exc.diagnosis is not None:

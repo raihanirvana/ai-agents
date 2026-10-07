@@ -7,6 +7,65 @@ from .contracts import QaPlan
 MAX_SUITE_REPAIRS = 2
 
 
+def fill_selector_candidates(suite, proof, source):
+    """Bound proposals to unique editable DOM controls with literal source declarations."""
+    if proof.get('status') != 'failed' or proof.get('infrastructure_failure'):
+        return {}
+    literals = set()
+    for content in source.values():
+        for literal in re.findall(r'''["']([^"'\n]{1,200})["']''', content):
+            literals.update(literal.split())
+    tests = {test.id: test for test in suite.tests}
+    candidates = {}
+    for result in (proof.get('report') or {}).get('tests', []):
+        if result.get('status') != 'failed':
+            continue
+        test, index = tests.get(result.get('id')), result.get('failed_step')
+        facts = result.get('selector_diagnosis') or {}
+        if (test is None or type(index) is not int or not 0 <= index < len(test.steps)
+                or test.steps[index].action != 'fill'
+                or facts.get('contract') != 'missing_fill_selector'
+                or facts.get('selector') != test.steps[index].selector or facts.get('matched_count') != 0):
+            continue
+        rows = facts.get('candidates')
+        if not isinstance(rows, list) or len(rows) > 160:
+            continue
+        valid = []
+        for row_index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            selector = row.get('selector')
+            if (not isinstance(selector, str) or not re.fullmatch(r'[.#][A-Za-z_][A-Za-z0-9_-]{0,99}', selector)
+                    or selector[1:] not in literals or row.get('matched_count') != 1
+                    or any(row.get(flag) is not True for flag in ('visible', 'enabled', 'editable'))
+                    or row.get('tag') not in ('input', 'textarea')
+                    or (row.get('tag') == 'input' and row.get('type') not in ('text', 'search', 'email', 'tel', 'url', 'number'))):
+                continue
+            valid.append({'candidate_index': row_index, **row})
+        if valid:
+            candidates[test.id] = {'failed_step': index, 'original_selector': test.steps[index].selector,
+                                   'input': test.steps[index].value, 'candidates': valid}
+    return candidates
+
+
+def repair_fill_selectors(suite, proof, source, proposal):
+    candidates = fill_selector_candidates(suite, proof, source)
+    failed = {r['id'] for r in (proof.get('report') or {}).get('tests', []) if r.get('status') == 'failed'}
+    if not failed or {b.test_id for b in proposal.bindings} != failed or not failed.issubset(candidates):
+        return None
+    document = suite.model_dump()
+    tests = {test['id']: test for test in document['tests']}
+    for binding in proposal.bindings:
+        facts = candidates[binding.test_id]
+        choices = {row['candidate_index']: row for row in facts['candidates']}
+        if binding.candidate_index not in choices:
+            return None
+        # Only the failed fill's selector changes. Every input, assertion,
+        # subsequent action, test ID and UAC remains byte-for-byte equivalent.
+        tests[binding.test_id]['steps'][facts['failed_step']]['selector'] = choices[binding.candidate_index]['selector']
+    return QaPlan.model_validate(document)
+
+
 def repair_unsupported_text_selectors(suite, proof):
     """Replace an invalid legacy visibility selector with visibility + case-sensitive text assertions."""
     if proof.get('status') != 'failed' or proof.get('infrastructure_failure'):

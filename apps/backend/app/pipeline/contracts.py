@@ -406,6 +406,24 @@ class QaSetupRepair(Contract):
         return self
 
 
+class SelectorBinding(Contract):
+    test_id: str = Field(pattern=ID)
+    candidate_index: StrictInt = Field(ge=0, le=159)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class QaSelectorRepair(Contract):
+    kind: Literal['qa_selector_repair']
+    summary: str = Field(min_length=1, max_length=1000)
+    bindings: list[SelectorBinding] = Field(default_factory=list, max_length=24)
+
+    @model_validator(mode='after')
+    def unique_tests(self):
+        if len({b.test_id for b in self.bindings}) != len(self.bindings):
+            raise ValueError('one selector binding per failed test')
+        return self
+
+
 def validate_report(report, *, invocation_id, target_digest, suite: QaPlan):
     """Only the isolated runner's output can be admitted; exact identities/counts are mandatory."""
     incomplete = {"status": "incomplete", "counts": {}, "executed": [], "coverage": {}}

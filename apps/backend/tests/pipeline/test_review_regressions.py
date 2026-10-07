@@ -102,6 +102,7 @@ def test_a_rejection_completes_its_job_in_the_publication_transaction(world, tmp
     ctx = SimpleNamespace(queue=queue, lease=Lease(ref.job_id, actor.id, 1), actor=lambda: actor)
     runtime = object.__new__(PipelineRuntime)
     runtime.db, runtime.workflow = world.db, world.w
+    runtime.redactor = Redactor([])
     runtime.workspace = ProductWorkspace(world.db, world.store, world.w, tmp_path, None, Redactor([]))
     outcome = runtime._reject(ctx, queue.verify(ctx.lease), candidate, "Missing price validation")
     assert outcome.status == "succeeded"

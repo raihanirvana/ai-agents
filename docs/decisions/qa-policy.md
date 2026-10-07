@@ -80,8 +80,11 @@ cleanup, target drift, budget pool/usage kumulatif dan batas suite repair tetap.
 Retry diagnosis yang sudah tersimpan membaca artefak authoritative pada target/
 verification yang sama, termasuk setelah prompt/policy diperbarui. Diagnosis
 tidak diminta ulang lalu dibandingkan dengan teks lama yang bisa berbeda.
-Planning QA mempunyai ruang snapshot minimum 16384 token untuk instruksi peran,
-schema DSL dan dependency; ini batas ukuran konteks, bukan reset/cap usage demo.
+Planning QA menerima source UI baseline sampai 20.000 karakter, dengan inspect_app
+untuk file yang tidak termuat. Ruang snapshot minimum 32768 token mencakup
+instruksi peran, schema DSL, source dan dependency; ini batas ukuran konteks,
+bukan reset/cap usage demo. Kontrol prerequisite yang sudah diterima memakai
+selector aktual dari source; ID baru hanya direncanakan untuk fitur baru.
 Policy tidak menambah cap budget/token; projection context tetap dibatasi ukuran.
 Tidak ada migrasi DB, dependency baru, approval ulang otomatis, atau perubahan
 mode/approval proyek lama. Pada demo Mini CRM 7 Oktober, fixture setup #3 lulus
@@ -101,3 +104,24 @@ record dengan ID dinamis memakai label input asli. Koreksi tetap membuat target
 baru dan memerlukan eksekusi penuh; hasil actual tidak boleh menjadi expected.
 Opsi statis yang disebut eksplisit dan dideklarasikan dalam kutipan source
 boleh didiagnosis sebagai bug aplikasi bila tidak tersedia di DOM.
+
+## Pemulihan selector fill yang tidak ditemukan
+
+Runner mencatat selector asli dengan nol matches dan alternatif input/textarea
+yang visible, enabled, editable dan mempunyai selector ID/class unik. Observasi
+dibatasi 80 kontrol/160 alternatif, tanpa nilai isi input, password, ekspresi JS
+dari model atau akses di luar halaman target. Bukti kurang/ambigu tidak mengizinkan
+koreksi. Absennya kontrol saja belum membuktikan kesalahan tes.
+
+Setelah diagnosis `test`, supervisor menyaring alternatif yang token selector-nya
+juga terdapat sebagai literal dalam source shipped. Model hanya memilih indeks
+alternatif sesuai maksud field, fixture dan UAC, atau abstain. Seluruh failed test
+harus memenuhi kontrak ini; campuran dengan kegagalan lain tidak dikoreksi lewat
+jalur ini. Supervisor mengubah hanya selector pada failed fill; input, action lain,
+assertions/expected, ID, UAC dan purpose tetap. Proposal disimpan sebagai evidence.
+
+Target/suite baru menjalankan seluruh baseline dan kandidat ulang. Ini tidak
+memberi QA pass, tidak mengganti approval, dan tidak memakai repair cycle aplikasi.
+Runner baru pada target lama memerlukan refresh identitas runner dan execution
+baru terlebih dahulu. Maksimal suite repair tetap berlaku. Jalur ini belum
+mencakup selector assertion, tombol, custom widget atau kontrol yang ambigu.

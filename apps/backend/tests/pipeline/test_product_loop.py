@@ -165,14 +165,20 @@ def test_developer_input_checkpoint_is_product_persistent_and_resumes_new_genera
 def test_broken_candidate_with_green_repo_gate_cannot_pass_browser_qa(agent_env, tmp_path):
     env = agent_env
     runtime, sup, scheduler = setup(env, tmp_path, ScriptedDriver(broken=True))
-    env.script(plan(), *[{'kind': 'review', 'accept': True, 'summary': 'Contract reviewer accepts diff'} for _ in range(3)])
+    env.script(plan(), {'kind': 'review', 'accept': True, 'summary': 'Contract reviewer accepts diff'})
     t = env.approved_ticket()
-    env.run_until(sup, lambda: (env.world.ticket(t.id).blocker or {}).get('reason') == 'needs_human', timeout_s=120)
+    # Browser failure now queues diagnosis before any application repair. A
+    # raw failed assertion must not consume three development cycles directly.
+    env.run_until(sup, lambda: any((j.result or {}).get('diagnosis_required')
+                                  for j in jobs(env, t.id)), timeout_s=90)
     sup.wait_idle(10)
     with env.db.read() as s:
         verifications = list(s.scalars(select(Verification)))
-        assert len(verifications) == 3 and all(v.status == 'failed' and v.counts['failed'] == 1 for v in verifications)
-    assert env.world.ticket(t.id).phase == 'development'
+        assert len(verifications) == 1
+        assert verifications[0].status == 'failed' and verifications[0].counts['failed'] == 1
+    assert env.world.ticket(t.id).phase == 'qa'
+    assert env.world.ticket(t.id).workflow['repair_cycles'] == 0
+    assert len([j for j in jobs(env, t.id) if j.stage == 'development']) == 1
 
 
 def test_crash_after_candidate_publication_does_not_retry_development_in_the_wrong_phase(agent_env, tmp_path):

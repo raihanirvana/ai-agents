@@ -2755,6 +2755,28 @@ dicatat terpisah jika host/kredensial belum tersedia.
 
 ## Format catatan pengerjaan
 
+### DEV-010 follow-up — pemulihan selector QA, 7 Oktober 2026
+
+Status: DONE. Review: NOT_REVIEWED.
+Rencana: planning menerima source UI baseline; runner merekam kontrol editable
+ketika selector fill tidak ditemukan; QA memilih kontrol dari bukti tersebut,
+supervisor hanya mengubah selector fill dan mem-pin suite/target baru. Assertions,
+input, coverage dan approval tetap. Tambahkan regresi termasuk bug aplikasi yang
+harus tetap gagal, lalu pulihkan QA tiket #3 melalui retry resmi.
+File: pipeline runtime/contracts/qa_repair, runner acceptance, instruksi QA,
+tests pipeline dan keputusan qa-policy.
+Hasil: planning menerima source baseline 20k karakter; failed fill menyimpan
+kontrol observed; proposal hanya memilih indeks kontrol dengan literal source,
+dan supervisor mengubah selector failed fill saja. Target lama di-refresh untuk
+runner baru; seluruh baseline/kandidat dijalankan ulang. Tiket #3 Mini Perpustakaan
+lulus QA 2/2 dan masuk UAT, repair_cycles aplikasi tetap 0, commit kandidat sama.
+Verifikasi: 68 tes selector/contracts/harness lulus, 9 tes product/review lulus
+pada run pertama; dua fixture/assertion legacy diperbarui lalu 2/2 lulus.
+Total 79 tes terkait lulus pada hasil akhir, termasuk browser dengan seeded bug
+yang tetap gagal. git diff --check lulus. Suite penuh/lintas OS dan independent
+review belum dijalankan. Handoff dan evidence:
+[audit selector QA](docs/audits/qa-selector-recovery-2026-10-07.md).
+
 ### Perluasan DSL browser QA dan diagnosis kontrak — 2026-10-07
 
 Status: DONE (implementasi 2026-10-07). Review: NOT_REVIEWED.
