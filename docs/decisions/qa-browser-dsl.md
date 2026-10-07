@@ -1,4 +1,4 @@
-# DSL browser QA — revisi 2, 7 Oktober 2026
+# DSL browser QA — revisi 3, 7 Oktober 2026
 
 DSL adalah daftar operasi browser yang dijalankan runner tepercaya terpisah.
 Model tidak mengirim JavaScript, shell, path host, atau kode assertion bebas.
@@ -63,7 +63,16 @@ di direktori sementara runner, maksimal 1 MiB, bukan dari mount data kontrol.
 Assertion dapat membandingkan filename, UTF-8 text persis, substring nonempty,
 atau seluruh parsed CSV rows termasuk header. CSV menangani koma, quote,
 newline dalam quoted field, CRLF dan BOM UTF-8. Mismatch tetap gagal. Bukti
-download mencatat filename, ukuran dan SHA256; isi tidak disimpan di report.
+download mencatat filename, ukuran dan SHA256; isi lengkap tidak disimpan di report.
+Mismatch CSV mencatat jumlah rows/cells berbeda dan paling banyak delapan diff
+expected/actual, masing-masing nilai maksimal 200 karakter dengan tanda truncation.
+Indeks row/column dimulai dari nol. Diff bukan otoritas untuk mengganti expected.
+`csv_rows` memakai nilai sel asli: input `Kopi, Susu` tetap `Kopi, Susu`, dan
+`Gaji "Bulanan"` tetap memiliki satu pasangan kutip literal. Kutip pembungkus
+dan doubling pada serialisasi CSV tidak termasuk nilai sel. Pakai `text` untuk
+memeriksa format CSV mentah. Planning menolak token CSV berbungkus yang terbukti
+mewakili input fill sebelumnya, tanpa mengubah expected otomatis. Input literal
+yang memang berisi kutip pembungkus tidak ditolak oleh aturan ini.
 DownloadExpectation perlu paling sedikit satu ekspektasi; klik Export saja
 bukan verifikasi file. Expected CSV maksimal 101 rows, 32 cells/row dan 1000
 karakter/cell, total expectation 64 KiB. Suite maksimum 512 KiB. Timeout harness,
@@ -78,6 +87,10 @@ Tidak menambahkan credentials ataupun shared writable mount dengan target.
 Kesalahan native-control/action yang diamati runner adalah `action_contract`.
 Strict locator ambiguity tetap `selector_contract`. Keduanya menjadi kategori
 `test_contract`; aplikasi tidak otomatis diminta berubah atau dihitung repair.
+Mismatch parsed CSV diberi `expectation_diagnosis` dan tetap di QA untuk diagnosis
+terhadap UAC/input. Ini bukan klaim aplikasi benar atau expected salah. Tidak ada
+repair otomatis expected dari hasil download. Defect aplikasi yang terkonfirmasi
+tetap harus dikirim melalui request-changes dengan bukti/reproduksi.
 Runner membaca fakta DOM dengan fungsi tetap milik runner; model tidak dapat
 menyisipkan expression JavaScript dalam DSL.
 

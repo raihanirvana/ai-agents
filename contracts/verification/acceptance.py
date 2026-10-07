@@ -21,6 +21,31 @@ class BrowserContractError(RuntimeError):
         self.diagnosis = diagnosis
 
 
+class CsvComparisonError(AssertionError):
+    """A mismatch needs QA diagnosis; it alone cannot identify an application bug."""
+    def __init__(self, actual, expected):
+        super().__init__('Downloaded CSV rows do not match exactly')
+        differences = []
+        count = 0
+        for row in range(max(len(actual), len(expected))):
+            found = actual[row] if row < len(actual) else []
+            wanted = expected[row] if row < len(expected) else []
+            for column in range(max(len(found), len(wanted))):
+                observed = found[column] if column < len(found) else None
+                required = wanted[column] if column < len(wanted) else None
+                if observed != required:
+                    count += 1
+                    if len(differences) < 8:
+                        differences.append({'row': row, 'column': column,
+                            'expected': required[:200] if required is not None else None,
+                            'actual': observed[:200] if observed is not None else None,
+                            'expected_truncated': required is not None and len(required) > 200,
+                            'actual_truncated': observed is not None and len(observed) > 200})
+        self.diagnosis = {'comparison': 'parsed_csv_cells', 'expected_rows': len(expected),
+            'actual_rows': len(actual), 'different_cells': count,
+            'differences': differences, 'differences_truncated': count > len(differences)}
+
+
 def internal_url(base, path):
     destination = urljoin(base, path)
     source, target = urlsplit(base), urlsplit(destination)
@@ -102,7 +127,8 @@ def download_assertions(download, expected):
                 rows = list(csv.reader(io.StringIO(text.removeprefix('\ufeff'), newline=''), strict=True))
             except csv.Error as exc:
                 raise AssertionError('Downloaded CSV is malformed') from exc
-            assert rows == expected['csv_rows'], 'Downloaded CSV rows do not match exactly'
+            if rows != expected['csv_rows']:
+                raise CsvComparisonError(rows, expected['csv_rows'])
 
 
 def run_step(page, step, base_url, last_download):
@@ -219,6 +245,9 @@ def main():
                     record['failure_kind'] = 'action_contract'
                     if exc.diagnosis is not None:
                         record['action_diagnosis'] = exc.diagnosis
+                if isinstance(exc, CsvComparisonError):
+                    record['failure_kind'] = 'expectation_diagnosis'
+                    record['expectation_diagnosis'] = exc.diagnosis
                 if 'strict mode violation' in str(exc):
                     record['failure_kind'] = 'selector_contract'
                 # A narrow, observed contract defect: one visible alert and

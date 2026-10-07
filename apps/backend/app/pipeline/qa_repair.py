@@ -10,7 +10,7 @@ def classify_failure(proof):
     if proof.get('infrastructure_failure') or proof.get('status') == 'incomplete':
         return 'infrastructure'
     failed = [t for t in (proof.get('report') or {}).get('tests', []) if t.get('status') == 'failed']
-    if any(t.get('failure_kind') in ('selector_contract', 'action_contract') for t in failed):
+    if any(t.get('failure_kind') in ('selector_contract', 'action_contract', 'expectation_diagnosis') for t in failed):
         return 'test_contract'
     return 'application_or_unknown'
 
@@ -27,6 +27,10 @@ def repair_contract_errors(suite, proof):
         test = tests.get(result.get('id'))
         index = result.get('failed_step')
         if not test or type(index) is not int or not 0 <= index < len(test['steps']):
+            return None
+        # Expected values require diagnosis against scope/input, never copying
+        # actual application output into a suite through automatic DOM repair.
+        if result.get('failure_kind') not in ('selector_contract', 'action_contract'):
             return None
         step = test['steps'][index]
         if result.get('failure_kind') == 'action_contract':

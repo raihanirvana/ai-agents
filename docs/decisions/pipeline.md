@@ -162,6 +162,13 @@ ID unik, tujuan feature/bug/regression/smoke, dan pemetaan UAC. Semua automated 
 harus tercakup; manual UAC tetap checklist pengguna dalam domain/API/GUI yang ada.
 Suite disimpan sebagai artifact supervisor di luar mount developer. Tool schema
 meng-inline referensi Pydantic agar nested plan/steps terkirim utuh ke Hermes.
+Revisi 3 menegaskan `csv_rows` sebagai parsed cells, bukan token CSV ter-escape.
+Planning menolak wrapping/doubling yang dapat ditelusuri ke input fill; parsed
+CSV mismatch membawa diff expected/actual terbatas dari runner dan kategori
+`expectation_diagnosis` (routing `test_contract`). Kasus ini menunggu diagnosis
+QA terhadap UAC/input, tanpa langsung meminta repair aplikasi. Expected tidak
+disalin otomatis dari actual. Koreksi memerlukan suite/target baru dan eksekusi
+baseline/kandidat baru; evidence lama tetap immutable, user approval tetap.
 `fill` mengubah nilai field, bukan event keyboard. Enter harus berupa langkah
 `press` dengan selector field dan value `Enter`, sesudah fill. Tombol press
 dibatasi Enter/Tab/Escape/Space/Backspace/Delete/ArrowUp/Down/Left/Right/Home/End;

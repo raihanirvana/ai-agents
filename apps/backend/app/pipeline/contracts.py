@@ -1,6 +1,8 @@
 """Bounded acceptance DSL: QA describes browser assertions, never arbitrary runner code."""
 from typing import Literal
+import csv
 import hashlib
+import io
 import json
 from pydantic import ConfigDict, Field, model_validator, model_serializer, StrictInt, StrictStr, StrictBool
 from app.agents.outputs import Contract, ID
@@ -42,7 +44,10 @@ class DownloadExpectation(Contract):
     filename: StrictStr | None = Field(default=None, min_length=1, max_length=200)
     text: StrictStr | None = Field(default=None, max_length=10000)
     contains_text: StrictStr | None = Field(default=None, min_length=1, max_length=10000)
-    csv_rows: list[list[StrictStr]] | None = Field(default=None, min_length=1, max_length=101)
+    csv_rows: list[list[StrictStr]] | None = Field(default=None, min_length=1, max_length=101,
+        description='Exact parsed CSV cells including header, not serialized CSV tokens. '
+                    'Input Kopi, Susu stays Kopi, Susu; Gaji "Bulanan" keeps one pair of literal quotes. '
+                    'Do not add CSV wrapping quotes or double literal quotes. Use text for raw CSV bytes decoded as UTF-8.')
 
     @model_validator(mode='after')
     def bounded_expectations(self):
@@ -187,16 +192,55 @@ class QaPlan(Contract):
         if not covered <= known or not required <= covered:
             raise ValueError("unknown UAC or automated UAC coverage missing")
 
+    def csv_expectation_issues(self):
+        """Flag serialized input tokens without consulting application output.
+
+        This is planning feedback, not permission to change any expectation.
+        Quoted values that were themselves entered literally remain valid.
+        """
+        issues = []
+        for test in self.tests:
+            inputs = set()
+            for index, step in enumerate(test.steps):
+                if step.action == 'fill':
+                    inputs.add(step.value)
+                if step.action != 'assert_download' or step.download.csv_rows is None:
+                    continue
+                for row_index, row in enumerate(step.download.csv_rows):
+                    for column, cell in enumerate(row):
+                        if cell in inputs or len(cell) < 2 or not cell.startswith('"') or not cell.endswith('"'):
+                            continue
+                        try:
+                            parsed = list(csv.reader(io.StringIO(cell, newline=''), strict=True))
+                        except csv.Error:
+                            continue
+                        if len(parsed) != 1 or len(parsed[0]) != 1:
+                            continue
+                        value = parsed[0][0]
+                        if value in inputs and cell == '"' + value.replace('"', '""') + '"':
+                            issues.append({'test_id': test.id, 'step': index, 'row': row_index,
+                                'column': column, 'expected': cell, 'input': value})
+        return issues
+
+    def check_csv_expectations(self):
+        issues = self.csv_expectation_issues()
+        if issues:
+            first = issues[0]
+            raise ValueError('csv_rows requires parsed cells, not CSV-escaped input tokens: '
+                f"test {first['test_id']}, step {first['step']}, row {first['row']}, column {first['column']}. "
+                'Compare the original fill input and approved criteria; use text for serialized CSV expectations.')
+
     @property
     def digest(self):
         return digest_of(self.model_dump())
 
 
 def browser_capabilities():
-    return {'revision': 2, 'actions': Step.model_json_schema()['properties']['action']['enum'],
+    return {'revision': 3, 'actions': Step.model_json_schema()['properties']['action']['enum'],
             'rules': ['fill is for text/date/number inputs, textarea or contenteditable, never select/checkbox',
                       'select_option matches explicit option value or label; check/uncheck operate on checkbox/radio',
                       'download captures one click-triggered download; assert_download checks exact filename/text/CSV rows',
+                      'csv_rows compares parsed cell values, without CSV wrapping quotes or doubled escaping; text compares raw UTF-8 CSV',
                       'upload_file accepts only an inline bounded text/CSV/JSON fixture; no host path',
                       'click_dialog clicks a control and verifies/accepts or dismisses one native alert/confirm/prompt',
                       'navigate/assert_url accept same-origin paths only; each test has isolated storage',

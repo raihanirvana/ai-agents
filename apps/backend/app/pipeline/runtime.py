@@ -124,6 +124,7 @@ class PipelineRuntime:
             if set(args) != {'plan'}:
                 raise ValueError('propose_tests requires only plan')
             suite = QaPlan.model_validate(args['plan'])
+            suite.check_csv_expectations()
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, current)
                 version = s.query(TicketVersion).filter_by(ticket_id=current['ticket_id'], version=current['scope_version']).one()
@@ -478,7 +479,8 @@ class PipelineRuntime:
                     return self._repair_qa_target(ctx, identity, candidate, target, repaired, v.id, attachments)
                 return Outcome('failed', {'verification_id': v.id, 'evidence_artifact_ids': attachments,
                     'qa_status': 'failed', 'failure_kind': 'test_contract'},
-                    error='QA action/selector contract needs diagnosis; application repair was not requested.')
+                    error='QA action/selector/expected-value contract needs diagnosis; '
+                          'compare approved criteria and test inputs before requesting application repair.')
             return self._reject(ctx, identity, candidate, 'Browser acceptance failed: ' + json.dumps(proof['report'])[:3000],
                                 verification_id=v.id, evidence_artifact_ids=attachments, qa_status='failed',
                                 failure_kind=failure_kind)

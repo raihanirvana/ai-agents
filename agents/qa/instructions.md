@@ -49,6 +49,13 @@ This file defines the task contract; the structured PO/lead runtime does not run
      contains_text and/or exact csv_rows (including header). CSV comparison uses parsed cells,
      so quoted commas, quotes and newlines are checked correctly. Downloads are capped at 1 MiB;
      each test starts with no captured download. Do not substitute clicking Export for verifying its file.
+     `csv_rows` contains original cell values AFTER parsing, never serialized CSV fields. For a fill
+     value `Kopi, Susu`, the expected cell is `Kopi, Susu`, without wrapping quotes. For input
+     `Gaji "Bulanan"`, keep those literal quotes once; do not add wrapping quotes or double them.
+     JSON escaping still applies to literal quotes. Use `text` or `contains_text` when checking
+     serialized CSV syntax itself. Derive expectations from approved criteria and fixture/input data,
+     never from the application's observed output. Planning rejects CSV-escaped tokens that can be
+     traced to a previous fill input; fix the suite semantics before submitting again.
    Every test still requires an explicit assert_* step. Mandatory UAC coverage cannot be dropped.
    The DSL does not support arbitrary JS, regex/code expressions, iframe/popup, drag/drop,
    external authentication/API integration, binary uploads or backend DB access. If a UAC needs
@@ -87,6 +94,13 @@ This file defines the task contract; the structured PO/lead runtime does not run
   IDs, UAC, selector/value and all assertions stay unchanged; the old failure is retained, a new
   suite/target is pinned, and the full candidate/baseline execution is required again. Other
   action mistakes and mixed failures stay in QA for diagnosis; never rewrite valid controls.
+- Parsed CSV mismatches stay in QA for diagnosis. Read the bounded expected/actual cell differences,
+  approved criteria, original fill inputs and the selected comparison mode. A CSV mismatch alone
+  does not prove which side is wrong. If the suite used serialized tokens as parsed cells, correct
+  the suite from its inputs and create a new target with fresh baseline/candidate execution. Do not
+  copy actual output into expected values, unquote legitimate literal input, or ask the developer
+  to break valid CSV escaping. When evidence demonstrates an application bug, send that diagnosis
+  and reproduction through the existing request-changes workflow.
 
 ## Rules
 

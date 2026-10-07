@@ -1572,6 +1572,45 @@ uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
 
+### Diagnosis expected CSV QA — 2026-10-07
+
+Status: DONE (implementasi 2026-10-07). Review: NOT_REVIEWED.
+Rencana: jelaskan parsed CSV cells pada schema/instruksi QA, tolak kekeliruan
+escaping yang dapat ditelusuri ke input tes saat planning, dan simpan diff
+expected/actual yang dibatasi ukuran. Mismatch CSV menunggu diagnosis di QA,
+tanpa langsung meminta perubahan aplikasi. Koreksi demo memakai input tes,
+artefak suite/target baru dan eksekusi ulang; bukti lama tidak ditimpa.
+File: contracts/verification/acceptance.py, pipeline/contracts.py,
+pipeline/qa_repair.py, pipeline/runtime.py, instruksi QA dan keputusan pipeline.
+Tes regresi tidak diminta; tidak ditambah/dijalankan. Verifikasi demo ulang
+termasuk tindakan pemulihan yang disetujui pengguna.
+Hasil: schema/capability revisi 3 dan instruksi QA membedakan parsed cells dari
+raw CSV. Planning memeriksa expected terhadap input fill, tanpa membaca actual.
+Runner menyimpan maksimal delapan diff sel (200 karakter/nilai); mismatch
+parsed CSV tetap failed di QA untuk diagnosis, tidak mengubah expected otomatis.
+Koreksi demo hanya dua sel dari input asli; seluruh test IDs/UAC/actions tetap.
+Suite baru `2d8a6809d044492f9d6a7b7966bb57a5`; kandidat baru
+`f73c122d30cd41ffa6376f8dba555c1c`, verification
+`dec349a5918b4b6aa0d5f00c2ab3856d`: browser 2/2 passed, baseline 2/2 failed,
+smoke passed, tanpa missing/skipped. Download 124 byte SHA256
+`35a24e3c7769a52dc168656166ae286531c2bc67489cfbd00b009c04fda61192`
+sama persis dengan run gagal sebelumnya. Kode aplikasi CSV tidak berubah;
+developer menambahkan file scratch/probe yang tidak dipakai aplikasi pada kandidat.
+Worker dihentikan tertib dan direstart; job developer yang sudah berjalan
+dilanjutkan dengan suite/konteks koreksi, kemudian review dan QA baru. Counter
+repair tetap 2 dan usage/histori tidak direset. Status Accepted teramati setelah
+QA; implementer tidak memberi approval UAT/release atau memindahkan accepted ref.
+Checks aktual: AST 4 file Python, import 3 modul, schema inline, TypeScript
+`tsc --noEmit -p apps/web/tsconfig.json`, dan `git diff --check` lulus.
+API health ok, frontend HTTP 200, worker pipeline siap.
+Keterbatasan: belum ada tes regresi baru untuk jalur mismatch/truncation/planning;
+run demo ini membuktikan koreksi suite dan eksekusi CSV, bukan seluruh DSL.
+Mismatch yang belum terdiagnosis tetap memerlukan diagnosis QA; tidak ada
+auto-repair expected atau auto-approval. Pengguna meminta commit/push hasil ini
+pada 2026-10-07; pendekatan QA ringan masih diskusi dan belum diimplementasikan.
+Handoff: diff sembilan file (runner, kontrak, routing, UI, instruksi dan docs);
+review independen belum dilakukan.
+
 ### Setup proyek baru otomatis dan recovery cleanup lokal — 2026-10-06
 
 Catatan operasional lanjutan: log Docker menunjukkan VM otomatis berhenti karena
