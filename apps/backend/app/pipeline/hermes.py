@@ -13,6 +13,12 @@ from .relay import ProductAdmission
 from .files import allocate_directory
 from .transcript import TranscriptProjection
 
+class RelayContextError(RuntimeError):
+    def __init__(self, detail):
+        self.detail = detail
+        super().__init__('Local relay rejected the context before calling the provider')
+
+
 WORKER = Path(__file__).resolve().parents[1] / 'runtime_spike' / 'hermes_worker.py'
 
 
@@ -175,6 +181,8 @@ class HermesDriver:
             raise RuntimeError('; '.join(collector_error))
         ctx.queue.verify(ctx.lease)
         if not runtime_result or runtime_result.get('error'):
+            if admission.relay_failure:
+                raise RelayContextError(admission.relay_failure)
             if admission.provider_failure:
                 from app.agents.models import ProviderUnavailable, ProviderRejected
                 code = admission.provider_failure.get('http_status')

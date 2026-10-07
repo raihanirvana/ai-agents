@@ -15,6 +15,7 @@ from app.persistence.transactions import bind_service
 from .contracts import QaPlan, QaDiagnosis, QaSetupRepair, QaOptionRepair, Review, tool_schema, browser_capabilities
 from .qa_policy import policy_context, preflight
 from .relay import reconcile_accounting
+from .hermes import RelayContextError
 from .workspace import FencedWorkspace, unpack_tree, cleanup_workspace
 from .files import allocate_directory, cleanup_directory
 
@@ -52,6 +53,10 @@ class PipelineRuntime:
             error = self.redactor.redact('pipeline context refused: ' + str(exc))[:500]
             ctx.log(error)
             return Outcome('failed', error=error, retryable=False)
+        except RelayContextError as exc:
+            return Outcome('failed', {'failure_kind': 'relay_context', 'relay_detail': exc.detail},
+                error='Konteks ditolak relay lokal sebelum panggilan provider. Periksa ukuran request/proyeksi sebelum retry.',
+                retryable=False)
         except ModelError as exc:
             error = self.redactor.redact(str(exc))[:500]
             return Outcome('failed', {'failure_kind': 'provider', 'http_status': getattr(exc, 'http_status', None)},
@@ -181,6 +186,23 @@ class PipelineRuntime:
             feedback = self.workspace.repair_feedback(s, identity)
             repair = ({'message_id': feedback.id, 'candidate_id': feedback.meta.get('candidate_id'),
                        'reason': feedback.body} if feedback is not None else None)
+            # Recover diagnostics from pinned evidence even for historical feedback
+            # whose prose was truncated before the actual gate failure.
+            if repair:
+                previous = s.get(Candidate, repair['candidate_id']) if repair['candidate_id'] else None
+                if (previous and previous.project_id == identity['project_id']
+                        and previous.ticket_id == identity['ticket_id']
+                        and previous.scope_version == identity['scope_version']
+                        and previous.target_artifact_id):
+                    target = json.loads(self.store.read_bytes(s, previous.target_artifact_id))
+                    gates = json.loads(self.store.read_bytes(s, target['gate_artifact_id']))
+                    if (gates.get('gate') or {}).get('status') != 'passed':
+                        from .review_context import gate_failure_summary
+                        repair['repository_gate_failure'] = gate_failure_summary(gates)
+                        repair['gate_artifact_id'] = target['gate_artifact_id']
+                        repair['guidance'] = ('Preserve baseline tests and their original test names/IDs. '
+                            'Restore missing baseline tests; add new feature tests separately. '
+                            'A passing run_command test alone does not prove baseline coverage at submission.')
         source_files = sup.list_files(started.ref, started.credential)
         bootstrap = bootstrap_contract() if self.workspace.bootstrap_available(identity) else None
         snapshot = self.structured.builder.build(identity, task={'name': 'implement', 'runner_manifest': manifest.to_dict(),
@@ -193,7 +215,9 @@ class PipelineRuntime:
             'qa_suite': suite.model_dump(), 'instructions': 'Implement the approved scope. Read/patch files with relative paths. '
             'read_file is paged and never writes. write_file creates/replaces entire files; edit_file replaces one exact match. '
             'Use current expected_digest from read_file for edits/replacements; empty digest creates only missing files. '
-            'Follow next_offset with expected_digest to read more. inspect_diff defaults to stat; pass path for file diff. '
+            'Follow next_offset with expected_digest to read more. Unchanged repeated pages return a reuse receipt, '
+            'not another content copy: use the earlier page and move to implementation/checks. If that page was '
+            'archived from active context, request refresh=true once. inspect_diff defaults to stat; pass path for file diff. '
             'read_file path "." lists source files. run_command selects bootstrap/install/test/build. '
             'For repository tests use node:test and node:assert/strict, with npm test running node --test. '
             'Create real .test.js/.test.cjs files that exercise application code; echo success and empty tests fail the gate. '
@@ -305,7 +329,13 @@ class PipelineRuntime:
                 'Project runner/base changed; rebuild the candidate with the current configuration. '
                 'New technical review, QA and UAT are required.', runner_changed=True)
         if not self.gates_eligible(identity, candidate, gates):
-            return self._reject(ctx, identity, candidate, 'Required repository gate failed without an exact baseline waiver: ' + json.dumps(gates.get('gate'))[:1800])
+            from .review_context import gate_failure_summary
+            failure = gate_failure_summary(gates)
+            return self._reject(ctx, identity, candidate,
+                'Required repository gate failed without an exact baseline waiver. '
+                'Preserve original baseline test names/IDs; restore missing tests rather than rename or remove them. '
+                'Failure: ' + json.dumps(failure) + '\nFull evidence artifact: ' + target['gate_artifact_id'],
+                repository_gate_failure=failure, gate_artifact_id=target['gate_artifact_id'])
         sup = FencedWorkspace(self.workspace.root, ctx)
         broker = sup.broker(identity['project_id'])
         diff = broker.diff_commits(candidate.base_sha, candidate.commit_sha)

@@ -114,3 +114,11 @@ def gate_summary(gates):
     result['commands'] = [command_summary(command) for command in gates.get('commands', [])
                           if isinstance(command, dict)]
     return result
+
+
+def gate_failure_summary(gates):
+    """Keep actionable failures ahead of command details and large passing ID lists."""
+    gate = gate_summary(gates).get('gate') or {}
+    fields = ('missing_baseline_tests', 'failed_test_ids', 'failures', 'status',
+              'counts', 'exit_code', 'infrastructure_failure', 'signature', 'command')
+    return {key: gate[key] for key in fields if key in gate}

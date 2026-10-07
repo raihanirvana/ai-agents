@@ -840,6 +840,46 @@ commit broker yang sah berhasil dan attempt cancelled ditolak.
 
 ## DEV-006 — Spike runtime nyata dan keputusan adapter
 
+### Follow-up: context overflow Developer Mini Perpustakaan — 2026-10-07
+
+Status follow-up: DONE (7 Oktober 2026). Prioritas: tinggi. Review: NOT_REVIEWED.
+Rencana implementasi: pisahkan ingress/projection/provider limits dan diagnosis;
+kurangi read_file redundant sambil memvalidasi digest; expose recovery state dan
+retry command user di web dengan guard queue yang sama.
+Attempt tiket #2 gagal setelah 96 model calls, 344 tool calls, 5.719.488 token
+kumulatif, USD 0,385126368, active_s 212,31. Error: conversation terlalu panjang
+untuk DeepSeek dan compression Hermes dimatikan. Proyeksi relay sudah aktif,
+tetapi belum mencegah overflow; budget unlimited tidak menghapus context window.
+Retry otomatis juga gagal: 87 calls, 4.455.723 token kumulatif, USD 0,318880008;
+job needs_human dan antrean berhenti. Indikasi kuat ingress relay 1 MiB sebelum
+projection: log terakhir 1.043.050 karakter asli menjadi 284.359 projected.
+Perlu verifikasi bytes/HTTP response agar limit relay tidak disalahartikan
+sebagai context window provider.
+
+Penyebab sudah dikonfirmasi pada arsip transport: HTTP 413 dari relay lokal
+sebelum projection, bukan bukti bahwa context-window provider habis.
+Implementasi: ingress projected 8 MiB/provider 1 MiB, byte-size events,
+failure_kind relay_context, unchanged read receipts/refresh dan working set
+64.000 karakter, public recovery state dan endpoint retry user di web.
+Tambahan dari monitoring: feedback gate terpotong sebelum missing_baseline_tests;
+ringkasan sekarang menaruh kegagalan di awal dan Developer memuat diagnosis
+dari artefak target kandidat yang dipin, termasuk untuk feedback historis.
+Pertahankan scope/feedback, fencing, pin bukti dan kontrak memory/profile runtime.
+Detail, bukti dan ukuran keberhasilan:
+[audit Mini Perpustakaan](docs/audits/library-demo-context-overflow-2026-10-07.md).
+Verifikasi aktual: AST 10 file Python/import runtime/API, TypeScript --noEmit
+dan git diff --check lulus. Retry HTTP nyata/replay key sama menghasilkan satu
+child dan readiness parent berubah. Worker direstart dengan shutdown tertib;
+API direstart (proses lama yang macet setelah SIGTERM dihentikan terpisah).
+Tidak menambah/menjalankan tes regresi; tidak diminta pada assignment ini.
+UI browser/independent review dan pengukuran komparatif penuh belum dilakukan.
+Recovery menghasilkan kandidat nyata. Repair terakhir: 13 model calls,
+336.605 token kumulatif, USD 0,022130028, active_s 60,57. Gate 31/31 pass,
+baseline IDs dipulihkan; TL pass; QA browser nyata pass (40,90 detik aktif).
+Tiket #2 masuk UAT, tiket #3 menunggu acceptance #2. Approval tetap pengguna.
+Handoff/diff scope, evidence IDs, cara menjalankan dan keterbatasan tercatat
+pada audit di atas. Penghematan universal belum dibuktikan.
+
 ### Catatan pengerjaan
 Status: DONE (4 Oktober UTC / 5 Oktober WIB 2026)
 Review R3: REVIEWED — Claude, dikonfirmasi pengguna 2026-10-05;

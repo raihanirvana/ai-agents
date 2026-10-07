@@ -13,6 +13,7 @@ export default function Activity() {
   const { board, selectTicket } = useWorkspace();
   if (!board) return <p className="muted pad">Memuat aktivitas…</p>;
   const runs = [...board.runs].sort((a, b) => Number(ACTIVE_RUN.has(b.status)) - Number(ACTIVE_RUN.has(a.status)));
+  const needsAction = runs.filter((run) => run.recovery?.needs_action);
   const blocked = board.tickets.filter((t) => blockerLabel(t.blocker));
   return (
     <div className="activity">
@@ -25,6 +26,10 @@ export default function Activity() {
           ))}</ul>
         )}
       </section>
+      {needsAction.length > 0 && <section aria-label="Run perlu tindakan">
+        <h3>Perlu tindakan ({needsAction.length})</h3>
+        <p className="notice notice--bad">Ada run gagal yang berhenti menunggu pemulihan. Lihat alasan dan tombol Coba lagi pada run terkait.</p>
+      </section>}
       <section aria-labelledby="run-h">
         <h3 id="run-h">Run tim</h3>
         {runs.length === 0 && <p className="muted">Belum ada run. Kirim pesan ke PO untuk memulai.</p>}
@@ -63,10 +68,14 @@ function RunRow({ run }: { run: Run }) {
     <li className="run" data-run={run.id} data-status={run.status}>
       <div className="run-head">
         <strong>{ROLE_LABEL[run.role] ?? run.role}</strong> <span className="muted">{run.stage}</span>
-        <Badge tone={tone(run.status)}>{RUN_STATUS_LABEL[run.status]}</Badge>
+        <Badge tone={tone(run.status)}>{run.recovery?.needs_action ? "Perlu tindakan" : RUN_STATUS_LABEL[run.status]}</Badge>
         {run.fake ? <FakeBadge title={`Runtime ${run.runtime}: fake, bukan QA/model nyata`} /> : <Badge title={`Runtime ${run.runtime}`}>{run.runtime}</Badge>}
         <span className="run-actions">
           <button type="button" className="ghost small" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Tutup" : "Detail"}</button>
+          {run.recovery?.can_retry && (
+            <ConfirmButton label="Coba lagi" confirmLabel="Ya, coba lagi"
+              onConfirm={async () => { await command<"retry">(`/runs/${run.id}/retry`, { expected_revision: run.revision }); }} />
+          )}
           {active && (
             <ConfirmButton tone="danger" label="Stop" confirmLabel="Ya, hentikan run"
               onConfirm={async () => { await command<"stop">(`/runs/${run.id}/stop`, {}); }} />
@@ -74,6 +83,12 @@ function RunRow({ run }: { run: Run }) {
         </span>
       </div>
       {ticket && <div className="muted">Tiket <button type="button" className="link" onClick={() => selectTicket(ticket.id)}>#{ticket.number} {ticket.title}</button>{run.scope_version ? ` · scope v${run.scope_version}` : ""}</div>}
+      {run.recovery?.needs_action && <p className="notice notice--bad" role="status">
+        Retry otomatis sudah berhenti. Periksa penyebab kegagalan, lalu coba lagi setelah penyebabnya diperbaiki.
+        {!run.recovery.can_retry && run.recovery.reason && <> {run.recovery.reason}</>}
+      </p>}
+      {run.recovery?.retry_job_id && <p className="muted">Run ini sudah dilanjutkan pada attempt berikutnya.</p>}
+      {run.result?.failure_kind === "relay_context" && <p className="notice notice--bad" role="status">Konteks ditolak relay lokal sebelum dikirim ke provider. Periksa ukuran request dan pemadatan.</p>}
       {run.result?.qa_status === "suite_repaired" && <p className="notice" role="status">Kontrak tes QA diperbaiki. Menunggu pengujian ulang pada target baru.</p>}
       {run.result?.diagnosis_required === true && <p className="notice" role="status">Tes browser gagal. QA akan mendiagnosis bukti sebelum meminta perubahan aplikasi.</p>}
       {run.result?.failure_kind === "test_contract" && run.status === "failed" && <p className="notice" role="status">Operasi, selector, atau expected tes QA perlu diperiksa terhadap kriteria dan input tes. Tiket tetap di QA.</p>}

@@ -34,16 +34,36 @@ class SourceTools:
         self.sup, self.started, self.redactor = sup, started, redactor
         self.after_write = after_write
         self.mutation_lock = threading.RLock()
+        self.read_pages = {}
 
     def read(self, c, i, a):
-        if set(a) - {'path', *PAGE_FIELDS} or 'path' not in a:
+        if set(a) - {'path', 'refresh', *PAGE_FIELDS} or 'path' not in a:
             raise ValueError('read_file takes path and optional paging fields')
+        if type(a.get('refresh', False)) is not bool:
+            raise ValueError('refresh must be boolean')
         if a['path'] == '.':
             text = '\n'.join(self.sup.list_files(self.started.ref, self.started.credential))
             return {**page(text, a), 'format': 'source-file-list'}
         data = self.sup.read_file(self.started.ref, self.started.credential, a['path'])
-        return {**page(self.redactor.redact(data.decode('utf-8')), a,
-                       digest=hashlib.sha256(data).hexdigest()), 'path': a['path']}
+        result = {**page(self.redactor.redact(data.decode('utf-8')), a,
+                        digest=hashlib.sha256(data).hexdigest()), 'path': a['path']}
+        key = (a['path'], result['digest'], result['offset'], a.get('limit', 4000))
+        with self.mutation_lock:
+            duplicate = key in self.read_pages
+            # Bound only receipt metadata. No source bytes or credentials are cached.
+            self.read_pages[key] = None
+            if len(self.read_pages) > 128:
+                self.read_pages.pop(next(iter(self.read_pages)))
+        if hasattr(c, 'log'):
+            c.log(f'source.read path={self.redactor.redact(a["path"])} offset={result["offset"]} '
+                  f'unchanged={duplicate} refresh={a.get("refresh", False)}')
+        if duplicate and not a.get('refresh', False):
+            result.pop('content')
+            result.update(unchanged_read=True,
+                next='This exact page was already read and the source digest is still current. '
+                     'Reuse its content and proceed to edits/checks. If the earlier page is unavailable '
+                     'in active context, request refresh=true once. Do not repeat unchanged reads.')
+        return result
 
     def write(self, c, i, a):
         if set(a) != {'path', 'content', 'expected_digest'} or (a['content'] is not None and not isinstance(a['content'], str)):
@@ -78,7 +98,9 @@ class SourceTools:
 
     @property
     def parameters(self):
-        return {'read_file': {'path': {'type': 'string'}, **PAGE_FIELDS},
+        return {'read_file': {'path': {'type': 'string'}, **PAGE_FIELDS,
+                    'refresh': {'type': 'boolean', 'default': False,
+                        'description': 'Force page content only if the prior unchanged page is unavailable in active context.'}},
                 'write_file': {'path': {'type': 'string'}, 'content': {'type': ['string', 'null'],
                     'description': 'Entire new file contents. For a small change use edit_file. Null deletes.'},
                     'expected_digest': DIGEST_FIELD},

@@ -255,7 +255,7 @@ Penghematan token/waktu aktual belum diukur pada demo baru.
 # Perbaikan efisiensi setelah dua demo — 7 Oktober 2026
 
 - Konteks developer mempertahankan user/system/decisions/feedback/error dan enam
-  messages terbaru. Completed read di luar working set 16.000 karakter dan
+  messages terbaru. Completed read di luar working set 64.000 karakter dan
   argument mutasi lama diganti digest/range. Transcript asli tetap diarsipkan;
   tool read dapat mengambil source terbaru. Ini batas observasi lama, bukan
   pembatas token provider. Penghematan aktual belum diukur pada demo ulang.
@@ -269,3 +269,35 @@ Penghematan token/waktu aktual belum diukur pada demo baru.
   mengubah accepted/attempt Git ref. Checkpoint bukan kandidat atau bukti QA.
   Latest checkpoint job resumable dipin; snapshot lama dapat dibersihkan jika
   tidak dipin oleh referensi lain. Log menyimpan ID/checksum, tanpa membanjiri chat.
+
+
+### Perbaikan relay dan read receipts — 7 Oktober 2026
+
+Ingress chat relay produk dengan projection menerima paling banyak 8 MiB
+request mentah; request provider sesudah projection tetap maksimal 1 MiB.
+Tools/nonprojected relay tetap memakai ingress 1 MiB. Ini batas payload/memori,
+bukan pembatas budget token demo. Canary diperiksa pada request asli sebelum
+projection; bearer, generation, admission dan accounting tetap berlaku.
+Log context.size mencatat bytes kedua sisi, bukan hanya jumlah karakter.
+Penolakan lokal memakai error relay_request_limit dan failure_kind relay_context,
+terpisah dari kegagalan provider; tidak diteruskan sebagai generic HTTP 413 yang
+Hermes salah tafsirkan sebagai context overflow. Compression upstream tetap off.
+
+SourceTools selalu memvalidasi file/digest melalui supervisor. Read halaman yang
+sama pada digest yang sama menghasilkan unchanged_read receipt tanpa salinan
+content kedua. Refresh eksplisit boleh mengambil content kembali bila halaman
+lama tidak ada dalam konteks aktif. Cache hanya menyimpan metadata maksimal
+128 page identities per instance/attempt; digest berubah berarti halaman baru.
+Projection mempertahankan read yang berisi source dan tidak menggantinya dengan
+receipt. Pasangan read receipt completed yang sudah lama dihapus dari request
+projected, sementara transcript asli tetap diarsipkan. Pending/recent calls,
+mutasi, keputusan, scope, feedback, dan checks tetap dipertahankan.
+Working set dinaikkan menjadi 64.000 karakter agar source+tests yang relevan
+bisa dibaca bersama, mengurangi pergantian halaman yang mengusir source lain.
+
+Feedback repository gate memprioritaskan missing baseline IDs, failed IDs dan
+counts sebelum detail command. Developer repair juga membaca ringkasan dari
+artefak gate target kandidat feedback yang dipin (project/ticket/scope harus
+sesuai), sehingga feedback historis yang terpotong masih bisa dipulihkan.
+Nama/ID tes baseline harus tetap; tambahkan tes feature secara terpisah.
+Hasil run_command test tidak menggantikan coverage baseline pada submit gate.

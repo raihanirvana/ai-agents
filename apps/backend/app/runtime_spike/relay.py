@@ -42,6 +42,8 @@ class Relay:
         self.token = secrets.token_urlsafe(32)
         self.opener = transport or urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         self.request_projection = request_projection
+        self.raw_request_max_bytes = 8 * 1024 * 1024 if request_projection is not None else 1024 * 1024
+        self.provider_request_max_bytes = 1024 * 1024
         self.provider_retry_delays = tuple(provider_retry_delays)
         if any(type(delay) not in (int, float) or not 0 <= delay <= 45 for delay in self.provider_retry_delays) or len(self.provider_retry_delays) > 3:
             raise ValueError('provider retries require at most three bounded delays')
@@ -85,8 +87,12 @@ class Relay:
                         self.reply(403, {"error": "browser or chunked requests forbidden"})
                         return
                     size = int(self.headers.get("Content-Length", "0"))
-                    if not 0 < size <= 1024 * 1024:
-                        self.reply(413, {"error": "request too large"})
+                    ingress_limit = owner.raw_request_max_bytes if self.path == "/v1/chat/completions" else 1024 * 1024
+                    if not 0 < size <= ingress_limit:
+                        owner.journal.event(owner.scope, owner.generation, 'relay.rejected',
+                            {'phase': 'ingress', 'request_bytes': size, 'limit_bytes': ingress_limit})
+                        self.reply(422, {"error": {"message": "Local relay ingress exceeds its bounded request limit; no provider call was made.",
+                            "type": "relay_request_limit", "code": "relay_ingress_limit"}})
                         return
                     body = json.loads(self.rfile.read(size))
                     if self.path == "/tools":
@@ -157,8 +163,21 @@ class Relay:
                     # observations; compaction must never hide a cross-run canary.
                     if owner.request_projection is not None:
                         body = owner.request_projection(body)
+                    projected_payload = json.dumps(body).encode()
+                    owner.journal.event(owner.scope, owner.generation, 'context.size',
+                        {'ingress_bytes': size, 'projected_bytes': len(projected_payload),
+                         'ingress_limit_bytes': ingress_limit, 'provider_limit_bytes': owner.provider_request_max_bytes})
+                    if len(projected_payload) > owner.provider_request_max_bytes:
+                        owner.journal.finish(rid, {'status': 'local_rejected'})
+                        rid = None
+                        owner.journal.event(owner.scope, owner.generation, 'relay.rejected',
+                            {'phase': 'projection', 'request_bytes': len(projected_payload),
+                             'limit_bytes': owner.provider_request_max_bytes})
+                        self.reply(422, {"error": {"message": "Projected context exceeds the local relay limit; no provider call was made.",
+                            "type": "relay_request_limit", "code": "relay_projection_limit"}})
+                        return
                     owner.journal.event(owner.scope, owner.generation, "model.started", {"reservation": rid, "model": owner.model})
-                    req = urllib.request.Request(owner.ENDPOINT, data=json.dumps(body).encode(), headers={
+                    req = urllib.request.Request(owner.ENDPOINT, data=projected_payload, headers={
                         "Authorization": "Bearer " + owner.key, "Content-Type": "application/json",
                         "X-Title": "DEV-006 scoped compatibility experiment"})
                     # Quota pacing never resets journal counters and remains part

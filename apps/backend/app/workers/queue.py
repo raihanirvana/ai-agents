@@ -670,6 +670,50 @@ class JobQueue:
         return self.finish_cleanup(job_id, cleanup["generation"], recovery_token=token)
 
     # -- budget decisions ---------------------------------------------------------------------
+    def retry_readiness(self, s, job: Job, *, peers=None) -> dict:
+        """Read-only public readiness; the mutation checks this again under its writer lock."""
+        child = (max((peer for peer in peers if peer.parent_job_id == job.id),
+                     key=lambda peer: (peer.created_at, peer.id), default=None) if peers is not None else
+                 s.scalar(select(Job).where(Job.parent_job_id == job.id).order_by(Job.created_at.desc(), Job.id.desc())))
+        reason = None
+        if job.status != 'failed':
+            reason = 'Run belum berstatus gagal.'
+        elif self._cleanup(job):
+            reason = 'Pembersihan attempt belum selesai.'
+        elif child is not None:
+            reason = 'Run sudah mempunyai attempt lanjutan.'
+        elif self._claimable(s, job) != 'ok':
+            reason = 'Scope, phase, dependency atau batas perbaikan belum mengizinkan retry.'
+        elif self._budget_limit(s, job, self.budget_usage(s, job), calls=True):
+            reason = 'Budget habis; perlu otorisasi budget sebelum retry.'
+        ticket = s.get(Ticket, job.ticket_id) if job.ticket_id else None
+        obsolete = bool(ticket and (ticket.current_version != job.scope_version or
+            ticket.phase in ('accepted', 'cancelled', 'integrating')))
+        if ticket and job.stage in BIND_STAGES and ticket.phase != job.stage:
+            # A failed historical review must not appear actionable after its
+            # ticket has progressed to QA/UAT or returned to development.
+            # Development can also be retried from ready, before its first bind.
+            if not (job.stage == 'development' and ticket.phase == 'ready'):
+                reason = 'Tiket sudah berpindah dari tahap run ini.'
+                obsolete = True
+        if ticket:
+            payload = job.runtime_ref.get('payload', {})
+            if ticket.phase == 'integrating':
+                reason = 'Tiket sedang diintegrasikan.'
+            if payload.get('candidate_id') and payload['candidate_id'] != ticket.workflow.get('candidate_id'):
+                reason = 'Kandidat run sudah digantikan.'
+                obsolete = True
+            target_key = re.search(r'@target-([0-9a-f]{64})', job.idempotency_key)
+            if target_key and ticket.workflow.get('candidate_id'):
+                from app.persistence.models import Candidate
+                candidate = s.get(Candidate, ticket.workflow['candidate_id'])
+                if candidate is None or candidate.target_digest != target_key.group(1):
+                    reason = 'Target verifikasi run sudah digantikan.'
+                    obsolete = True
+        return {'can_retry': reason is None,
+                'needs_action': job.status == 'failed' and child is None and not obsolete and bool((job.result or {}).get('needs_human')),
+                'reason': reason, 'retry_job_id': child.id if child else None}
+
     def retry_failed(self, job_id: str, *, user: str, authorization_id: str) -> str:
         """One explicit local operator retry after fixing a permanent failure. No raised/reset caps.
 
@@ -688,8 +732,9 @@ class JobQueue:
                 if existing.runtime_ref.get('retry_authorization') != {'user': user, 'id': authorization_id}:
                     raise QueueError('retry authorization reused by a different user')
                 return existing.id
-            if s.scalar(select(Job.id).where(Job.parent_job_id == job.id)):
-                raise QueueError('job already has a retry; operate on the latest attempt')
+            readiness = self.retry_readiness(s, job)
+            if not readiness['can_retry']:
+                raise QueueError(readiness['reason'])
             ticket = s.get(Ticket, job.ticket_id) if job.ticket_id else None
             if ticket and (ticket.current_version != job.scope_version or ticket.phase in ('accepted','cancelled','integrating')):
                 raise QueueError('failed job belongs to an obsolete scope/phase')

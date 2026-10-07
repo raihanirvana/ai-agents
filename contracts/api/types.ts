@@ -30,6 +30,7 @@ export interface Run {
   attempt: number; usage: Usage; attempt_usage: Usage; limits: { [key: string]: number | string };
   result: { [key: string]: Json } | null; request_id: string | null; context_artifact_id: string | null;
   available_at: string | null;
+  recovery?: { can_retry: boolean; needs_action: boolean; reason: string | null; retry_job_id: string | null };
 }
 export interface InputRequest {
   id: string; thread_id: string; project_id: string; ticket_id: string | null; scope_version: number | null;
@@ -125,6 +126,7 @@ export interface Commands {
   message: { body: MessageCreate; response: { message: Message; job_id: string | null } };
   input: { body: InputAnswer; response: { answer_id: string; resumed: boolean } };
   nonblockingInput: { body: { scope_version: number | null; generation: number; answer: string }; response: { answer_id: string; resumed: boolean } };
+  retry: { body: Revision; response: { run: Run } };
   stop: { body: Empty; response: { run: Run; cleanup: "supervisor_pending" } };
   freezeRelease: { body: Revision; response: { job_id: string; accepted_tip: string; tickets: string[] } };
   approveRelease: { body: Body.ReleaseDecision; response: { release_id: string; status: string; revision: number } };

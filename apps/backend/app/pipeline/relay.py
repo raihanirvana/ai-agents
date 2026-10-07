@@ -16,6 +16,7 @@ class ProductAdmission:
         self.ctx, self.redactor = ctx, redactor
         self.pending, self.error = {}, None
         self.provider_failure = None
+        self.relay_failure = None
         self.lock = threading.RLock()
 
     def inspect(self, scope):
@@ -92,6 +93,9 @@ class ProductAdmission:
                         'cost_usd': amount(result.get('cost'))}
                     details = usage.get('prompt_tokens_details')
                     counters['cached_tokens'] = amount(details.get('cached_tokens')) if isinstance(details, dict) else None
+                    if result.get('status') == 'local_rejected':
+                        # Admission was reserved, but no request reached a provider.
+                        counters = dict.fromkeys((*UNKNOWN, 'cached_tokens'), 0)
                     if counters['input_tokens'] is not None and counters['output_tokens'] is not None:
                         counters['total_tokens'] = max(counters['total_tokens'] or 0, counters['input_tokens'] + counters['output_tokens'])
                     bound = bind_service(self.ctx.queue, s)
@@ -119,6 +123,10 @@ class ProductAdmission:
                 self.ctx.limiter.release(self.ctx.lane)
 
     def event(self, scope, generation, kind, payload):
+        if kind == 'relay.rejected':
+            self.relay_failure = dict(payload)
+        if kind in ('relay.rejected', 'context.size'):
+            self.ctx.log(kind + ' ' + str(payload))
         # Persist hashes/audit metadata, never tool content or provider secrets.
         self.ctx.log(self.redactor.redact(f'{kind}: {digest_of(payload)}'))
         if kind in ('tool.started', 'tool.completed'):

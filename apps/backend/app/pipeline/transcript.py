@@ -55,20 +55,20 @@ class TranscriptProjection:
                 if success and isinstance(path, str):
                     if name in WRITES:
                         latest_write[path] = idx
-                    if name == 'read_file':
+                    if name == 'read_file' and not result.get('unchanged_read'):
                         latest_read[(path, args.get('offset', 0))] = idx
                 if name == 'run_command':
                     latest_command[args.get('phase')] = idx
         compacted = 0
         active_reads, active_chars = set(), 0
         for idx, ri, call, name, args, message, result in reversed(exchanges):
-            if name != 'read_file' or result.get('error'):
+            if name != 'read_file' or result.get('error') or result.get('unchanged_read'):
                 continue
             path = args.get('path')
             if idx < latest_write.get(path, -1) or idx < latest_read.get((path, args.get('offset', 0)), idx):
                 continue
             size = len(message.get('content') or '')
-            if active_chars + size <= 16000:
+            if active_chars + size <= 64000:
                 active_reads.add(call.get('id'))
                 active_chars += size
         for idx, ri, call, name, args, message, result in exchanges:
@@ -112,11 +112,31 @@ class TranscriptProjection:
                         abbreviated[key] = '[Archived executed argument: sha256=' + digest(value) + ', chars=' + str(len(value)) + ']'
                 call['function']['arguments'] = json.dumps(abbreviated, ensure_ascii=False)
             compacted += 1
+        # Repeated read receipts are pure observations, with a freshly checked
+        # digest and no new source content. Drop old completed pairs, keeping
+        # recent/pending calls and every mutation/decision exchange intact.
+        redundant = {call['id'] for idx, ri, call, name, args, message, result in exchanges
+                     if name == 'read_file' and result.get('unchanged_read')
+                     and not result.get('error') and ri < len(projected) - 6}
+        filtered = []
+        for message in projected:
+            if message.get('role') == 'tool' and message.get('tool_call_id') in redundant:
+                continue
+            if message.get('role') == 'assistant' and message.get('tool_calls'):
+                kept = [call for call in message['tool_calls'] if call.get('id') not in redundant]
+                if not kept and not message.get('content'):
+                    continue
+                if kept:
+                    message['tool_calls'] = kept
+                else:
+                    message.pop('tool_calls', None)
+            filtered.append(message)
+        projected = filtered
         encoded = json.dumps(projected, ensure_ascii=False)
         if len(encoded) >= len(original):
             return body
         self.log('context.projection ' + json.dumps({'original_chars': len(original),
             'projected_chars': len(encoded), 'compacted_exchanges': compacted,
-            'active_read_chars': active_chars,
+            'active_read_chars': active_chars, 'redundant_read_exchanges_removed': len(redundant),
             'original_sha256': digest(original), 'projected_sha256': digest(encoded)}))
         return {**body, 'messages': projected}

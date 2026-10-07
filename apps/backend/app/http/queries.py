@@ -67,6 +67,10 @@ def run(j, s, peers=None, usage_by_key=None):
         usage = usage_by_key[key]
     else:
         usage = JobQueue.budget_usage(s, j)
+    from app.domain import Workflow
+    from app.persistence.transactions import TransactionDatabase
+    transaction = TransactionDatabase(s)
+    recovery = JobQueue(transaction, startable=Workflow(transaction, None).startable).retry_readiness(s, j, peers=peers)
     unknown = sorted({name for peer in peers if peer.limits.get("budget_key") == key
                       for name in peer.usage.get("_unknown", [])})
     if unknown: usage = {**usage, "_unknown": unknown}
@@ -75,7 +79,7 @@ def run(j, s, peers=None, usage_by_key=None):
             "runtime": j.runtime_ref.get("runtime"), "fake": bool(j.runtime_ref.get("fake")),
             "lane": j.lane, "stage": j.stage, "status": j.status, "attempt": j.attempt,
             "usage": usage, "attempt_usage": j.usage, "limits": j.limits, "result": j.result, "request_id": j.waiting_request_id,
-            "context_artifact_id": j.context_artifact_id, "available_at": j.available_at}
+            "context_artifact_id": j.context_artifact_id, "available_at": j.available_at, "recovery": recovery}
 
 
 def message(s, m, threads):

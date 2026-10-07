@@ -47,6 +47,7 @@ export interface RequestBodies {
   "POST /releases/{release_id}/sync": Revision;
   "POST /runs/{run_id}/budget-authorizations": Budget;
   "POST /runs/{run_id}/input": InputAnswer;
+  "POST /runs/{run_id}/retry": Revision;
   "POST /runs/{run_id}/stop": Empty;
   "POST /runtime/candidates/{candidate_id}/reviews": CandidateReview;
   "POST /runtime/tickets/{ticket_id}/candidates": CandidateSubmit;

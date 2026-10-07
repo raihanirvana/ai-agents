@@ -364,6 +364,15 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
                 raise Conflict(f"run is {status}; only an active run can be stopped")
             return {"run": q.run(j, s), "cleanup": "supervisor_pending"}
         return command(request, body, action)
+    @app.post("/runs/{run_id}/retry")
+    def retry(request: Request, run_id: str, body: b.Revision):
+        def action(s, svc, key, principal):
+            job = q.row(s, Job, run_id)
+            actor = user_actor(principal, job.project_id)
+            revision(job, body.expected_revision)
+            next_id = svc.queue.retry_failed(job.id, user=actor.id, authorization_id=key)
+            return {"run": q.run(q.row(s, Job, next_id), s)}
+        return command(request, body, action)
     @app.post("/runs/{run_id}/budget-authorizations")
     def budget(request: Request, run_id: str, body: b.Budget):
         def action(s, svc, key, p):

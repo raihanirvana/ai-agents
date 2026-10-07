@@ -154,3 +154,21 @@ Konfigurasi: `WORKER_RUNTIME` (`none`/`fake`), `WORKER_LEASE_S` (default 30; hea
   menguji SIGKILL worker, workspace/credential/log/ownership, serta crash sebelum registrasi PGID.
 - CLI DB baru: migrasi/check 0003 sehat; runtime none tidak claim, fake menyelesaikan job dan cleanup;
   kedua mode berhenti dengan SIGTERM exit 0. Provider nyata tidak dipanggil.
+
+
+## Pemulihan run gagal lewat web — 7 Oktober 2026
+
+Public run projection menyertakan recovery.can_retry/needs_action/reason/
+retry_job_id. Readiness berasal dari aturan queue/domain dan dihitung ulang di
+transaksi mutasi. Histori yang sudah punya child retry tidak lagi ditampilkan
+sebagai run yang menunggu tindakan. Budget, scope, dependency, stage, target/
+candidate terkini, cleanup dan repair limit tetap membatasi eligibility.
+
+POST /runs/{run_id}/retry memakai session user, Origin/CSRF policy, revision dan
+Idempotency-Key. Runtime tidak dapat mengotorisasi retry pengguna. Mutasi
+memanggil JobQueue.retry_failed yang menyimpan authorization user/key, menciptakan
+satu child job, memulihkan checkpoint dan tetap mengakumulasi usage. Key yang
+sama mereplay receipt; request berbeda untuk parent yang sudah punya child
+ditolak. Retry tidak memperbesar budget atau menghapus approval/generation lama.
+Web menampilkan Perlu tindakan dan alasan, serta Coba lagi untuk run eligible;
+worker tetap berjalan terpisah dari sesi browser pengguna.
