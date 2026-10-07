@@ -152,11 +152,31 @@ class Step(Contract):
         return self
 
 
+class UiFixture(Contract):
+    id: str = Field(pattern=ID)
+    steps: list[Step] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode='after')
+    def setup_only(self):
+        allowed = {'navigate', 'fill', 'click', 'select_option', 'press', 'check', 'uncheck'}
+        if any(step.action not in allowed for step in self.steps):
+            raise ValueError('UI fixtures contain setup actions only; assertions belong to the mandatory test')
+        return self
+
+
 class BrowserTest(Contract):
     id: str = Field(pattern=ID)
     uac: list[str] = Field(max_length=20)
     purpose: Literal["feature", "bug", "regression", "smoke"] = "regression"
     steps: list[Step] = Field(min_length=1, max_length=30)
+    fixture_ids: list[str] = Field(default_factory=list, max_length=8)
+
+    @model_serializer(mode='wrap')
+    def preserve_legacy_digest(self, handler):
+        document = handler(self)
+        if not document.get('fixture_ids'):
+            document.pop('fixture_ids', None)
+        return document
 
     @model_validator(mode="after")
     def assertions(self):
@@ -164,6 +184,8 @@ class BrowserTest(Contract):
             raise ValueError("every mandatory browser test needs an assertion")
         if len(set(self.uac)) != len(self.uac):
             raise ValueError("duplicate UAC")
+        if len(set(self.fixture_ids)) != len(self.fixture_ids):
+            raise ValueError('duplicate fixture reference')
         downloaded = False
         for step in self.steps:
             if step.action == 'download':
@@ -177,14 +199,43 @@ class QaPlan(Contract):
     kind: Literal["qa_plan"]
     summary: str = Field(min_length=1, max_length=1000)
     tests: list[BrowserTest] = Field(min_length=1, max_length=24)
+    fixtures: list[UiFixture] = Field(default_factory=list, max_length=12)
+
+    @model_serializer(mode='wrap')
+    def preserve_legacy_digest(self, handler):
+        document = handler(self)
+        if not document.get('fixtures'):
+            document.pop('fixtures', None)
+        return document
 
     @model_validator(mode="after")
     def unique(self):
         if len({t.id for t in self.tests}) != len(self.tests):
             raise ValueError("duplicate test ID")
+        fixtures = {fixture.id: fixture for fixture in self.fixtures}
+        if len(fixtures) != len(self.fixtures):
+            raise ValueError('duplicate fixture ID')
+        references = {key for test in self.tests for key in test.fixture_ids}
+        if references != set(fixtures):
+            raise ValueError('fixture references must exist and every fixture must be used')
+        if any(len(test.steps) + sum(len(fixtures[key].steps) for key in test.fixture_ids) > 30
+               for test in self.tests):
+            raise ValueError('expanded fixture and test exceed 30 steps')
         if len(self.model_dump_json().encode()) > 512 * 1024:
             raise ValueError('acceptance suite exceeds 512 KiB')
         return self
+
+    def materialize_fixtures(self):
+        """Expand supervisor-owned setup for each isolated test; the runner gets one canonical suite."""
+        if not self.fixtures:
+            return self
+        fixtures = {fixture.id: fixture for fixture in self.fixtures}
+        document = self.model_dump()
+        document.pop('fixtures')
+        for test, row in zip(self.tests, document['tests']):
+            row['steps'] = [step.model_dump() for key in test.fixture_ids for step in fixtures[key].steps] + row['steps']
+            row.pop('fixture_ids', None)
+        return QaPlan.model_validate(document)
 
     def check_criteria(self, criteria):
         known = {c["id"] for c in criteria}
@@ -240,13 +291,20 @@ class QaPlan(Contract):
                     raise ValueError(f'test {test.id}, step {index}: jQuery :contains() is unsupported. '
                                      'Use a scoped CSS selector with assert_contains_text and the original expected text.')
 
+    def check_selection_contracts(self):
+        for test in self.tests:
+            for index, step in enumerate(test.steps):
+                if step.action == 'select_option' and step.select_by is None:
+                    raise ValueError(f'test {test.id}, step {index}: select_option requires explicit select_by. '
+                        'Use label for fixture-created records; generated IDs must never be guessed.')
+
     @property
     def digest(self):
         return digest_of(self.model_dump())
 
 
 def browser_capabilities():
-    return {'revision': 3, 'actions': Step.model_json_schema()['properties']['action']['enum'],
+    return {'revision': 4, 'actions': Step.model_json_schema()['properties']['action']['enum'],
             'rules': ['fill is for text/date/number inputs, textarea or contenteditable, never select/checkbox',
                       'select_option matches explicit option value or label; check/uncheck operate on checkbox/radio',
                       'download captures one click-triggered download; assert_download checks exact filename/text/CSV rows',
@@ -256,6 +314,8 @@ def browser_capabilities():
                       'navigate/assert_url accept same-origin paths only; each test has isolated storage',
                       'Each test creates its own prerequisite records; reopen detail panels after reload when selection is transient',
                       'jQuery :contains() is unsupported; use a scoped selector and assert_contains_text',
+                      'Declare reusable UI fixtures and reference fixture_ids; supervisor expands setup into every isolated test',
+                      'select_option requires explicit select_by in new plans; use label for generated record IDs',
                       'No arbitrary JavaScript, shell, external auth/API, iframe/popup, drag/drop or backend DB access',
                       'Unsupported requirements need a runner capability decision; do not invent or weaken assertions'],
             'download_max_bytes': 1024 * 1024, 'suite_max_bytes': 512 * 1024}
@@ -274,6 +334,17 @@ class DiagnosisFinding(Contract):
     expected: str = Field(min_length=1, max_length=800)
     observed: str = Field(min_length=1, max_length=800)
     reason: str = Field(min_length=1, max_length=1000)
+    criterion_id: str | None = Field(default=None, pattern=ID)
+    source_path: str | None = Field(default=None, min_length=1, max_length=300)
+    source_excerpt: str | None = Field(default=None, min_length=1, max_length=400)
+
+    @model_serializer(mode='wrap')
+    def preserve_legacy_diagnosis(self, handler):
+        document = handler(self)
+        for field in ('criterion_id', 'source_path', 'source_excerpt'):
+            if document.get(field) is None:
+                document.pop(field, None)
+        return document
 
 
 class QaDiagnosis(Contract):
@@ -302,6 +373,24 @@ class SetupSelection(Contract):
     def ordered_indexes(self):
         if any(i < 0 or i > 29 for i in self.step_indexes) or self.step_indexes != sorted(set(self.step_indexes)):
             raise ValueError('setup indexes must be unique, ascending, nonnegative indexes')
+        return self
+
+
+class OptionBinding(Contract):
+    test_id: str = Field(pattern=ID)
+    step_index: StrictInt = Field(ge=0, le=29)
+    label_input_step: StrictInt = Field(ge=0, le=29)
+
+
+class QaOptionRepair(Contract):
+    kind: Literal['qa_option_repair']
+    summary: str = Field(min_length=1, max_length=1000)
+    bindings: list[OptionBinding] = Field(min_length=1, max_length=24)
+
+    @model_validator(mode='after')
+    def unique_bindings(self):
+        if len({(b.test_id, b.step_index) for b in self.bindings}) != len(self.bindings):
+            raise ValueError('duplicate option binding')
         return self
 
 

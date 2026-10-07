@@ -95,6 +95,20 @@ def control_contract(loc, step):
         raise BrowserContractError('select_option requires a native select; custom menus use click', diagnosis)
     if action == 'select_option' and isinstance(step.get('value'), list) and len(step['value']) > 1 and not facts['multiple']:
         raise BrowserContractError('multiple selected options require select[multiple]', diagnosis)
+    if action == 'select_option' and (step.get('select_by') or 'value') == 'value':
+        options = loc.locator('option')
+        if options.count() <= 200 and loc.is_visible() and loc.is_enabled():
+            observed = options.evaluate_all('(els) => els.map(el => ({value: el.value, '
+                'label: el.label, enabled: !el.disabled && !(el.parentElement.tagName === "OPTGROUP" '
+                '&& el.parentElement.disabled)}))')
+            requested = step['value'] if isinstance(step['value'], list) else [step['value']]
+            if any(not any(row['enabled'] and row['value'] == value for row in observed) for value in requested):
+                bounded = [row for row in observed if len(row['value']) <= 1000 and len(row['label']) <= 1000]
+                complete = len(bounded) == len(observed) and len(json.dumps(bounded).encode()) <= 64 * 1024
+                diagnosis.update(contract='unavailable_option_value', select_by='value',
+                    requested=step['value'], options=bounded if complete else [], options_complete=complete)
+                raise BrowserContractError('Requested option value is absent. Compare original fixture inputs '
+                    'with the observed option labels; never guess generated record IDs.', diagnosis)
     if action in ('check', 'uncheck', 'assert_checked', 'assert_unchecked') and not (
             (tag == 'input' and kind in ('checkbox', 'radio')) or role in ('checkbox', 'radio')):
         raise BrowserContractError('checked-state operations require a checkbox or radio', diagnosis)

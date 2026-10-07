@@ -89,3 +89,15 @@ browser 3/3 setelah koreksi, dan suite #2 dengan pembukaan detail setelah reload
 lulus 2/2 pada kandidat yang memakai accepted base terbaru. Keduanya menjalankan
 baseline yang gagal pada kontrol fitur yang belum tersedia. Hasil tersebut
 membuktikan kedua alur konkret, bukan seluruh kemungkinan error/recovery.
+
+
+## Bukti sebelum mengirim ke Developer
+
+Application diagnosis harus menyertakan UAC otomatis yang disetujui, failed
+step, source_path dan kutipan source shipped yang diverifikasi supervisor.
+Kesalahan kontrak selector/action/fixture yang belum terselesaikan tetap di QA.
+Fixture bernama diekspansi secara independen per tes; binding dropdown untuk
+record dengan ID dinamis memakai label input asli. Koreksi tetap membuat target
+baru dan memerlukan eksekusi penuh; hasil actual tidak boleh menjadi expected.
+Opsi statis yang disebut eksplisit dan dideklarasikan dalam kutipan source
+boleh didiagnosis sebagai bug aplikasi bila tidak tersedia di DOM.

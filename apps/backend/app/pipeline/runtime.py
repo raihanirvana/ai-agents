@@ -12,7 +12,7 @@ from app.domain import Actor, Attempt
 from app.persistence.models import Candidate, Job, Ticket, TicketVersion, Artifact, Verification, Approval
 from app.workers.runtime import Outcome
 from app.persistence.transactions import bind_service
-from .contracts import QaPlan, QaDiagnosis, QaSetupRepair, Review, tool_schema, browser_capabilities
+from .contracts import QaPlan, QaDiagnosis, QaSetupRepair, QaOptionRepair, Review, tool_schema, browser_capabilities
 from .qa_policy import policy_context, preflight
 from .relay import reconcile_accounting
 from .workspace import FencedWorkspace, unpack_tree, cleanup_workspace
@@ -130,18 +130,24 @@ class PipelineRuntime:
         def propose(ctx_, current, args):
             if set(args) != {'plan'}:
                 raise ValueError('propose_tests requires only plan')
-            suite = QaPlan.model_validate(args['plan'])
+            authored = QaPlan.model_validate(args['plan'])
+            suite = authored.materialize_fixtures()
             suite.check_csv_expectations()
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, current)
                 version = s.query(TicketVersion).filter_by(ticket_id=current['ticket_id'], version=current['scope_version']).one()
                 readiness = preflight(suite, version.uac, current['scope_version'], new_plan=True)
                 receipt = self.store.put_json(s, project_id=current['project_id'], kind='report', name='qa-preflight.json',
-                    document=readiness, meta={'producer': 'qa-preflight', 'fake': self.fake})
+                    document={**readiness, 'authored_suite_digest': authored.digest,
+                              'fixtures': {fixture.id: len(fixture.steps) for fixture in authored.fixtures}},
+                    meta={'producer': 'qa-preflight', 'fake': self.fake})
+                authored_row = self.store.put_json(s, project_id=current['project_id'], kind='report',
+                    name='qa-authored-plan.json', document=authored.model_dump(),
+                    meta={'producer': 'qa-plan-authored', 'fake': self.fake})
                 artifact = self.store.put_json(s, project_id=current['project_id'], kind='report', name='qa-suite.json',
                     document=suite.model_dump(), meta={'producer': 'qa-plan', 'fake': self.fake})
                 self.workspace._post(s, current, 'qa-plan:' + current['root_job_id'], suite.summary,
-                    [snapshot.artifact_id, receipt.id, artifact.id], 'qa_plan', suite_digest=suite.digest,
+                    [snapshot.artifact_id, receipt.id, authored_row.id, artifact.id], 'qa_plan', suite_digest=suite.digest,
                     verification_plan=readiness, preflight_artifact_id=receipt.id)
                 job = s.get(Job, current['job_id'])
                 job.runtime_ref = {**job.runtime_ref, 'pipeline_qa_plan': artifact.id}
@@ -407,10 +413,10 @@ class PipelineRuntime:
                 'New technical review, QA and UAT are required.', runner_changed=True)
         if not self.gates_eligible(identity, candidate, gates):
             return self._reject(ctx, identity, candidate, 'Required gates/waiver no longer eligible')
-        if self.workspace.harness.identity() != target['runner']:
-            return Outcome('failed', {'failure_kind': 'infrastructure', 'runner_changed': True},
-                error='Browser runner identity differs from the pinned target. A new target and fresh QA '
-                      'are required; the existing target cannot be silently revalidated with another runner.')
+        runner = self.workspace.harness.identity()
+        if runner != target['runner']:
+            return self._repair_qa_target(ctx, identity, candidate, target, suite, None, [],
+                repair_kind='runner_contract_upgrade', new_runner=runner)
         directory = allocate_directory(ctx, self.workspace.root / '.verification', 'verification',
                                        store=self.store, redactor=self.redactor, finalizers=finalizers)
         site = directory / 'site'
@@ -541,10 +547,13 @@ class PipelineRuntime:
                 persisted_output = QaDiagnosis.model_validate(json.loads(self.store.read_bytes(s, diagnosis_row.id)))
         manifest, base = self.workspace.configuration(identity)
         from app.workspace.manifest import parse_manifest
-        if (base != candidate.base_sha or manifest.digest != parse_manifest(target['execution_manifest']).digest
-                or self.workspace.harness.identity() != target['runner']):
+        if base != candidate.base_sha or manifest.digest != parse_manifest(target['execution_manifest']).digest:
             return Outcome('failed', {'failure_kind': 'infrastructure', 'verification_id': verification_id},
                            error='Runner/base changed after failed QA; rebuild/revalidate before diagnosis.')
+        runner = self.workspace.harness.identity()
+        if runner != target['runner']:
+            return self._repair_qa_target(ctx, identity, candidate, target, suite, verification_id, attachments,
+                repair_kind='runner_contract_upgrade', new_runner=runner)
         failed = [t for t in proof['report']['tests'] if t['status'] == 'failed']
         if not failed:
             raise ValueError('failed verification contains no failed test')
@@ -553,8 +562,9 @@ class PipelineRuntime:
         broker = FencedWorkspace(self.workspace.root, ctx).broker(candidate.project_id)
         paths = broker._bare('ls-tree', '-r', '--name-only', candidate.commit_sha).decode().splitlines()
         source, remaining, unavailable = {}, 16000, []
-        eligible = [p for p in paths if p.endswith(('.html', '.js', '.jsx', '.ts', '.tsx'))
-                    and not p.startswith(('test/', 'tests/', 'node_modules/', 'home/'))]
+        eligible = [p for p in paths if p.endswith(('.html', '.css', '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'))
+                    and not set(Path(p).parts).intersection(('test', 'tests', '__tests__', 'node_modules', 'home'))
+                    and not Path(p).stem.endswith(('.test', '.spec'))]
         from app.workspace.errors import WorkspaceError
         for path in eligible[:12]:
             try:
@@ -574,7 +584,9 @@ class PipelineRuntime:
             'source_unavailable': unavailable,
             'instructions': 'Diagnose every failed test against approved criteria, original input, runner evidence and source. '
                 'Return QaDiagnosis. Application fault requires concrete evidence that the assertion is valid and shipped '
-                'behaviour violates a criterion. Test fault means wrong selector/action/expected value; never ask for a valid '
+                'behaviour violates a criterion. Each application finding MUST include criterion_id, source_path and '
+                'source_excerpt copied exactly from supplied shipped source (12..400 characters), explaining the causal bug. '
+                'An unresolved selector/action contract or guessed generated record ID cannot authorize application repair. Test fault means wrong selector/action/expected value; never ask for a valid '
                 'control or CSV escaping to be broken to fit a test. Mixed or insufficient evidence is unknown. '
                 'You cannot pass QA, drop tests, change approved UAC or waive a gate. Include every failed test exactly once.'
         }
@@ -608,13 +620,22 @@ class PipelineRuntime:
                     attachments, 'qa_diagnosis', candidate_id=candidate.id, verification_id=verification_id,
                     fault=output.fault, findings=output.model_dump()['findings'])
         if output.fault == 'application':
+            from .qa_repair import application_repair_issues
+            issues = application_repair_issues(suite, proof, output, criteria, source)
+            if issues:
+                ctx.log('Application attribution withheld: ' + '; '.join(issues))
+                return Outcome('failed', {'verification_id': verification_id, 'evidence_artifact_ids': attachments,
+                    'qa_status': 'failed', 'failure_kind': 'test_contract', 'diagnosis_fault': 'unknown',
+                    'diagnosis_artifact_id': diagnosis.id, 'application_repair_issues': issues},
+                    error='QA application diagnosis lacks qualified evidence: ' + '; '.join(issues))
             detail = '\n'.join(f"{f.test_id}: expected {f.expected}; observed {f.observed}. {f.reason}" for f in output.findings)
             return self._reject(ctx, identity, candidate, 'QA diagnosed an application defect: ' + output.summary + '\n' + detail,
                 verification_id=verification_id, evidence_artifact_ids=attachments, qa_status='failed',
                 failure_kind='application', diagnosis_artifact_id=diagnosis.id)
         if output.fault == 'test':
             from .qa_repair import (repair_csv_inputs, repair_unsupported_text_selectors,
-                                    passed_setup_prefixes, repair_test_setup, MAX_SUITE_REPAIRS)
+                                    passed_setup_prefixes, repair_test_setup, MAX_SUITE_REPAIRS,
+                                    option_binding_candidates, repair_option_bindings)
             count = target.get('suite_repair_count', 0)
             if type(count) is int and 0 <= count < MAX_SUITE_REPAIRS:
                 for repair_kind, repair in (('csv_input_encoding', repair_csv_inputs),
@@ -623,6 +644,35 @@ class PipelineRuntime:
                     if repaired is not None:
                         return self._repair_qa_target(ctx, identity, candidate, target, repaired,
                                                      verification_id, attachments, repair_kind=repair_kind)
+                bindings = option_binding_candidates(suite, proof)
+                if bindings and set(bindings) == {test['id'] for test in failed}:
+                    ctx.log('QA dropdown repair: binding original fixture names to observed option labels.')
+                    proposal, binding_meta, _ = self.structured._ask(ctx, identity, {
+                        'name': 'qa_option_repair', 'candidate_id': candidate.id,
+                        'verification_id': verification_id, 'approved_criteria': criteria,
+                        'suite': suite.model_dump(), 'failed_tests': failed, 'source': source,
+                        'option_binding_candidates': bindings,
+                        'instructions': 'Return QaOptionRepair with bindings of test_id, step_index, label_input_step. '
+                            'Correct the failed select and subsequent guessed values of the SAME select using the '
+                            'corresponding original earlier fill input index. Supplied candidates prove these exact '
+                            'fixture names are unique enabled labels in the DOM. Do not guess generated IDs or provide '
+                            'new labels/expected values. Preserve all tests, UAC, actions, inputs and assertions. '
+                            'Cover every failed selection; bind later selections consistently in the same proposal.'
+                    }, QaOptionRepair, context_limits=replace(self.structured.builder.limits, total_tokens=32768))
+                    repaired = repair_option_bindings(suite, proof, proposal)
+                    if repaired is not None:
+                        with self.db.write() as s:
+                            ctx.queue.verify_identity(s, identity)
+                            binding_row = self.store.put_json(s, project_id=identity['project_id'], kind='report',
+                                name='qa-option-repair.json', document=self.redactor.redact_value(proposal.model_dump()),
+                                meta={'producer': 'qa-option-repair', 'verification_id': verification_id,
+                                      'target_digest': candidate.target_digest, 'fake': self.fake})
+                        return self._repair_qa_target(ctx, identity, candidate, target, repaired,
+                            verification_id, [*attachments, binding_meta['context_artifact_id'], binding_row.id],
+                            repair_kind='fixture_option_binding')
+                    return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id,
+                        'evidence_artifact_ids': attachments, 'diagnosis_artifact_id': diagnosis.id},
+                        error='QA dropdown binding proposal is not supported by original inputs and DOM evidence.')
                 prefixes = passed_setup_prefixes(suite, proof)
                 if prefixes:
                     ctx.log('QA test fault: selecting setup from passed tests; original assertions remain fixed.')
@@ -659,8 +709,12 @@ class PipelineRuntime:
                   'application repair was not requested.')
 
     def _repair_qa_target(self, ctx, identity, candidate, target, repaired, verification_id, attachments,
-                          repair_kind='dom_contract'):
-        """New suite/target on the same reviewed bytes; old QA proof stays immutable."""
+                          repair_kind='dom_contract', new_runner=None):
+        """Repin an unaccepted target to corrected QA contracts; old proof stays immutable."""
+        suite_changed = repaired.digest != target['runner_manifest_digest']
+        if new_runner is not None and (repair_kind != 'runner_contract_upgrade' or suite_changed
+                or new_runner != self.workspace.harness.identity()):
+            raise ValueError('runner refresh must preserve the suite and pin the trusted current runner')
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
             t = s.get(Ticket, identity['ticket_id'])
@@ -682,11 +736,12 @@ class PipelineRuntime:
             previous = s.get(Artifact, candidate.target_artifact_id)
             new_target = self.store.put_json(s, project_id=t.project_id, kind='target_manifest', name='target.json',
                 document={**target, 'suite_artifact_id': suite_row.id, 'runner_manifest_digest': repaired.digest,
-                    'suite_repair_count': target.get('suite_repair_count', 0) + 1,
+                    'runner': new_runner if new_runner is not None else target['runner'],
+                    'suite_repair_count': target.get('suite_repair_count', 0) + int(suite_changed),
                     'previous_target_artifact_id': previous.id, 'repair_verification_id': verification_id},
                 meta={**previous.meta, 'qa_repair_job_id': identity['job_id']})
-            # Reviewed source, build, config and runner are identical. Only the
-            # suite pin changes; every baseline/candidate assertion runs again.
+            # Reviewed source/build/config stay pinned. A changed suite or trusted
+            # runner gets a new target and full baseline/candidate execution.
             workflow.attach_target(Actor('service:builder', 'builder', t.project_id), t.id, t.revision,
                 candidate.id, build_artifact_id=current.build_artifact_id,
                 target_artifact_id=new_target.id, target_digest=new_target.checksum)
@@ -696,7 +751,8 @@ class PipelineRuntime:
                 candidate_id=candidate.id, suite_digest=repaired.digest,
                 previous_target_artifact_id=previous.id, target_artifact_id=new_target.id,
                 verification_plan=readiness, repair_kind=repair_kind)
-            result = {'qa_status': 'suite_repaired', 'failure_kind': 'test_contract',
+            result = {'qa_status': 'suite_repaired' if suite_changed else 'target_refreshed',
+                'failure_kind': 'test_contract' if suite_changed else 'infrastructure',
                 'repair_kind': repair_kind,
                 'verification_id': verification_id, 'target_artifact_id': new_target.id,
                 'evidence_artifact_ids': [*attachments, suite_row.id, new_target.id]}

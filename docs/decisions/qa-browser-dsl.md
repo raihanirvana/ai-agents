@@ -29,7 +29,7 @@ dan seluruh UAC otomatis tetap wajib tercakup.
 | Download | `download` | selector yang diklik untuk memicu satu download |
 | Verifikasi download | `assert_download` | download object; tanpa selector/value |
 
-`select_by` default value. List selection maksimal 20 string unik dan cocok
+`select_by` wajib eksplisit pada plan baru; default value hanya untuk kompatibilitas suite lama. List selection maksimal 20 string unik dan cocok
 untuk multiple select. Custom dropdown memakai click pada trigger dan opsi;
 select_option tidak dipaksakan pada elemen selain select. Fill tidak menekan
 Enter dan tidak boleh dipakai pada select, checkbox/radio atau file input.
@@ -108,7 +108,7 @@ Koreksi otomatis dibatasi pada kasus berikut:
    kekeliruan lain tetap gagal pada eksekusi berikutnya atau memerlukan diagnosis.
 
 Semua kegagalan harus memenuhi syarat untuk koreksi. Mixed/unknown failure,
-missing option, ambiguous option, salah control lain, atau batas dua koreksi
+missing option tanpa binding fixture yang terbukti, ambiguous option, salah control lain, atau batas dua koreksi
 per rantai target tetap failed dan memerlukan diagnosis QA. Tidak ada waiver,
 assertion dihapus, expected disalin dari actual, aplikasi ditulis ulang, atau pass
 yang diperoleh dari diagnosis. Verification lama tetap immutable. Suite/target
@@ -126,8 +126,9 @@ tidak membuka UAT dan tidak merelabel kriteria menjadi manual.
 Field opsional baru dihilangkan saat kosong agar serialization/digest suite
 lama tidak berubah. Runner code digest tetap berubah dengan implementation
 baru. Target lama tidak boleh dieksekusi dengan runner baru tanpa target/QA
-baru. Runner identity mismatch tetap failure infrastruktur yang eksplisit,
-bukan application repair. Restart tidak menghapus blocker repair yang sudah
+baru. Runner identity mismatch memerlukan target baru dan eksekusi baru. Target
+review_approved yang masih di QA dapat di-refresh oleh supervisor; mismatch
+lain tetap failure infrastruktur yang eksplisit. Restart tidak menghapus blocker repair yang sudah
 ada atau mengubah kandidat/approval lama.
 
 Belum didukung: arbitrary scripts/regex/code, iframe/popup, drag/drop, clipboard,
@@ -143,4 +144,47 @@ API Playwright dipetakan ke dokumentasi resmi [actions](https://playwright.dev/p
 [downloads](https://playwright.dev/python/docs/downloads) dan
 [assertions](https://playwright.dev/python/docs/test-assertions).
 Verifikasi implementasi: AST/import/schema Python dan TypeScript statis;
-tes regresi/browser/provider tidak ditambah/dijalankan karena belum diminta.
+tes regresi tidak ditambah/dijalankan. Browser demo yang sudah diizinkan
+dijalankan kembali setelah perbaikan; lihat bukti terbaru di backlog.
+
+
+## Fixture UI dan binding relasi
+
+Plan dapat memuat `fixtures: [{id, steps}]`; setiap BrowserTest menyebut
+`fixture_ids`. Supervisor menambahkan setup ke awal setiap tes pada context
+terisolasi sebelum hashing/pinning. Fixture hanya berisi navigate/fill/click/
+select_option/press/check/uncheck; assertion tetap wajib pada tes. Referensi
+harus valid, unik, dan semua fixture dipakai; total hasil ekspansi maksimal 30
+steps per tes. Plan authored dan canonical suite disimpan sebagai artefak
+terpisah; canonical suite tetap attachment terakhir pesan qa_plan.
+
+Record buatan fixture dipilih dengan `select_by: label` dan nama unik yang
+benar-benar diinput. Nilai ID acak tidak boleh ditebak dari nomor urut. Runner
+merekam paling banyak 200 opsi dari satu select visible/enabled ketika value
+permintaan tidak ditemukan. Setelah diagnosis test fault, model hanya memilih
+indeks input asal dan langkah select; supervisor menerima binding jika label
+input asli cocok dengan tepat satu opsi enabled yang diamati. Semua assertion,
+UAC dan input tetap, lalu baseline/kandidat dijalankan ulang pada target baru.
+Opsi hilang/ambigu tanpa bukti input tidak diperbaiki otomatis dan belum
+membuktikan apakah aplikasi atau tes yang salah.
+
+Diagnosis application wajib memetakan setiap failed test ke UAC otomatis yang
+disetujui dan kutipan source kandidat yang cocok persis (12..400 karakter).
+Guard menahan attribution tanpa bukti, selector/action contract yang belum
+terselesaikan, mode select yang tidak jelas, atau expected CSV yang bertentangan
+dengan input. Tidak ada repair cycle aplikasi yang dikonsumsi dari kasus ini.
+Kutipan source adalah syarat bukti minimum, bukan pembuktian formal semantik;
+diagnosis ambiguous tetap di QA dan tidak memperoleh pass.
+
+Perubahan identitas trusted browser runner dapat me-refresh target yang belum
+diterima dan masih review_approved di QA. Source/build/config/base dan suite
+harus tetap dipin; target lama immutable, target baru memakai runner baru,
+seluruh baseline/kandidat wajib dijalankan ulang. Refresh runner tidak memakai
+jatah koreksi suite dan tidak memindahkan approval UAT/release lama.
+
+
+Value statis yang disebut eksplisit oleh suite dan dideklarasikan dalam kutipan
+source dapat menghasilkan application diagnosis saat opsi nyata hilang. Guard
+mengharuskan literal value pada kutipan source untuk membedakan kasus tersebut
+dari ID record yang ditebak. Mode selection, UAC dan bukti source tetap wajib;
+hasil model bukan jaminan semantik, dan kontrak yang ambigu tetap di QA.

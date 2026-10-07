@@ -216,6 +216,13 @@ di QA; koreksi CSV dari input asli, selector text legacy yang terbukti invalid,
 dan setup dari prefix tes lulus tetap memerlukan target dan eksekusi baru.
 Model setup hanya memilih indeks tindakan existing, tanpa mengubah assertion;
 supervisor memvalidasi sumber fixture, penempatan, coverage, lease dan target.
+Fixture UI bernama diekspansi supervisor ke setiap context terisolasi sebelum
+suite canonical dipin. Select mode wajib eksplisit; relasi record dinamis memakai
+label input asli. Binding yang dikoreksi harus didukung opsi nyata dari runner,
+bukan ID dugaan. Diagnosis application memerlukan UAC dan kutipan source shipped
+yang cocok persis; kontrak ambigu tanpa bukti tidak mengirim repair ke developer.
+Runner upgrade hanya mem-refresh target review_approved yang masih di QA dengan
+source/build/config/base tetap; bukti lama immutable dan QA penuh wajib diulang.
 Checklist manual tetap dikonfirmasi pengguna saat UAT, tanpa auto-pass/model
 approval atau downgrade automated UAC. Lihat docs/decisions/qa-policy.md.
 

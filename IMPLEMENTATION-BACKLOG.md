@@ -1601,6 +1601,52 @@ uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
 
+### Kontrak fixture dan triage QA — 2026-10-07
+
+Status perbaikan: DONE (implementasi dan recovery demo). Review: NOT_REVIEWED.
+Scope: fixture UI bernama diekspansi supervisor sebelum suite canonical dipin;
+planning wajib memilih mode select secara eksplisit; runner mencatat opsi
+native dropdown secara bounded. Repair binding mengambil label dari input
+fixture asli yang cocok tepat satu enabled option, bukan ID dugaan. Model hanya
+memilih indeks. Assertion, UAC, source, build dan approval tidak dilonggarkan.
+Diagnosis application wajib memetakan UAC otomatis dan kutipan source shipped
+nyata serta melewati guard selector/action/CSV sebelum meminta repair developer.
+Static option yang dinyatakan eksplisit dan dikutip dalam source boleh tetap
+menghasilkan application diagnosis bila hilang di DOM; attribution ambiguous
+tetap QA. Runner upgrade pada target review_approved di QA membuat target baru,
+tanpa mengonsumsi jatah koreksi suite atau memindahkan approval lama.
+
+File: `app/pipeline/{contracts,qa_policy,qa_repair,runtime}.py`,
+`contracts/verification/acceptance.py`, soul/instruksi QA, arsitektur dan docs
+`qa-policy.md`/`qa-browser-dsl.md`.
+Verifikasi aktual: AST semua modul pipeline/runner, import PipelineRuntime/
+QaPlan/QaOptionRepair melalui `.venv/bin/python`, `git diff --check`, dan
+konsistensi serialization/digest suite persisten — semuanya OK. Tes regresi
+unit tidak ditambah/dijalankan karena tidak diminta. Named fixture planning dan
+seluruh cabang guard baru belum memiliki bukti regresi otomatis; recovery
+dropdown/repin runner diuji melalui demo nyata yang sebelumnya diizinkan.
+
+Bukti Mini CRM #4: retry diagnosis `74f795f5966e4e38b9c5f05e131e7601`
+menghasilkan target runner baru; verification failed dengan DOM options nyata
+`92d08c83b0354b07a8b32fbdfc8be1a3`; diagnosis/repair binding
+`dd9fefafe2344293bb973cfdf2c4bfac` mengubah select value 1/2 menjadi
+label Customer 1/Customer 2 yang berasal dari input asli. Model diagnosis+
+binding memakai 2 calls, 30.818 token, active_s 6,27, cost_usd 0,008292
+sesuai usage provider. Target baru `128289d0a4f442239704cbeb4929a1f4`,
+verification `540abaa8535f426a83cdbc49224cc6b2`: kandidat 2/2 passed,
+baseline 2/2 failed karena fitur dashboard/export belum ada. Full verification
+active_s 35,78. Tiket masuk UAT; repair_cycles tetap 1, source commit tetap
+`73d6b233858abd0709cce5e7e75f5f41e96dd829`; accepted #1/#2/#3 tidak disentuh.
+Hasil konkret ini tidak membuktikan seluruh kemungkinan suite/runner bebas
+error. Kasus tanpa binding unik/bukti memadai tetap QA failed, bukan auto-pass.
+
+Handoff: periksa `git diff` untuk mapping fixture→canonical pin, preflight
+selection, opsi DOM→binding terbatas, guard application→request_changes dan
+runner refresh→target baru. Jalankan worker pipeline; bila ingin regresi unit,
+file acuan existing `tests/pipeline/test_contracts.py`, `test_harness.py` dan
+`test_product_regressions.py`. Tidak ada
+independent review yang diklaim.
+
 ### Pemulihan suite QA Mini CRM — 2026-10-07
 
 Status perbaikan: DONE (implementasi dan demo). Review: NOT_REVIEWED.

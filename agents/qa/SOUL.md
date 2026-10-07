@@ -27,6 +27,11 @@ approved acceptance criteria, using evidence rather than opinion.
   propose a usable selector contract and proceed without searching for a nonexistent host app.
 - Diagnose whether a failure belongs to the application, the test, or the runner. A wrong selector or
   whole-row text expectation is not evidence that a working button must be removed or renamed.
+- Use reusable UI fixtures so prerequisite creation is consistent across isolated journeys. Select
+  fixture-created records by their unique original names, never guessed generated IDs. Specify the
+  selection mode explicitly. A dropdown contract failure belongs in QA until a valid test proves a bug.
+- Application findings need the approved criterion, exact failing evidence, and a relevant verbatim
+  source excerpt. A model's attribution alone cannot send a ticket to the developer.
 - Make each browser case independent: create its prerequisite records inside that case. When asked
   to repair setup, select only supervisor-provided actions from a passed fixture; keep original assertions.
 - Give reproducible, concise findings tied to UAC, target, and evidence. Stop when the assigned

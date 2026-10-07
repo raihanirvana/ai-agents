@@ -34,7 +34,12 @@ This file defines the task contract; the structured PO/lead runtime does not run
    behavior to preserve. Read the actual baseline before adding a regression selector.
    Every browser test starts with a fresh context and page. Reproduce the whole interaction sequence inside that
    test: a two-click toggle case needs two clicks, with the intermediate and final assertions in the same test.
-   Do not rely on state from an earlier test. Prefer approved test-id selectors; avoid global tag counts or invented
+   Do not rely on state from an earlier test. Declare reusable setup as QaPlan.fixtures:
+   {"id":"customer","steps":[{"action":"fill","selector":"#name-input","value":"Customer One"},
+   {"action":"click","selector":"#add-button"}]}, then reference fixture_ids:["customer"] in each
+   dependent test. Fixtures contain setup actions only; keep assertions in tests. The supervisor expands
+   setup independently before pinning the canonical suite. Expanded cases stay within 30 steps.
+   Reuse fixtures for prerequisites shared by journeys; do not duplicate hand-written setup across cases. Prefer approved test-id selectors; avoid global tag counts or invented
    tag requirements unless the approved criteria require them. Preserve previously accepted behavior.
    Create prerequisite customers/records and select their relationship inside each test before submitting a
    dependent form. Reload preserves storage, but transient detail selection may require reopening the record.
@@ -46,7 +51,10 @@ This file defines the task contract; the structured PO/lead runtime does not run
    listed in the tool schema; it does not execute JavaScript or arbitrary commands.
    Read browser_capabilities and the Step schema before planning interactions. The DSL supports:
    - `select_option` for native select controls; `value` is one string or a list for select[multiple],
-     `select_by` is `value` (default) or `label`. Never use fill on select; custom dropdowns use clicks.
+     `select_by` MUST be explicitly `value` or `label` in every new plan. For records created by fixture,
+     select by their original unique label; generated IDs cannot be inferred as "1"/"2" or from creation order.
+     Value selection requires a known literal option value inspected in the source (for example a static status).
+     Never use fill on select; custom dropdowns use clicks.
    - `check`/`uncheck` for checkboxes, `check` for radios, and `assert_checked`/`assert_unchecked`.
      Radio deselection means selecting a different radio, never uncheck.
    - `assert_enabled`, `assert_disabled`, `assert_hidden`, `assert_contains_text`, `assert_attribute`
@@ -118,10 +126,15 @@ This file defines the task contract; the structured PO/lead runtime does not run
 
 The independent browser execution has already finished. Return one QaDiagnosis JSON object,
 with fault application/test/infrastructure/unknown, summary, and one finding per failed test:
-test_id, fault, expected, observed, reason. Use the supplied schema. Do not run tools or tests.
+test_id, fault, expected, observed, reason. Each application finding MUST also provide criterion_id,
+source_path and source_excerpt copied exactly (12..400 characters) from the supplied shipped source,
+explaining how that code violates the cited approved automated criterion. Use the supplied schema. Do not run tools or tests.
 
 - Inspect the approved criteria, original test inputs, exact failed evidence and source excerpt.
   Cite the failed test and criterion in each reason. Account for all failed tests exactly once.
+- An unresolved selector/action contract, guessed generated record ID, unsupported selector or CSV
+  expectation inconsistent with original input cannot authorize application repair. Correct the test
+  or mark unknown; missing/incorrect real app options may still be bugs once a valid test proves them.
 - Choose application only with concrete evidence that a valid test exposed shipped behaviour
   violating scope. Wrong selector/action/CSV representation belongs to the test. A missing DOM
   element may be an application bug; do not automatically blame the selector. Mixed failures or
@@ -147,6 +160,17 @@ Select only needed existing steps, in original order. You cannot change their in
 alter original assertions/expected values, remove tests, or declare pass. The supervisor validates
 indexes and placement, creates a new immutable suite/target, and reruns the full baseline/candidate.
 If no supplied setup can solve the diagnosed failure, do not fabricate a fixture.
+
+## Task: `qa_option_repair`
+
+Return QaOptionRepair using only supplied option_binding_candidates. Each binding names test_id,
+step_index of a guessed by-value select, and label_input_step of the earlier original fill that created
+its intended record. Correct the failed selection and later guessed values of the SAME control in
+one proposal. Use the intended relationship from source/UAC, not arbitrary order. Candidates prove
+these exact original inputs uniquely match enabled option labels. Supply indexes only; never new
+labels, generated IDs, inputs or expectations. The supervisor validates all bindings, preserves every
+assertion/UAC and requires a new target with full candidate/baseline execution. If no candidate matches,
+leave the failure for diagnosis instead of guessing.
 
 ## Rules
 

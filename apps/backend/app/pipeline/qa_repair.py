@@ -118,6 +118,120 @@ def classify_failure(proof):
     return 'application_or_unknown'
 
 
+def option_binding_candidates(suite, proof):
+    """Expose only real dropdown labels that match earlier, unchanged fixture inputs."""
+    tests = {test.id: test for test in suite.tests}
+    candidates = {}
+    for result in (proof.get('report') or {}).get('tests', []):
+        if result.get('status') != 'failed':
+            continue
+        diagnosis = result.get('action_diagnosis') or {}
+        index, test = result.get('failed_step'), tests.get(result.get('id'))
+        if (diagnosis.get('contract') != 'unavailable_option_value' or not test
+                or type(index) is not int or not 0 <= index < len(test.steps)):
+            continue
+        step = test.steps[index]
+        if (step.action != 'select_option' or step.select_by not in (None, 'value')
+                or diagnosis.get('selector') != step.selector or diagnosis.get('requested') != step.value):
+            continue
+        options = diagnosis.get('options')
+        if (diagnosis.get('options_complete') is not True or not isinstance(options, list)
+                or len(options) > 200):
+            continue
+        inputs = []
+        for i, original in enumerate(test.steps[:index]):
+            if original.action != 'fill' or not isinstance(original.value, str) or not original.value:
+                continue
+            matching = [row for row in options if isinstance(row, dict) and row.get('enabled') is True
+                        and row.get('label') == original.value and isinstance(row.get('value'), str)]
+            if len(matching) == 1:
+                inputs.append({'input_step': i, 'label': original.value})
+        if inputs:
+            candidates[test.id] = {'failed_step': index, 'selector': step.selector, 'inputs': inputs,
+                                   'options': options}
+    return candidates
+
+
+def repair_option_bindings(suite, proof, proposal):
+    """Correct guessed values using original fixture labels observed in the authoritative DOM report."""
+    if proof.get('status') != 'failed' or proof.get('infrastructure_failure'):
+        return None
+    failed = {test['id'] for test in (proof.get('report') or {}).get('tests', []) if test.get('status') == 'failed'}
+    candidates = option_binding_candidates(suite, proof)
+    selected = {binding.test_id for binding in proposal.bindings}
+    if selected != failed or not selected.issubset(candidates):
+        return None
+    # Every actual failed selection must be repaired; future selections of the
+    # same control may also bind the already-created labels, without changing inputs.
+    if any(not any(binding.test_id == test_id and binding.step_index == item['failed_step']
+                   for binding in proposal.bindings) for test_id, item in candidates.items() if test_id in selected):
+        return None
+    document = suite.model_dump()
+    tests = {test['id']: test for test in document['tests']}
+    for binding in proposal.bindings:
+        test, facts = tests[binding.test_id], candidates[binding.test_id]
+        index, origin = binding.step_index, binding.label_input_step
+        if not 0 <= origin < index < len(test['steps']):
+            return None
+        step, original = test['steps'][index], test['steps'][origin]
+        if (step['action'] != 'select_option' or step['selector'] != facts['selector']
+                or step.get('select_by') not in (None, 'value') or not isinstance(step['value'], str)
+                or any(row.get('value') == step['value'] for row in facts['options'])
+                or original['action'] != 'fill' or not any(item['input_step'] == origin for item in facts['inputs'])):
+            return None
+        step.update(select_by='label', value=original['value'])
+    return QaPlan.model_validate(document)
+
+
+def application_repair_issues(suite, proof, diagnosis, criteria, source):
+    """A model attribution alone cannot turn a malformed test into an application repair."""
+    tests = {test.id: test for test in suite.tests}
+    results = {test['id']: test for test in (proof.get('report') or {}).get('tests', []) if test.get('status') == 'failed'}
+    automated = {criterion['id'] for criterion in criteria if criterion.get('mode', 'automated') == 'automated'}
+    csv_issues = {(issue['test_id'], issue['step']) for issue in suite.csv_expectation_issues()}
+    issues = []
+    if {finding.test_id for finding in diagnosis.findings} != set(results):
+        issues.append('diagnosis must cover every failed test exactly once')
+    for finding in diagnosis.findings:
+        test, result = tests.get(finding.test_id), results.get(finding.test_id)
+        if not test or not result:
+            issues.append(f'{finding.test_id}: failed evidence is missing')
+            continue
+        if finding.criterion_id not in automated or finding.criterion_id not in test.uac:
+            issues.append(f'{finding.test_id}: an approved automated criterion must be cited')
+        excerpt = finding.source_excerpt
+        if (not excerpt or len(excerpt.strip()) < 12 or finding.source_path not in source
+                or excerpt not in source[finding.source_path]):
+            issues.append(f'{finding.test_id}: an exact relevant shipped-source excerpt is required')
+        index = result.get('failed_step')
+        if type(index) is not int or not 0 <= index < len(test.steps):
+            issues.append(f'{finding.test_id}: failing browser step is unavailable')
+            continue
+        step = test.steps[index]
+        if result.get('failure_kind') == 'selector_contract':
+            issues.append(f'{finding.test_id}: unresolved selector ambiguity belongs to QA')
+        if result.get('failure_kind') == 'action_contract':
+            facts = result.get('action_diagnosis') or {}
+            values = step.value if isinstance(step.value, list) else [step.value]
+            # A deliberately specified static option may genuinely be missing
+            # from the rendered app. Require its literal declaration in the
+            # cited shipped code; guessed record IDs cannot qualify this way.
+            declared_static = (facts.get('contract') == 'unavailable_option_value'
+                and step.action == 'select_option' and step.select_by == 'value'
+                and excerpt and all(isinstance(value, str) and (
+                    json.dumps(value, ensure_ascii=False) in excerpt or repr(value) in excerpt)
+                    for value in values))
+            if not declared_static:
+                issues.append(f'{finding.test_id}: unresolved action/fixture binding belongs to QA')
+        if (finding.test_id, index) in csv_issues:
+            issues.append(f'{finding.test_id}: CSV expectation disagrees with original input')
+        if step.action == 'select_option' and step.select_by is None:
+            issues.append(f'{finding.test_id}: selection mode/fixture binding was never specified')
+        if ':contains(' in (step.selector or '') and 'SyntaxError' in result.get('error', ''):
+            issues.append(f'{finding.test_id}: unsupported selector is a test defect')
+    return issues
+
+
 def repair_contract_errors(suite, proof):
     """Qualify a visible alert or replace fill on an observed select. Never weaken assertions."""
     if proof.get('status') != 'failed' or classify_failure(proof) != 'test_contract':
