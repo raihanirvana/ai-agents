@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .journal import AdmissionError
+from app.provider_routing import routing_fields, retry_after_seconds
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -27,10 +28,17 @@ class Relay:
     ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
     def __init__(self, journal, scope, generation, model, key, tools, *, transport=None, foreign_markers=(), interval_s=0, request_projection=None,
-                 provider_retry_delays=()):
+                 provider_retry_delays=(), fallback_models=(), allow_provider_fallbacks=False):
         self.journal, self.scope, self.generation = journal, scope, generation
         self.model, self.key, self.tools = model, key, tools
         self.foreign_markers = tuple(foreign_markers)
+        if (not isinstance(fallback_models, (tuple, list)) or
+                any(not isinstance(m, str) or not m.strip() or m != m.strip() for m in fallback_models) or
+                len(set([model, *fallback_models])) != 1 + len(fallback_models) or
+                type(allow_provider_fallbacks) is not bool):
+            raise ValueError('invalid supervisor model fallback configuration')
+        self.fallback_models = tuple(fallback_models)
+        self.allow_provider_fallbacks = allow_provider_fallbacks
         self.token = secrets.token_urlsafe(32)
         self.opener = transport or urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         self.request_projection = request_projection
@@ -114,14 +122,22 @@ class Relay:
                     if body.get("model") != owner.model:
                         self.reply(403, {"error": "model differs from supervisor configuration"})
                         return
+                    # Only the supervisor selects model routes. Runtime-supplied
+                    # backup IDs and routing preferences cannot authorize spend.
+                    for field in ('models', 'fallbacks', 'route'):
+                        body.pop(field, None)
                     limits = owner.journal.inspect(owner.scope)["limits"]
                     if limits.get('output_tokens') is not None:
                         body["max_tokens"] = limits["output_tokens"]
                     body.pop("max_completion_tokens", None)
                     if urlsplit(owner.ENDPOINT).hostname == "openrouter.ai":
                         body["usage"] = {"include": True}
-                        body["provider"] = {"allow_fallbacks": False}
+                        if owner.fallback_models:
+                            body.pop('model')
+                        body.update(routing_fields(owner.model, owner.fallback_models, owner.allow_provider_fallbacks))
                     else:
+                        if owner.fallback_models or owner.allow_provider_fallbacks:
+                            raise ValueError('fallback routing requires OpenRouter')
                         # Routing and usage extensions belong to OpenRouter,
                         # including fields supplied by the runtime itself.
                         body.pop("usage", None)
@@ -157,7 +173,7 @@ class Relay:
                         owner.next_request_at = time.time() + owner.interval_s
                     upstream, rid = owner.open_model(req, rid)
                     with upstream:
-                        usage, count, error = None, 0, False
+                        usage, count, error, response_model = None, 0, False, None
                         self.send_response(upstream.status)
                         self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
                         self.send_header("Connection", "close")
@@ -176,6 +192,7 @@ class Relay:
                                     frame = json.loads(line[6:])
                                     usage = frame.get("usage") or usage
                                     error = error or bool(frame.get("error"))
+                                    response_model = frame.get('model') or response_model
                                 self.wfile.write(line)
                                 self.wfile.flush()
                         else:
@@ -184,15 +201,19 @@ class Relay:
                                 raise ValueError("provider output too large")
                             frame = json.loads(raw)
                             usage, error = frame.get("usage"), bool(frame.get("error"))
+                            response_model = frame.get('model')
                             self.wfile.write(raw)
                         owner.journal.finish(rid, {"http_status": upstream.status,
                             "status": "provider_error" if error else "complete", "usage": usage,
+                            "model": response_model, "requested_model": owner.model,
                             "cost": usage.get("cost") if isinstance(usage, dict) else None})
                         owner.journal.event(owner.scope, owner.generation, "model.completed", {"reservation": rid, "usage": usage})
                 except urllib.error.HTTPError as exc:
+                    rid = getattr(exc, 'provider_reservation_id', rid)
                     detail = exc.read(2000).decode(errors="replace").replace(owner.key, "[redacted]")
                     if rid:
-                        owner.journal.finish(rid, {"http_status": exc.code, "status": "provider_error", "usage": None, "cost": None, "detail": detail})
+                        owner.journal.finish(rid, {"http_status": exc.code, "status": "provider_error", "usage": None, "cost": None,
+                            "detail": detail, "retry_after_s": retry_after_seconds((exc.headers or {}).get('Retry-After'))})
                     self.reply(exc.code, {"error": {"message": detail, "type": "provider_error"}})
                 except (AdmissionError, KeyError, ValueError, TypeError) as exc:
                     if rid:
@@ -202,7 +223,8 @@ class Relay:
                     except AdmissionError:
                         pass
                     self.reply(409, {"error": {"message": str(exc)[:400], "type": "admission_error"}})
-                except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+                except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError) as exc:
+                    rid = getattr(exc, 'provider_reservation_id', rid)
                     if rid:
                         owner.journal.finish(rid, {"status": "transport_failure", "usage": None, "cost": None})
                     self.close_connection = True
@@ -235,8 +257,9 @@ class Relay:
                 if isinstance(reason, socket.gaierror) and reason.errno == socket.EAI_AGAIN:
                     transient = True
                 if not transient or attempt == len(self.provider_retry_delays):
-                    self.journal.finish(reservation, {'http_status': code, 'status': 'provider_error',
-                        'usage': None, 'cost': None})
+                    # The handler owns final failure accounting, including the
+                    # HTTP body and Retry-After. Finishing here loses those details.
+                    exc.provider_reservation_id = reservation
                     raise
                 # No model/tool mutation is replayed. Unknown spend stays unknown.
                 self.journal.finish(reservation, {'http_status': code, 'status': 'provider_error',

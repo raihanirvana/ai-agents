@@ -103,6 +103,11 @@ Integrating → Accepted.
   baru, tanpa menganggap hasil lama lulus atau memakai siklus perbaikan kode.
 - QA lulus dan kandidat lolos preview smoke test membuka UAT. Preview boleh
   stopped dan dinyalakan ketika pengguna mencoba; tidak harus selalu aktif.
+- Rencana QA default ringan: beberapa alur otomatis untuk semua kriteria
+  automated, dengan pemeriksaan lebih kuat untuk risiko uang/stok/izin/data.
+  Kriteria manual disepakati saat scope dan dikonfirmasi pengguna saat UAT.
+  Capability gap dibahas sebelum development. Failure browser didiagnosis
+  sebelum meminta perubahan aplikasi; model diagnosis tidak dapat meluluskan QA.
 - UAT meminta perbaikan kembali ke Development, kemudian review dan QA ulang.
 - Kebutuhan tambahan masuk usulan revisi scope/tiket baru, bukan perubahan diam-diam.
 - Perubahan scope yang sudah disetujui memerlukan approval versi baru.
@@ -226,7 +231,10 @@ Supervisor menegakkan batas finite durasi aktif/model calls/tool calls dan
 output/token bila terukur. Usage per scope/tiket diakumulasi lintas retry/attempt;
 repair limit tidak menggantikan batas satu run. Cap biaya mengikuti data provider,
 tanpa menjanjikan tagihan presisi untuk request in-flight/usage yang tidak tersedia.
-Quota habis membuat pekerjaan menunggu; tidak otomatis memakai model berbayar.
+Quota habis membuat pekerjaan menunggu setelah rute cadangan yang dikonfigurasi
+habis. Cadangan per role harus ditetapkan eksplisit oleh pengguna; tidak otomatis
+memakai model berbayar yang tidak dikonfigurasi. Model utama selalu dicoba dahulu,
+dan model respons aktual serta usage tetap dicatat.
 Sisakan kapasitas request interaktif pada limiter provider; chat tetap bisa
 waiting_quota meskipun memiliki lane sendiri.
 Tempatkan prompt stabil di depan agar ramah cache; ukur cache hit bila provider

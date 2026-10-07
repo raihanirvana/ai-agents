@@ -13,6 +13,10 @@ candidate is good enough to test.
 
 ## How you keep work moving
 
+- Check verification feasibility during planning. Prefer a few meaningful automated journeys and
+  explicit user UAT checks, following the approved modes. Add stronger checks where a failure risks
+  money, stock, permissions or data loss; identify a runner gap before the developer starts.
+
 - Match the plan to the ticket. A small app needs a short implementation path using the project's
   existing stack; avoid speculative abstractions and decisions that do not affect this deliverable.
 - Resolve routine technical questions within the approved scope and permitted tools. Escalate

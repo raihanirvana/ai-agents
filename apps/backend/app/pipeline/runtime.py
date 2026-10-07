@@ -7,12 +7,13 @@ from sqlalchemy import select
 from app.agents.tools import ToolFacade
 from app.agents.context import ContextRefused, ContextTooLarge
 from app.agents.models import ModelError
-from app.agents.outputs import LeadPlanOutput, Clarification
+from app.agents.outputs import LeadPlanOutput, Clarification, InvalidOutput
 from app.domain import Actor, Attempt
 from app.persistence.models import Candidate, Job, Ticket, TicketVersion, Artifact, Verification, Approval
 from app.workers.runtime import Outcome
 from app.persistence.transactions import bind_service
-from .contracts import QaPlan, Review, tool_schema, browser_capabilities
+from .contracts import QaPlan, QaDiagnosis, QaSetupRepair, Review, tool_schema, browser_capabilities
+from .qa_policy import policy_context, preflight
 from .relay import reconcile_accounting
 from .workspace import FencedWorkspace, unpack_tree, cleanup_workspace
 from .files import allocate_directory, cleanup_directory
@@ -37,7 +38,7 @@ class PipelineRuntime:
         if identity['fake'] != self.fake or bool(self.structured.client.provider_for(role).fake) != self.fake:
             return Outcome('failed', error='provider and pipeline fake labels disagree')
         wanted = {'technical_plan': 'technical-lead', 'qa_plan': 'qa', 'implement': 'developer',
-                  'review': 'technical-lead', 'verify': 'qa'}
+                  'review': 'technical-lead', 'verify': 'qa', 'diagnose': 'qa'}
         if wanted.get(task) != role:
             return Outcome('failed', error='pipeline task/role mismatch')
         if task in ('technical_plan', 'qa_plan'):
@@ -47,7 +48,7 @@ class PipelineRuntime:
                     return Outcome('failed', error='planning requires an eligible approved scope')
         try:
             return getattr(self, '_' + task)(ctx, identity)
-        except (ContextRefused, ContextTooLarge) as exc:
+        except (ContextRefused, ContextTooLarge, InvalidOutput) as exc:
             error = self.redactor.redact('pipeline context refused: ' + str(exc))[:500]
             ctx.log(error)
             return Outcome('failed', error=error, retryable=False)
@@ -66,6 +67,7 @@ class PipelineRuntime:
             {'name': 'technical_plan', 'ticket_id': identity['ticket_id'], 'source_files': files,
              'runner_manifest': manifest.to_dict(),
              'browser_capabilities': browser_capabilities(),
+             'verification_policy': policy_context(),
              'reference_bootstrap': bootstrap_contract() if self.workspace.bootstrap_available(identity) else None,
              'onboarding': self._onboarding_context(identity['project_id'])}, LeadPlanOutput)
         if isinstance(output, Clarification):
@@ -98,7 +100,11 @@ class PipelineRuntime:
         baseline = self.workspace.base_build(ctx)
         sup, started, manifest = self.workspace.start(ctx)
         source_files = sup.list_files(started.ref, started.credential)
-        snapshot = self.structured.builder.build(identity, task={
+        from app.agents.context import ContextBuilder
+        builder = self.structured.builder
+        planning_builder = ContextBuilder(builder.db, builder.store, builder.agents, builder.redactor,
+            limits=replace(builder.limits, total_tokens=max(16384, builder.limits.total_tokens)))
+        snapshot = planning_builder.build(identity, task={
             'name': 'qa_plan', 'instruction': 'Create mandatory browser assertions from approved UAC and the technical plan. '
             'Use CSS selectors. Every automated UAC must be covered. feature/bug cases must fail on the base when applicable; '
             'regression cases may pass on both. Use propose_tests with one QaPlan object. Do not edit source or claim pass.',
@@ -111,6 +117,7 @@ class PipelineRuntime:
                 'reload takes no selector or value. Every test starts with a fresh browser context.',
             'schema': QaPlan.model_json_schema(), 'source_files': source_files,
             'browser_capabilities': browser_capabilities(),
+            'verification_policy': policy_context(),
             'empty_source_guidance': ('The accepted base is empty; this is expected for a new project. '
                 'There is no DOM or other folder to inspect. Plan feature tests from approved UAC and technical plan, '
                 'and declare stable selectors/text as a contract for the developer. Do not request user input '
@@ -128,14 +135,18 @@ class PipelineRuntime:
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, current)
                 version = s.query(TicketVersion).filter_by(ticket_id=current['ticket_id'], version=current['scope_version']).one()
-                suite.check_criteria(version.uac)
+                readiness = preflight(suite, version.uac, current['scope_version'], new_plan=True)
+                receipt = self.store.put_json(s, project_id=current['project_id'], kind='report', name='qa-preflight.json',
+                    document=readiness, meta={'producer': 'qa-preflight', 'fake': self.fake})
                 artifact = self.store.put_json(s, project_id=current['project_id'], kind='report', name='qa-suite.json',
                     document=suite.model_dump(), meta={'producer': 'qa-plan', 'fake': self.fake})
                 self.workspace._post(s, current, 'qa-plan:' + current['root_job_id'], suite.summary,
-                    [snapshot.artifact_id, artifact.id], 'qa_plan', suite_digest=suite.digest)
+                    [snapshot.artifact_id, receipt.id, artifact.id], 'qa_plan', suite_digest=suite.digest,
+                    verification_plan=readiness, preflight_artifact_id=receipt.id)
                 job = s.get(Job, current['job_id'])
                 job.runtime_ref = {**job.runtime_ref, 'pipeline_qa_plan': artifact.id}
                 result['suite_artifact_id'] = artifact.id
+                result['preflight_artifact_id'] = receipt.id
             return {'submitted': True, 'suite_digest': suite.digest}
         def inspect(c, i, a):
             if set(a) != {'path'}:
@@ -477,20 +488,178 @@ class PipelineRuntime:
                 repair_count = target.get('suite_repair_count', 0)
                 if repaired is not None and type(repair_count) is int and 0 <= repair_count < MAX_SUITE_REPAIRS:
                     return self._repair_qa_target(ctx, identity, candidate, target, repaired, v.id, attachments)
-                return Outcome('failed', {'verification_id': v.id, 'evidence_artifact_ids': attachments,
-                    'qa_status': 'failed', 'failure_kind': 'test_contract'},
-                    error='QA action/selector/expected-value contract needs diagnosis; '
-                          'compare approved criteria and test inputs before requesting application repair.')
-            return self._reject(ctx, identity, candidate, 'Browser acceptance failed: ' + json.dumps(proof['report'])[:3000],
-                                verification_id=v.id, evidence_artifact_ids=attachments, qa_status='failed',
-                                failure_kind=failure_kind)
+            pending = {'verification_id': v.id, 'evidence_artifact_ids': attachments,
+                'qa_status': 'failed', 'failure_kind': failure_kind, 'diagnosis_required': True,
+                'candidate_id': candidate.id, 'target_digest': candidate.target_digest}
+            with self.db.write() as s:
+                ctx.queue.verify_identity(s, identity)
+                bind_service(ctx.queue, s).complete(ctx.lease, {**pending, 'pipeline_completion': {
+                    'job_id': identity['job_id'], 'generation': identity['generation']}})
+            return Outcome('succeeded', pending)
         return Outcome('succeeded' if proof['status'] == 'passed' else 'failed',
             {'verification_id': v.id, 'evidence_artifact_ids': attachments, 'qa_status': proof['status'],
              'failure_kind': failure_kind},
             error=proof.get('error') or ('Incomplete harness execution' if proof['status'] == 'incomplete' else ''),
             retryable=failure_kind == 'infrastructure')
 
-    def _repair_qa_target(self, ctx, identity, candidate, target, repaired, verification_id, attachments):
+    def _diagnose(self, ctx, identity):
+        """One durable diagnosis of failed evidence, with no model authority to pass QA."""
+        candidate = self._candidate(identity)
+        with self.db.read() as s:
+            job = s.get(Job, identity['job_id'])
+            v = s.get(Verification, job.runtime_ref['payload'].get('verification_id'))
+            if (v is None or v.status != 'failed' or v.candidate_id != candidate.id
+                    or v.target_digest != candidate.target_digest or v.target_artifact_id != candidate.target_artifact_id):
+                raise ValueError('diagnosis belongs to an obsolete verification target')
+            target = json.loads(self.store.read_bytes(s, candidate.target_artifact_id))
+            suite = QaPlan.model_validate(json.loads(self.store.read_bytes(s, target['suite_artifact_id'])))
+            version = s.query(TicketVersion).filter_by(ticket_id=candidate.ticket_id, version=candidate.scope_version).one()
+            criteria = version.uac
+            suite.check_criteria(criteria)
+            rows = [s.get(Artifact, aid) for aid in v.evidence_artifact_ids]
+            report_row = next((row for row in rows if row is not None
+                and row.kind == 'report' and str(row.path).endswith('/acceptance.json')
+                and row.meta.get('producer') == 'verification'), None)
+            if report_row is None:
+                raise ValueError('authoritative acceptance report unavailable')
+            proof = json.loads(self.store.read_bytes(s, report_row.id))
+            attachments = list(v.evidence_artifact_ids)
+            verification_id = v.id
+            from app.persistence.models import Message
+            previous = s.scalar(select(Message).where(Message.project_id == identity['project_id'],
+                Message.idempotency_key == 'qa-diagnosis:' + identity['root_job_id']))
+            persisted_output = None
+            if previous is not None:
+                diagnosis_row = s.get(Artifact, previous.attachment_ids[-1]) if previous.attachment_ids else None
+                if (previous.meta.get('candidate_id') != candidate.id
+                        or previous.meta.get('verification_id') != verification_id or diagnosis_row is None
+                        or diagnosis_row.meta.get('producer') != 'qa-diagnosis'
+                        or diagnosis_row.meta.get('target_digest') != candidate.target_digest
+                        or diagnosis_row.meta.get('verification_id') != verification_id
+                        or diagnosis_row.meta.get('fake') != self.fake):
+                    raise ValueError('persisted QA diagnosis belongs to different candidate/evidence')
+                persisted_output = QaDiagnosis.model_validate(json.loads(self.store.read_bytes(s, diagnosis_row.id)))
+        manifest, base = self.workspace.configuration(identity)
+        from app.workspace.manifest import parse_manifest
+        if (base != candidate.base_sha or manifest.digest != parse_manifest(target['execution_manifest']).digest
+                or self.workspace.harness.identity() != target['runner']):
+            return Outcome('failed', {'failure_kind': 'infrastructure', 'verification_id': verification_id},
+                           error='Runner/base changed after failed QA; rebuild/revalidate before diagnosis.')
+        failed = [t for t in proof['report']['tests'] if t['status'] == 'failed']
+        if not failed:
+            raise ValueError('failed verification contains no failed test')
+        # Read source as data through the broker, never execute it. The evidence
+        # and test inputs remain the basis; an incomplete view requires unknown.
+        broker = FencedWorkspace(self.workspace.root, ctx).broker(candidate.project_id)
+        paths = broker._bare('ls-tree', '-r', '--name-only', candidate.commit_sha).decode().splitlines()
+        source, remaining, unavailable = {}, 16000, []
+        eligible = [p for p in paths if p.endswith(('.html', '.js', '.jsx', '.ts', '.tsx'))
+                    and not p.startswith(('test/', 'tests/', 'node_modules/', 'home/'))]
+        from app.workspace.errors import WorkspaceError
+        for path in eligible[:12]:
+            try:
+                raw = broker.read_committed_file(candidate.commit_sha, path).decode(errors='replace')
+            except (WorkspaceError, ValueError):
+                unavailable.append(path)
+                continue
+            source[path] = raw[:remaining]
+            remaining -= len(source[path])
+            if remaining <= 0:
+                break
+        diagnosis_task = {
+            'name': 'qa_diagnosis', 'candidate_id': candidate.id, 'verification_id': verification_id,
+            'verification_policy': policy_context(), 'approved_criteria': criteria,
+            'suite': suite.model_dump(), 'failed_tests': failed, 'source': source,
+            'source_complete': not unavailable and len(source) == len(eligible) and remaining > 0,
+            'source_unavailable': unavailable,
+            'instructions': 'Diagnose every failed test against approved criteria, original input, runner evidence and source. '
+                'Return QaDiagnosis. Application fault requires concrete evidence that the assertion is valid and shipped '
+                'behaviour violates a criterion. Test fault means wrong selector/action/expected value; never ask for a valid '
+                'control or CSV escaping to be broken to fit a test. Mixed or insufficient evidence is unknown. '
+                'You cannot pass QA, drop tests, change approved UAC or waive a gate. Include every failed test exactly once.'
+        }
+        if persisted_output is not None:
+            output, meta = persisted_output, {}
+            ctx.log('Reusing persisted QA diagnosis for this exact failed target/evidence.')
+        else:
+            output, meta, _ = self.structured._ask(ctx, identity, diagnosis_task, QaDiagnosis,
+                context_limits=replace(self.structured.builder.limits, total_tokens=32768))
+        if {f.test_id for f in output.findings} != {t['id'] for t in failed}:
+            return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id},
+                           error='QA diagnosis must account for every failed test exactly once.')
+        with self.db.write() as s:
+            ctx.queue.verify_identity(s, identity)
+            from app.persistence.models import Message
+            key = 'qa-diagnosis:' + identity['root_job_id']
+            previous = s.scalar(select(Message).where(Message.project_id == identity['project_id'],
+                                                      Message.idempotency_key == key))
+            if previous is not None:
+                diagnosis = s.get(Artifact, previous.attachment_ids[-1])
+                if (previous.meta.get('candidate_id') != candidate.id or previous.meta.get('verification_id') != verification_id
+                        or json.loads(self.store.read_bytes(s, diagnosis.id)) != self.redactor.redact_value(output.model_dump())):
+                    raise ValueError('persisted QA diagnosis differs from this candidate/evidence')
+                attachments = list(previous.attachment_ids)
+            else:
+                diagnosis = self.store.put_json(s, project_id=identity['project_id'], kind='report', name='qa-diagnosis.json',
+                    document=self.redactor.redact_value(output.model_dump()), meta={'producer': 'qa-diagnosis',
+                        'verification_id': verification_id, 'target_digest': candidate.target_digest, 'fake': self.fake})
+                attachments += [meta['context_artifact_id'], diagnosis.id]
+                self.workspace._post(s, identity, key, output.summary,
+                    attachments, 'qa_diagnosis', candidate_id=candidate.id, verification_id=verification_id,
+                    fault=output.fault, findings=output.model_dump()['findings'])
+        if output.fault == 'application':
+            detail = '\n'.join(f"{f.test_id}: expected {f.expected}; observed {f.observed}. {f.reason}" for f in output.findings)
+            return self._reject(ctx, identity, candidate, 'QA diagnosed an application defect: ' + output.summary + '\n' + detail,
+                verification_id=verification_id, evidence_artifact_ids=attachments, qa_status='failed',
+                failure_kind='application', diagnosis_artifact_id=diagnosis.id)
+        if output.fault == 'test':
+            from .qa_repair import (repair_csv_inputs, repair_unsupported_text_selectors,
+                                    passed_setup_prefixes, repair_test_setup, MAX_SUITE_REPAIRS)
+            count = target.get('suite_repair_count', 0)
+            if type(count) is int and 0 <= count < MAX_SUITE_REPAIRS:
+                for repair_kind, repair in (('csv_input_encoding', repair_csv_inputs),
+                                            ('text_selector_contract', repair_unsupported_text_selectors)):
+                    repaired = repair(suite, proof)
+                    if repaired is not None:
+                        return self._repair_qa_target(ctx, identity, candidate, target, repaired,
+                                                     verification_id, attachments, repair_kind=repair_kind)
+                prefixes = passed_setup_prefixes(suite, proof)
+                if prefixes:
+                    ctx.log('QA test fault: selecting setup from passed tests; original assertions remain fixed.')
+                    proposal, setup_meta, _ = self.structured._ask(ctx, identity, {
+                        'name': 'qa_setup_repair', 'candidate_id': candidate.id,
+                        'verification_id': verification_id, 'approved_criteria': criteria,
+                        'diagnosis': output.model_dump(), 'suite': suite.model_dump(),
+                        'failed_tests': failed, 'source': source, 'passed_setup_prefixes': prefixes,
+                        'instructions': 'Return QaSetupRepair, selecting only step indexes from one supplied passed '
+                            'test prefix per failed test. Every browser test has empty isolated storage. Before_step=0 '
+                            'prepends missing prerequisite customer/task creation. Select only necessary existing steps '
+                            'in original order, preserving their exact input values. For an assertion immediately after '
+                            'reload, before_step may point to that assertion and select only a prior proven click '
+                            'to reopen a transient detail panel: before_step MUST equal failed_step, never zero. '
+                            'Do not prepend actions already performed by the failed test before its failed_step. '
+                            'Never change or remove any original step/assertion, '
+                            'expected value, test ID, UAC or purpose. Cover every failed test once. No code or new inputs.'
+                    }, QaSetupRepair, context_limits=replace(self.structured.builder.limits, total_tokens=32768))
+                    repaired = repair_test_setup(suite, proof, proposal)
+                    if repaired is not None:
+                        with self.db.write() as s:
+                            ctx.queue.verify_identity(s, identity)
+                            setup_row = self.store.put_json(s, project_id=identity['project_id'], kind='report',
+                                name='qa-setup-repair.json', document=self.redactor.redact_value(proposal.model_dump()),
+                                meta={'producer': 'qa-setup-repair', 'verification_id': verification_id,
+                                      'target_digest': candidate.target_digest, 'fake': self.fake})
+                        return self._repair_qa_target(ctx, identity, candidate, target, repaired,
+                            verification_id, [*attachments, setup_meta['context_artifact_id'], setup_row.id],
+                            repair_kind='isolated_test_setup')
+        return Outcome('failed', {'verification_id': verification_id, 'evidence_artifact_ids': attachments,
+            'qa_status': 'failed', 'failure_kind': 'infrastructure' if output.fault == 'infrastructure' else 'test_contract',
+            'diagnosis_artifact_id': diagnosis.id, 'diagnosis_fault': output.fault},
+            error='QA diagnosis: ' + output.summary + '. A corrected suite/runner and fresh evidence are required; '
+                  'application repair was not requested.')
+
+    def _repair_qa_target(self, ctx, identity, candidate, target, repaired, verification_id, attachments,
+                          repair_kind='dom_contract'):
         """New suite/target on the same reviewed bytes; old QA proof stays immutable."""
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
@@ -505,9 +674,11 @@ class PipelineRuntime:
                 raise ValueError('QA repair belongs to an obsolete candidate/target')
             version = s.query(TicketVersion).filter_by(ticket_id=t.id, version=t.current_version).one()
             repaired.check_criteria(version.uac)
+            readiness = preflight(repaired, version.uac, t.current_version)
             suite_row = self.store.put_json(s, project_id=t.project_id, kind='report', name='qa-suite.json',
                 document=repaired.model_dump(), meta={'producer': 'qa-plan', 'fake': self.fake,
-                    'repair_verification_id': verification_id, 'previous_suite_artifact_id': target['suite_artifact_id']})
+                    'repair_verification_id': verification_id, 'previous_suite_artifact_id': target['suite_artifact_id'],
+                    'repair_kind': repair_kind})
             previous = s.get(Artifact, candidate.target_artifact_id)
             new_target = self.store.put_json(s, project_id=t.project_id, kind='target_manifest', name='target.json',
                 document={**target, 'suite_artifact_id': suite_row.id, 'runner_manifest_digest': repaired.digest,
@@ -520,11 +691,13 @@ class PipelineRuntime:
                 candidate.id, build_artifact_id=current.build_artifact_id,
                 target_artifact_id=new_target.id, target_digest=new_target.checksum)
             self.workspace._post(s, identity, 'qa-selector-repair:' + identity['job_id'],
-                'QA corrected a runner-observed action/selector contract error. New suite/target require fresh baseline and '
+                'QA corrected a test contract (' + repair_kind + '). New suite/target require fresh baseline and '
                 'candidate execution; source/build unchanged.', [*attachments, suite_row.id], 'qa_plan',
                 candidate_id=candidate.id, suite_digest=repaired.digest,
-                previous_target_artifact_id=previous.id, target_artifact_id=new_target.id)
+                previous_target_artifact_id=previous.id, target_artifact_id=new_target.id,
+                verification_plan=readiness, repair_kind=repair_kind)
             result = {'qa_status': 'suite_repaired', 'failure_kind': 'test_contract',
+                'repair_kind': repair_kind,
                 'verification_id': verification_id, 'target_artifact_id': new_target.id,
                 'evidence_artifact_ids': [*attachments, suite_row.id, new_target.id]}
             bind_service(ctx.queue, s).complete(ctx.lease, {**result, 'pipeline_completion': {

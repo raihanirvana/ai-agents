@@ -1,5 +1,55 @@
 # SOUL, context, model client, dan pesan antar-agent — DEV-007
 
+## Fallback OpenRouter yang dikonfigurasi — 7 Oktober 2026
+
+Role dapat menetapkan `fallback_models` berupa daftar ID cadangan, urut prioritas.
+Model `model` tetap utama pada setiap request. Contoh override lokal untuk Developer
+dan Technical Lead:
+
+```json
+{
+  "provider": "openrouter",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "fallback_models": ["z-ai/glm-5.3-flash"],
+  "allow_provider_fallbacks": true
+}
+```
+
+Cadangan nonkosong secara default mengaktifkan `allow_provider_fallbacks`;
+override boolean dapat membatasinya. ID kosong/duplikat/utama di daftar cadangan,
+nilai bukan boolean, dan routing cadangan di luar OpenRouter ditolak. Contoh repo
+memakai daftar kosong: tidak mengotorisasi model berbayar tambahan tanpa konfigurasi.
+
+Structured client dan relay Hermes mengirim `models: [utama, ...cadangan]` sesuai
+[kontrak resmi OpenRouter](https://openrouter.ai/docs/guides/routing/model-fallbacks).
+Router mencoba utama dahulu, lalu cadangan ketika utama error, termasuk rate limit,
+downtime, validasi konteks atau refusal. Ini failover request model; tidak memainkan
+ulang tool, membuat job baru, mengubah approval, atau mereset usage. Runtime tidak
+dapat menyisipkan daftar `models`/`fallbacks` sendiri: relay menggantinya dengan
+konfigurasi supervisor, dan tetap memeriksa identitas model utama.
+
+Satu HTTP request dirouting oleh OpenRouter dan ditagih pada model yang akhirnya
+dipakai. Aplikasi mereservasi request tersebut sebelum forwarding dan mencatat
+usage/cost respons; pemakaian yang hilang tetap unknown. Retry HTTP oleh aplikasi
+tetap punya reservasi masing-masing. Model respons aktual tersimpan pada metadata
+structured dan `jobs.runtime_ref.pipeline_model_responses` untuk Hermes, serta
+log `model.response requested=... actual=...`; `pipeline_models` adalah konfigurasi
+attempt beserta daftar cadangan, bukan klaim semua request memakai model utama.
+
+Output parameter satu request harus didukung seluruh model yang diotorisasi.
+Untuk `max_output_tokens: null`, maksimum berasal dari metadata OpenRouter semua
+model tersebut, memakai maksimum bersama yang kompatibel; bukan angka cap aplikasi
+baru. Timeout, fencing, reservasi, cancellation dan transport bounds tetap berlaku.
+
+Jika seluruh rute gagal dengan 429, Hermes menyimpan detail yang sudah di-redact
+dan memakai `Retry-After` (detik atau HTTP date; fallback 30 detik), lalu masuk
+`waiting_quota`. Fallback tidak memperbaiki koneksi lokal yang putus, key salah,
+atau saldo akun yang tidak dapat membiayai rute mana pun. Error setelah stream
+dimulai tidak mengulang partial response. Router tidak mengekspos setiap percobaan
+internal: model aktual membuktikan model yang menjawab, bukan penyebab failover.
+Fallback tetap harus dikualifikasi pada run nyata; static checks bukan bukti
+bahwa 429 pernah memicu GLM atau bahwa kualitas model setara.
+
 Tanggal: 5 Oktober 2026. Implementasi: Claude (Sonnet 5.5); perbaikan review: Codex.
 Status implementasi: DONE dengan fake/contract checks. Review awal Codex: **NEEDS_FIX**;
 F1–F7 diperbaiki dan diverifikasi melalui self-check, menunggu re-review independen.

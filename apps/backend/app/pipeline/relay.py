@@ -63,10 +63,12 @@ class ProductAdmission:
         with self.lock:
             kind = self.pending.pop(rid, None)
             if kind == 'model':
-                self.provider_failure = ({'http_status': result.get('http_status'), 'status': result.get('status')}
+                self.provider_failure = ({'http_status': result.get('http_status'), 'status': result.get('status'),
+                    'detail': self.redactor.redact(str(result.get('detail') or ''))[:1000]}
                     if result.get('status') in ('provider_error', 'transport_failure') else None)
         if kind is None:
             return  # a transport error after accounting cannot bill the same call twice
+        response = None
         try:
             with self.ctx.queue.db.write() as s:
                 job = s.get(Job, self.ctx.lease.job_id)
@@ -74,6 +76,14 @@ class ProductAdmission:
                 saved.pop(rid, None)
                 job.runtime_ref = {**job.runtime_ref, 'pipeline_reservations': saved}
                 if kind == 'model':
+                    actual = result.get('model')
+                    if isinstance(actual, str) and actual.strip():
+                        response = {'generation': self.ctx.lease.generation, 'reservation': rid,
+                            'model': self.redactor.redact(actual)[:200],
+                            'requested_model': self.redactor.redact(str(result.get('requested_model') or ''))[:200],
+                            'status': result.get('status')}
+                        job.runtime_ref = {**job.runtime_ref, 'pipeline_model_responses': [
+                            *job.runtime_ref.get('pipeline_model_responses', []), response]}
                     usage = result.get('usage') if isinstance(result.get('usage'), dict) else {}
                     def amount(value):
                         return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
@@ -91,7 +101,18 @@ class ProductAdmission:
                     if output is not None and cap is not None and output > cap:
                         bound.cancel(job.id, reason='provider exceeded output token cap', actor='service:relay')
                     if result.get('http_status') == 429:
-                        self.error = self.ctx.provider_quota(30, 'provider rate limit')
+                        detail = self.redactor.redact(str(result.get('detail') or ''))[:1000]
+                        delay = result.get('retry_after_s', 30)
+                        if type(delay) not in (int, float) or not math.isfinite(delay):
+                            delay = 30
+                        self.error = self.ctx.provider_quota(min(3600, max(1, delay)),
+                            'provider HTTP 429' + (': ' + detail if detail else ' rate limit'))
+            # Durable logging uses its own transaction, after accounting commits.
+            if response is not None:
+                self.ctx.log(f'model.response requested={response["requested_model"]} actual={response["model"]}')
+            if kind == 'model' and result.get('status') in ('provider_error', 'transport_failure'):
+                self.ctx.log(self.redactor.redact(f'provider.error http_status={result.get("http_status")} '
+                    f'detail={str(result.get("detail") or "transport or upstream error")[:1000]}'))
             self.ctx.log(self.redactor.redact(f'relay {kind}: {result.get("status")} usage={result.get("usage")}'))
         finally:
             if kind == 'model':

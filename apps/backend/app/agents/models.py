@@ -25,6 +25,7 @@ from app.workers.runtime import RunContext
 
 from .redaction import Redactor
 from .souls import ROLES
+from app.provider_routing import routing_fields, retry_after_seconds
 
 
 class ModelError(RuntimeError):
@@ -77,6 +78,8 @@ class ModelRequest:
     temperature: float = 0.2
     stream: bool = False
     reasoning_effort: str | None = None
+    fallback_models: tuple[str, ...] = ()
+    allow_provider_fallbacks: bool = False
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,8 @@ class ModelConfig:
     temperature: float = 0.2
     stream: bool = False
     reasoning_effort: str | None = None
+    fallback_models: tuple[str, ...] = ()
+    allow_provider_fallbacks: bool = False
 
 
 class ModelRegistry:
@@ -144,6 +149,19 @@ class ModelRegistry:
             tokens = merged.get("max_output_tokens", 2048)
             stream = merged.get('stream', False)
             effort = merged.get('reasoning_effort')
+            fallbacks = merged.get('fallback_models', [])
+            allow_fallbacks = merged.get('allow_provider_fallbacks', bool(fallbacks))
+            if (not isinstance(fallbacks, list) or any(not isinstance(m, str) or not m.strip()
+                    or m != m.strip() for m in fallbacks)):
+                raise ConfigError(f'role {role} fallback_models must be a list of model IDs')
+            if len(set([merged['model'], *fallbacks])) != 1 + len(fallbacks):
+                raise ConfigError(f'role {role} fallback models must be unique and exclude the primary')
+            if type(allow_fallbacks) is not bool:
+                raise ConfigError(f'role {role} allow_provider_fallbacks must be boolean')
+            if fallbacks or allow_fallbacks:
+                settings = providers.get(merged['provider'])
+                if not isinstance(settings, dict) or urlsplit(settings.get('base_url', '')).hostname != 'openrouter.ai':
+                    raise ConfigError(f'role {role} fallback routing is supported only through OpenRouter')
             if effort not in (None, 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'):
                 raise ConfigError(f'role {role} has an invalid reasoning_effort')
             if type(stream) is not bool:
@@ -152,7 +170,8 @@ class ModelRegistry:
                     (tokens is not None and (type(tokens) is not int or tokens <= 0))):
                 raise ConfigError(f"role {role} needs a finite timeout (0-600 s) and positive max_output_tokens or null")
             configs[role] = ModelConfig(role, merged["provider"], merged["model"], float(timeout), tokens,
-                                        float(merged.get("temperature", 0.2)), stream, effort)
+                                        float(merged.get("temperature", 0.2)), stream, effort,
+                                        tuple(fallbacks), allow_fallbacks)
         for name, settings in providers.items():
             if not isinstance(settings, dict) or not settings.get("base_url") or not settings.get("api_key_env"):
                 raise ConfigError(f"provider {name} needs base_url and api_key_env")
@@ -242,9 +261,15 @@ class ChatCompletionsProvider:
                    "messages": [{"role": "system", "content": request.system},
                                 {"role": "user", "content": request.user}]}
         if urlsplit(self.base_url).hostname == "openrouter.ai":
+            if request.fallback_models or request.allow_provider_fallbacks:
+                if request.fallback_models:
+                    payload.pop('model')
+                payload.update(routing_fields(request.model, request.fallback_models, request.allow_provider_fallbacks))
             payload["usage"] = {"include": True}
             if request.reasoning_effort is not None:
                 payload['reasoning'] = {'effort': request.reasoning_effort}
+        elif request.fallback_models or request.allow_provider_fallbacks:
+            raise ProviderRejected('fallback routing is currently supported only through OpenRouter')
         elif request.reasoning_effort is not None:
             raise ProviderRejected('reasoning_effort is currently supported only through OpenRouter')
         if request.stream:
@@ -293,13 +318,7 @@ class ChatCompletionsProvider:
     def _raise_http(self, exc: urllib.error.HTTPError):
         detail = self.redactor.redact(exc.read(1000).decode(errors="replace"))[:300]
         if exc.code == 429:
-            try:
-                retry = float(exc.headers.get("Retry-After", "") or 30)
-            except ValueError:
-                retry = 30.0
-            if not math.isfinite(retry):
-                retry = 30.0
-            retry = min(3600.0, max(1.0, retry))
+            retry = retry_after_seconds((exc.headers or {}).get('Retry-After'))
             raise ProviderQuota(retry, f"provider quota (HTTP 429): {detail}") from exc
         if exc.code >= 500:
             error = ProviderUnavailable(f"provider error HTTP {exc.code}: {detail}")
@@ -485,7 +504,9 @@ class ModelClient:
             provider = self.provider_for(role)
             if not isinstance(provider, ChatCompletionsProvider):
                 raise ConfigError('provider does not support output maximum metadata')
-            cap = provider.output_limit(config.model)
+            # A routed request has one shared output parameter. Use the provider's
+            # supported maximum for every authorized model, never an invented cap.
+            cap = min(provider.output_limit(model) for model in (config.model, *config.fallback_models))
         return min(cap, job_cap) if job_cap is not None else cap
 
     def complete(self, ctx: RunContext, role: str, system: str, user: str) -> ModelResult:
@@ -495,7 +516,8 @@ class ModelClient:
 
         def call(job_cap):
             cap = self.output_limit(role, job_cap)
-            request = ModelRequest(system, user, cap, config.model, config.temperature, config.stream, config.reasoning_effort)
+            request = ModelRequest(system, user, cap, config.model, config.temperature, config.stream,
+                                   config.reasoning_effort, config.fallback_models, config.allow_provider_fallbacks)
             try:
                 if isinstance(provider, ChatCompletionsProvider):
                     response = provider.complete(request, timeout_s=config.timeout_s, progress=ctx.log, check=ctx._check)
@@ -523,6 +545,7 @@ class ModelClient:
                 while time.monotonic() < deadline:
                     ctx._check()
                     ctx.cancelled.wait(min(0.1, max(0, deadline - time.monotonic())))
+        ctx.log(self.redactor.redact(f'model.response requested={config.model} actual={response.model or config.model}'))
         return ModelResult(self.redactor.redact(response.text), response.usage,
                            self.redactor.redact(response.provider or provider.name),
                            self.redactor.redact(response.model or config.model), bool(provider.fake))

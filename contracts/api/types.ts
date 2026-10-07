@@ -87,6 +87,9 @@ export interface Candidate {
 }
 export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; preview: Preview | null; releases: Release[]; cursor: number }
 export interface TicketDetail {
+  verification_plan?: { profile: "lightweight"; scope_version: number;
+    status: "not_planned" | "planned" | "legacy"; test_count: number | null;
+    criteria: (Criterion & { test_ids: string[] })[] };
   ticket: Ticket; versions: { version: number; title: string; description: string; uac: Criterion[]; scope: Json }[];
   dependencies: { upstream_id: string; state: string; scope_version: number | null; candidate_id: string | null;
     integration_sha: string | null; revalidation: Json }[];

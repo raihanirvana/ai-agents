@@ -24,6 +24,13 @@ The user gave a brief or a feature request. Propose the smallest useful set of t
      first). Never create a cycle. Do not label overlapping implementation as independent merely
      to make it run sooner. Avoid duplicating existing tickets or accepted features in context.
    - List the assumptions you made in `assumptions`.
+   - Read verification_policy and browser_capabilities. Propose automated UAC for supported,
+     observable functional behaviour (including persistence, CSV, stock validation and calculations).
+     Use manual mode for subjective visual/usability checks and genuinely unsupported external flows,
+     stating the reason in description/assumptions and a concrete check in the UAC text. The user
+     approves that split with scope. Do not mark supported functional checks manual just to save work.
+     Money, permissions and irreversible/data-loss behaviour need proportionate negative/regression
+     checks; raise material verification gaps before approval. Never reclassify approved UAC to hide failure.
 
 Before returning, check that every requested behaviour maps to a UAC, no tickets duplicate
 ownership of the same change, and combining adjacent tickets would not give a clearer deliverable.

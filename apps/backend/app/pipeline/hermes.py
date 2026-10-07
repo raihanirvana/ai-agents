@@ -70,6 +70,7 @@ class HermesDriver:
             job.runtime_ref = {**job.runtime_ref, 'pipeline_runtime': installation,
                 'pipeline_models': [*job.runtime_ref.get('pipeline_models', []),
                     {'generation': identity['generation'], 'provider': config.provider, 'model': config.model,
+                     'fallback_models': list(config.fallback_models),
                      'context_artifact_id': snapshot.artifact_id}]}
         if provider.fake or identity['fake'] or not hasattr(provider, '_key'):
             raise ValueError('Hermes HTTP driver requires a real configured provider; fake tests use an injected driver')
@@ -93,7 +94,8 @@ class HermesDriver:
         relay = Relay(admission, ctx.lease.job_id, ctx.lease.generation, config.model, provider._key,
                       {name: wrapped(name, handler) for name, handler in tools.items()},
                       request_projection=TranscriptProjection(ctx.log) if role == 'developer' else None,
-                      provider_retry_delays=(5, 15, 30))
+                      provider_retry_delays=(5, 15, 30), fallback_models=config.fallback_models,
+                      allow_provider_fallbacks=config.allow_provider_fallbacks)
         relay.ENDPOINT = provider.base_url + '/chat/completions'
         proc, thread = None, None
         try:

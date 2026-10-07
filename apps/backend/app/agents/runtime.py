@@ -178,7 +178,9 @@ class StructuredAgentRuntime:
     # -- PO ---------------------------------------------------------------------------------------------------------------
     def _breakdown(self, ctx: RunContext, identity: dict[str, Any]) -> Outcome:
         task = ctx.job["runtime_ref"]["payload"]
-        output, meta, _ = self._ask(ctx, identity, {"name": "breakdown", "request": task.get("request", "")}, PoOutput)
+        from app.pipeline.qa_policy import policy_context
+        output, meta, _ = self._ask(ctx, identity, {"name": "breakdown", "request": task.get("request", ""),
+            'verification_policy': policy_context()}, PoOutput)
         if isinstance(output, Clarification):
             self._clarify(ctx, identity, output)
         if not isinstance(output, PoProposal):
@@ -216,7 +218,9 @@ class StructuredAgentRuntime:
     def _revise(self, ctx: RunContext, identity: dict[str, Any]) -> Outcome:
         if identity["ticket_id"] is None:
             return self._failed(ctx, "revise needs a ticket run", retryable=False)
+        from app.pipeline.qa_policy import policy_context
         output, meta, _ = self._ask(ctx, identity, {"name": "revise", "ticket_id": identity["ticket_id"],
+                                                    'verification_policy': policy_context(),
                                                     "request": ctx.job["runtime_ref"]["payload"].get("request", "")},
                                     PoReviseOutput)
         if isinstance(output, Clarification):

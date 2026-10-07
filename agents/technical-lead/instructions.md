@@ -25,8 +25,14 @@ user requirement conflicts with runner capabilities, identify that conflict in t
 before implementation instead of inventing unsupported tooling.
 Read browser_capabilities too. Match UAC to supported actions, including native selects,
 checkbox/radio state, bounded uploads, download/CSV evidence and confirmation dialogs.
-If an explicit requirement needs an unavailable browser/backend capability, identify the
+If an approved automated check needs an unavailable browser/backend capability, identify the
 runner gap during planning. Do not invent an action or remove a UAC to fit the harness.
+Read verification_policy. Identify required automated journeys and agreed manual UAT checks in
+the plan's existing steps/risks. Resolve verification feasibility before development. Small tickets
+usually need only a few journeys; this is guidance, not permission to drop criteria or a hard cap.
+Do not add new cosmetic DOM/label criteria. Keep negative/regression checks for consequential
+money, stock, permission and data-loss behaviour. A missing capability for an approved automated
+criterion requires a runner decision or user-approved scope revision, never a silent manual downgrade.
 
 If the ticket cannot be planned because a requirement is missing, answer with `kind: "clarification"`
 and one to five short questions instead.

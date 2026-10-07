@@ -139,9 +139,35 @@ def _runs(s, project_id):
     return [run(j, s, jobs, usage_by_key) for j in jobs]
 
 
+def verification_plan(s, t):
+    """Scope owns automatic/manual modes; planning metadata describes tests, not a pass."""
+    from sqlalchemy import func
+    version = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id,
+                                                   TicketVersion.version == t.current_version))
+    message = s.scalar(select(Message).where(Message.ticket_id == t.id,
+        func.json_extract(Message.meta, '$.intent') == 'qa_plan',
+        func.json_extract(Message.meta, '$.scope_version') == t.current_version)
+        .order_by(Message.created_at.desc(), Message.seq.desc()).limit(1))
+    saved = (message.meta.get('verification_plan') or {}) if message else {}
+    if not isinstance(saved, dict):
+        saved = {}
+    entries = saved.get('criteria', [])
+    if not isinstance(entries, list):
+        entries = []
+    mapping = {c.get('id'): c.get('test_ids', []) for c in entries
+               if isinstance(c, dict) and isinstance(c.get('id'), str) and isinstance(c.get('test_ids', []), list)}
+    return {'profile': 'lightweight', 'scope_version': t.current_version,
+        'status': 'planned' if saved.get('status') == 'planned' else 'legacy' if message else 'not_planned',
+        'test_count': saved.get('test_count') if saved.get('status') == 'planned' else None,
+        'criteria': [{'id': c['id'], 'text': c['text'], 'mode': c.get('mode', 'automated'),
+            'test_ids': [i for i in mapping.get(c['id'], []) if isinstance(i, str)]}
+            for c in version.uac] if version else []}
+
+
 def detail(s, ticket_id, threads):
     t = row(s, Ticket, ticket_id)
-    return {"ticket": {**ticket(t), 'dependency_waits': dependency_waits(s, [t])[t.id]}, "versions": [{"version": v.version, "title": v.title, "description": v.description,
+    return {"ticket": {**ticket(t), 'dependency_waits': dependency_waits(s, [t])[t.id]},
+            'verification_plan': verification_plan(s, t), "versions": [{"version": v.version, "title": v.title, "description": v.description,
             "uac": v.uac, "scope": v.scope} for v in s.scalars(select(TicketVersion).where(TicketVersion.ticket_id == t.id)
                                                                     .order_by(TicketVersion.version))],
             "dependencies": [{"upstream_id": d.depends_on_ticket_id, "state": d.state,

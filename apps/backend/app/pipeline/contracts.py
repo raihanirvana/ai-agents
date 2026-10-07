@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 from pydantic import ConfigDict, Field, model_validator, model_serializer, StrictInt, StrictStr, StrictBool
 from app.agents.outputs import Contract, ID
 
@@ -230,6 +231,15 @@ class QaPlan(Contract):
                 f"test {first['test_id']}, step {first['step']}, row {first['row']}, column {first['column']}. "
                 'Compare the original fill input and approved criteria; use text for serialized CSV expectations.')
 
+    def check_selector_contracts(self):
+        for test in self.tests:
+            for index, step in enumerate(test.steps):
+                tokens = re.sub(r'''"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*' ''', '', step.selector or '',
+                                flags=re.VERBOSE)
+                if re.search(r'(?<!\\):contains\s*\(', tokens):
+                    raise ValueError(f'test {test.id}, step {index}: jQuery :contains() is unsupported. '
+                                     'Use a scoped CSS selector with assert_contains_text and the original expected text.')
+
     @property
     def digest(self):
         return digest_of(self.model_dump())
@@ -244,6 +254,8 @@ def browser_capabilities():
                       'upload_file accepts only an inline bounded text/CSV/JSON fixture; no host path',
                       'click_dialog clicks a control and verifies/accepts or dismisses one native alert/confirm/prompt',
                       'navigate/assert_url accept same-origin paths only; each test has isolated storage',
+                      'Each test creates its own prerequisite records; reopen detail panels after reload when selection is transient',
+                      'jQuery :contains() is unsupported; use a scoped selector and assert_contains_text',
                       'No arbitrary JavaScript, shell, external auth/API, iframe/popup, drag/drop or backend DB access',
                       'Unsupported requirements need a runner capability decision; do not invent or weaken assertions'],
             'download_max_bytes': 1024 * 1024, 'suite_max_bytes': 512 * 1024}
@@ -254,6 +266,55 @@ class Review(Contract):
     accept: StrictBool
     summary: str = Field(min_length=1, max_length=2000)
     findings: list[str] = Field(default_factory=list, max_length=20)
+
+
+class DiagnosisFinding(Contract):
+    test_id: str = Field(pattern=ID)
+    fault: Literal['application', 'test', 'infrastructure', 'unknown']
+    expected: str = Field(min_length=1, max_length=800)
+    observed: str = Field(min_length=1, max_length=800)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class QaDiagnosis(Contract):
+    kind: Literal['qa_diagnosis']
+    fault: Literal['application', 'test', 'infrastructure', 'unknown']
+    summary: str = Field(min_length=1, max_length=1500)
+    findings: list[DiagnosisFinding] = Field(min_length=1, max_length=24)
+
+    @model_validator(mode='after')
+    def consistent(self):
+        if len({f.test_id for f in self.findings}) != len(self.findings):
+            raise ValueError('duplicate diagnosis test ID')
+        if self.fault != 'unknown' and any(f.fault != self.fault for f in self.findings):
+            raise ValueError('mixed findings require unknown overall fault')
+        return self
+
+
+class SetupSelection(Contract):
+    test_id: str = Field(pattern=ID)
+    fixture_test_id: str = Field(pattern=ID)
+    before_step: StrictInt = Field(default=0, ge=0, le=29)
+    step_indexes: list[StrictInt] = Field(min_length=1, max_length=20)
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode='after')
+    def ordered_indexes(self):
+        if any(i < 0 or i > 29 for i in self.step_indexes) or self.step_indexes != sorted(set(self.step_indexes)):
+            raise ValueError('setup indexes must be unique, ascending, nonnegative indexes')
+        return self
+
+
+class QaSetupRepair(Contract):
+    kind: Literal['qa_setup_repair']
+    summary: str = Field(min_length=1, max_length=1000)
+    setups: list[SetupSelection] = Field(min_length=1, max_length=24)
+
+    @model_validator(mode='after')
+    def unique_tests(self):
+        if len({s.test_id for s in self.setups}) != len(self.setups):
+            raise ValueError('one setup selection per failed test')
+        return self
 
 
 def validate_report(report, *, invocation_id, target_digest, suite: QaPlan):

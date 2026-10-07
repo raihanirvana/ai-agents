@@ -206,6 +206,19 @@ selector yang konservatif membuat suite/target baru pada build yang sama dan
 menjalankan baseline/kandidat ulang. Ini tidak menaikkan repair_cycles aplikasi;
 ketidakjelasan diagnosis tetap incomplete/failed, bukan pass.
 
+Policy QA ringan memakai capability/preflight sebelum development dan pemetaan
+automated/manual dari scope yang disetujui. Rencana kecil menggabungkan UAC
+dalam beberapa journey tanpa menghapus coverage atau gates. Failure browser
+yang belum memenuhi koreksi konservatif dikirim ke job QA diagnosis persisten
+pada target/evidence yang sama, sehingga retry model tidak mengulang harness.
+Hanya application fault yang terdiagnosis meminta repair. Test/unknown tetap
+di QA; koreksi CSV dari input asli, selector text legacy yang terbukti invalid,
+dan setup dari prefix tes lulus tetap memerlukan target dan eksekusi baru.
+Model setup hanya memilih indeks tindakan existing, tanpa mengubah assertion;
+supervisor memvalidasi sumber fixture, penempatan, coverage, lease dan target.
+Checklist manual tetap dikonfirmasi pengguna saat UAT, tanpa auto-pass/model
+approval atau downgrade automated UAC. Lihat docs/decisions/qa-policy.md.
+
 Dependency mem-pin ticket/scope version, accepted candidate, dan integration SHA.
 Histori acceptance tersebut tidak dihapus ketika ada revisi/revert melalui tiket
 baru. Perubahan kontrak dependency pada base terbaru ditandai needs_revalidation
@@ -477,8 +490,13 @@ gateway transient, dengan jeda 5/15/30 detik dan reservation/accounting setiap
 percobaan. Respons parsial dan mutasi tool tidak diputar ulang melalui jalur ini.
 Kebijakan retry job dan request model adalah dua tingkat yang berbeda. Siklus
 perbaikan review/QA default tiga per scope version; needs_human setelah itu.
-Quota habis masuk waiting_quota; tidak berpindah ke provider berbayar tanpa
-konfigurasi pengguna. Pertanyaan produk masuk waiting_input dan worker tersedia
+Role OpenRouter dapat menetapkan `fallback_models` eksplisit: router mencoba model
+utama, lalu cadangan untuk error model/provider. Structured client dan relay Hermes
+memakai rute yang sama, mem-pin daftar yang diotorisasi, dan mencatat model respons
+aktual. Native routing dihitung sebagai satu request aplikasi dengan usage respons;
+retry HTTP terpisah tetap memiliki reservasi sendiri. Runtime tidak memilih cadangan.
+Quota habis setelah seluruh rute gagal masuk waiting_quota; tidak berpindah ke
+model/provider berbayar tanpa konfigurasi pengguna. Pertanyaan produk masuk waiting_input dan worker tersedia
 untuk tiket lain. Limit per run dan akumulasi usage per scope tetap berlaku saat
 retry/resume; budget exhausted membutuhkan keputusan pengguna, tanpa reset histori.
 

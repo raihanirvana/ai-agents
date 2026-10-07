@@ -94,20 +94,32 @@ tetap harus dikirim melalui request-changes dengan bukti/reproduksi.
 Runner membaca fakta DOM dengan fungsi tetap milik runner; model tidak dapat
 menyisipkan expression JavaScript dalam DSL.
 
-Koreksi otomatis dibatasi pada dua kasus:
+Koreksi otomatis dibatasi pada kasus berikut:
 
 1. assert_visible ambigu dengan tepat satu visible alert dan ID unik yang aman.
 2. fill pada tepat satu visible/enabled native select, dengan tepat satu enabled
    option bernilai persis value yang diminta. Operasi berubah menjadi
    select_option by value; selector/value dan seluruh assertion tidak berubah.
+3. Setelah diagnosis QA mengidentifikasi test fault pada parsed CSV, token
+   berbungkus/doubled quotes dapat diganti dengan nilai fill asli sebelumnya
+   pada tes yang sama. Hanya representasi encoding yang dikoreksi; nilai actual
+   tidak dipakai sebagai replacement. Nilai literal yang memang dimasukkan
+   berbungkus kutip tidak dikoreksi. Helper harus mengenali semua failed tests;
+   kekeliruan lain tetap gagal pada eksekusi berikutnya atau memerlukan diagnosis.
 
 Semua kegagalan harus memenuhi syarat untuk koreksi. Mixed/unknown failure,
 missing option, ambiguous option, salah control lain, atau batas dua koreksi
 per rantai target tetap failed dan memerlukan diagnosis QA. Tidak ada waiver,
-assertion dihapus, expected value diganti, aplikasi ditulis ulang, atau pass
+assertion dihapus, expected disalin dari actual, aplikasi ditulis ulang, atau pass
 yang diperoleh dari diagnosis. Verification lama tetap immutable. Suite/target
 baru pada source/build/config/runner yang sama harus menjalankan ulang semua
 candidate tests dan baseline bila applicable sebelum UAT pengguna.
+
+Diagnosis yang belum dapat diperbaiki dengan fakta DOM dijalankan sebagai job QA
+terpisah pada verification/target yang sama. Retry model memakai report lama;
+browser tidak dijalankan ulang untuk retry diagnosis. Job ini hanya mengirim
+application fault yang terdiagnosis ke development. Test/unknown/infrastructure
+tidak membuka UAT dan tidak merelabel kriteria menjadi manual.
 
 ## Kompatibilitas dan keterbatasan
 

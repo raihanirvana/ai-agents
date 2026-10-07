@@ -45,12 +45,27 @@ class PipelineScheduler:
                 key = f"pipeline:{t.id}:v{t.current_version}:{stage}:{cycle}:{candidate or '-'}"
                 legacy_key = key
                 suite_repaired = False
+                payload = {"task": task, "candidate_id": candidate}
                 if stage in ('technical_review', 'qa') and candidate:
                     current = s.get(Candidate, candidate)
                     if current and current.target_digest:
                         key += '@target-' + current.target_digest
                         target_row = s.get(Artifact, current.target_artifact_id)
                         suite_repaired = bool(target_row and target_row.meta.get('qa_repair_job_id'))
+                        if stage == 'qa':
+                            pending = next((j for j in reversed(jobs) if j.status == 'succeeded'
+                                and (j.result or {}).get('diagnosis_required') is True
+                                and j.result.get('candidate_id') == candidate
+                                and j.result.get('target_digest') == current.target_digest
+                                and j.result.get('verification_id')), None)
+                            if pending is not None:
+                                key += ':diagnose:' + pending.result['verification_id']
+                                # Diagnosis is a separate durable QA attempt. It
+                                # reuses failed evidence, never reruns the browser
+                                # merely because a model/provider call retried.
+                                legacy_key = key
+                                payload = {'task': 'diagnose', 'candidate_id': candidate,
+                                           'verification_id': pending.result['verification_id']}
                 if stage == "development":  # work on an older accepted base must be redone on the new one
                     key += "@" + p.workflow["accepted_tip"][:12]
                 existing = [j for j in jobs if j.idempotency_key == key]
@@ -70,6 +85,6 @@ class PipelineScheduler:
                 job = self.queue.enqueue(session=s, project_id=t.project_id, ticket_id=t.id, expected_scope=t.current_version,
                     lane="execution", role=role, stage=stage, runtime=self.runtime, idempotency_key=key, limits=caps,
                     budget_pool=BUDGET_POOL,
-                    payload={"task": task, "candidate_id": candidate}, actor="scheduler:pipeline")
+                    payload=payload, actor="scheduler:pipeline")
                 dispatched.append(job.id)
         return dispatched

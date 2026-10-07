@@ -154,6 +154,13 @@ dapat di-waive; browser UAC tetap wajib. Evidence menampilkan `required_checks:
 
 ## Suite dan evidence authoritative
 
+Rencana baru mengikuti [policy QA ringan](qa-policy.md): preflight otomatis/manual
+sebelum developer mulai, beberapa journey yang mencakup seluruh automated UAC,
+dan checklist UAT dari scope yang disetujui. Failed execution yang belum dapat
+dikoreksi dengan fakta DOM dianalisis job QA diagnosis terpisah; hanya bug
+aplikasi yang terdiagnosis meminta repair. Retry model memakai evidence yang
+sama. Tidak mengubah target/approval lama atau melewatkan mandatory tests.
+
 QA melalui Hermes hanya menyusun DSL browser yang tervalidasi. Operasi awal
 click/fill/press/reload dan assert_text/count/visible/value diperluas pada revisi 2
 untuk select, checkbox/radio, state/attribute, upload/download/CSV dan dialog;

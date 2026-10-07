@@ -32,6 +32,7 @@ export default function TicketPanel() {
       <ScopeSection detail={detail} />
       <ProposalSection detail={detail} />
       <Dependencies detail={detail} />
+      <VerificationPlan detail={detail} />
       <Candidates detail={detail} fake={fake} />
       <Approvals detail={detail} />
       <Work detail={detail} />
@@ -76,7 +77,9 @@ function ScopeSection({ detail }: { detail: TicketDetail }) {
         <>
           <p className="desc">{shown.description || <span className="muted">Tanpa deskripsi</span>}</p>
           <ul className="uac" aria-label="Kriteria penerimaan">
-            {shown.uac.map((c) => <li key={c.id}><code>{c.id}</code> {c.text} {c.mode === "manual" && <Badge tone="warn" title="Perlu konfirmasi manual Anda saat UAT">manual</Badge>}</li>)}
+            {shown.uac.map((c) => <li key={c.id}><code>{c.id}</code> {c.text} <Badge tone={c.mode === "manual" ? "warn" : "info"}
+              title={c.mode === "manual" ? "Perlu konfirmasi Anda saat UAT" : "Wajib dibuktikan tes otomatis"}>
+              {c.mode === "manual" ? "Anda saat UAT" : "otomatis"}</Badge></li>)}
           </ul>
         </>
       )}
@@ -96,6 +99,28 @@ function ScopeSection({ detail }: { detail: TicketDetail }) {
         {ticket.phase === "scope_review" && <span className="muted">Approval selalu atas scope v{ticket.scope_version} tiket ini.</span>}
       </div>
       <AskPo ticketId={ticket.id} />
+    </section>
+  );
+}
+
+function VerificationPlan({ detail }: { detail: TicketDetail }) {
+  const plan = detail.verification_plan;
+  const criteria = plan?.criteria ?? currentScope(detail).doc.uac.map((c) => ({ ...c, test_ids: [] as string[] }));
+  const automatic = criteria.filter((c) => c.mode !== "manual");
+  const manual = criteria.filter((c) => c.mode === "manual");
+  return (
+    <section aria-labelledby="verification-plan-h">
+      <h3 id="verification-plan-h">Rencana pengujian</h3>
+      <p>{automatic.length} kriteria otomatis · {manual.length} kriteria Anda periksa saat UAT.
+        {plan?.status === "planned" && <> Direncanakan {plan.test_count} skenario browser.</>}</p>
+      {plan?.status === "not_planned" && <p className="muted">Skenario disiapkan sebelum Developer mulai. Kemampuan pengujian yang belum tersedia dibahas saat planning.</p>}
+      <details><summary>Lihat pembagian pemeriksaan</summary><ul className="plain">
+        {criteria.map((c) => <li key={c.id}><code>{c.id}</code> {c.text}{" "}
+          <Badge tone={c.mode === "manual" ? "warn" : "info"}>{c.mode === "manual" ? "Checklist UAT" : "Otomatis"}</Badge>
+          {c.mode !== "manual" && c.test_ids.length > 0 && <span className="muted"> · {c.test_ids.length} skenario</span>}
+        </li>)}
+      </ul></details>
+      <p className="muted">Hasil otomatis ada pada bukti kandidat. Checklist manual tetap memerlukan konfirmasi Anda; tampilan dan kenyamanan juga dapat dicoba lewat preview.</p>
     </section>
   );
 }
@@ -430,6 +455,8 @@ function UatDecision({ detail, candidate, verification, manualUac, identity }: {
   return (
     <div className="uat" aria-label="Keputusan UAT">
       <h4>Keputusan UAT untuk target <code>{short(candidate.target_digest, 12)}</code></h4>
+      <p className="muted">Tes otomatis lulus untuk target ini. Coba alur utama dan kenyamanan aplikasi lewat preview.
+        {manualUac.length > 0 && " Centang kriteria manual hanya setelah Anda memeriksanya; hasil otomatis tidak mengisi checklist ini."}</p>
       {manualUac.length > 0 && (
         <fieldset><legend>Konfirmasi UAC manual (Anda yang memeriksa)</legend>
           {manualUac.map((c) => (

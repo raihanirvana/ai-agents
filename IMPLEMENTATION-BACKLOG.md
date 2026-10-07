@@ -1129,6 +1129,35 @@ optimasi tool/context/cache dan pengukuran ulang belum dikerjakan.
 
 ## DEV-007 — Soul, context, model client, dan pesan antar-agent
 
+### Fallback model OpenRouter eksplisit — 7 Oktober 2026
+
+Status perubahan: `DONE` (implementasi; review independen belum dilakukan). Permintaan pengguna: DeepSeek tetap utama;
+GLM 5.3 Flash hanya cadangan saat provider/model utama gagal. Rencana: konfigurasi
+`fallback_models` per role, routing yang sama untuk structured client dan relay
+Hermes, catat model respons aktual serta alasan quota, lalu restart worker.
+File relevan: `agents/models.example.json`, `app/agents/models.py`,
+`app/runtime_spike/relay.py`, `app/pipeline/{hermes,relay}.py` dan keputusan agents.
+Tidak mengubah approval, histori usage, atau budget demo.
+
+Hasil: `fallback_models`/`allow_provider_fallbacks` divalidasi per role;
+structured client dan relay mengirim daftar OpenRouter yang dipilih supervisor.
+Relay menolak model utama berbeda dan menghapus rute cadangan dari input runtime.
+Model respons nyata tercatat dalam log/metadata. Accounting tetap satu reservasi
+per request aplikasi, dan setiap retry HTTP punya reservasi sendiri; final error
+retry mengikat reservasi terakhir agar detail/Retry-After tidak hilang.
+Helper bersama: `apps/backend/app/provider_routing.py`.
+
+Verifikasi aktual: AST parse kelima file Python valid; impor model registry,
+relay/Hermes/ProductAdmission dan validasi registry lokal berhasil;
+`agents/models.example.json` valid JSON; `git diff --check` bersih. Worker lama
+berhenti tertib, job dikembalikan ke antrean, worker baru PID 34962 aktif.
+Job Developer tiket #2 generation 25 memakai primary DeepSeek dan fallback GLM;
+dua respons provider nyata `complete` tercatat sebagai DeepSeek sekitar 14.50 WIB.
+Tes regresi tidak ditambahkan/dijalankan karena pengguna meminta implementasi
+dan aktivasi konfigurasi, bukan menjalankan tes. Failover 429 ke GLM belum diamati
+di run baru; native routing mengikuti kontrak resmi OpenRouter, bukan klaim hasil
+simulasi. Fallback tidak menjamin pulih dari putus koneksi lokal atau limit akun.
+
 ### Output tanpa cap aplikasi untuk demo — 2026-10-06
 
 Status perubahan: DONE (implementasi). Pelaksana: Codex. Review: NOT_REVIEWED.
@@ -1571,6 +1600,103 @@ batch approval, daftar run/activity, blocker, dan indikator fake/real.
 uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
+
+### Pemulihan suite QA Mini CRM — 2026-10-07
+
+Status perbaikan: DONE (implementasi dan demo). Review: NOT_REVIEWED.
+Scope: koreksi selector jQuery `:contains()` dan setup yang hilang pada browser
+context terisolasi, tanpa mengubah source, assertion, UAC atau approval. Tambah
+preflight selector dan recovery otomatis yang hanya menyalin setup dari prefix
+tes yang sudah lulus pada target yang sama. Suite/target dan bukti lama tetap
+immutable; jalankan ulang baseline/kandidat untuk tiket demo #2 dan #3.
+File rencana: `app/pipeline/{contracts,qa_policy,qa_repair,runtime}.py`,
+instruksi QA dan dokumen keputusan. Restart worker setelah perubahan siap.
+Hasil implementasi:
+- Preflight planning baru menolak pseudo-class jQuery, tanpa menolak string
+  atribut yang hanya berisi teks `:contains`. Legacy visibility yang terbukti
+  syntax error menjadi visibility dan assertion substring case-sensitive dengan
+  expected asli; tidak mengganti expected dari output aplikasi.
+- QA memilih indeks setup dari prefix tes yang lulus di target yang sama.
+  Supervisor menyalin input/tindakan asli dan mempertahankan seluruh langkah,
+  assertion, ID, UAC dan purpose. Setup duplikat ditolak; pembukaan detail setelah
+  reload wajib ditempatkan tepat sebelum failed_step, bukan sebelum seluruh tes.
+- Retry membaca diagnosis tersimpan yang masih cocok dengan kandidat/target/
+  verification. Perubahan prompt tidak meminta diagnosis baru yang kemudian
+  bentrok dengan diagnosis lama. Tidak reset usage atau memindahkan approval.
+- Snapshot planning QA mempunyai ruang minimum 16384 token agar instruksi/schema
+  dan dependency #4 muat; policy usage demo tetap unlimited seperti sebelumnya.
+
+Verifikasi aktual:
+- AST/import empat modul Python OK dan `git diff --check` bersih.
+- Probe terhadap bukti authoritative historis: recipe membuka detail setelah
+  reload diterima; recipe menggandakan setup ditolak; seluruh langkah/kriteria
+  asli tetap identik. Selector invalid ditolak dan teks atribut quoted diterima.
+- Demo #3: runner browser nyata **3/3 passed**, baseline **3 failed** karena
+  kontrol fitur belum tersedia, repo gate passed. Verification
+  `27993dacdf6347e7b1ac79c08a6bf135`; pengguna kemudian menerima tiket tersebut.
+- Demo #2: awalnya selector berhasil dikoreksi otomatis, tetapi proposal model
+  setup yang salah menggandakan data. Guard diperketat. Setelah #3 diterima,
+  platform mengembalikan #2 ke development untuk base baru; recipe operator
+  berizin pengguna memulihkan suite dengan Edit setelah reload, melalui job
+  persisten `c618484a6bac4867a870446cea6c952f`, tanpa overwrite bukti lama.
+  Developer dan TL menjalankan kandidat baru pada accepted base #3. Runner
+  browser nyata **2/2 passed**, baseline **2 failed** karena kontrol interaction
+  belum tersedia, repo gate passed. Verification `10690a2523574e5e81323a29cbdde910`;
+  tiket #2 masuk UAT, menunggu keputusan pengguna.
+- #4 melewati planning yang sebelumnya gagal karena snapshot 8000 token; worker
+  tetap menjalankan pipeline proyek. Restart worker dilakukan dengan shutdown
+  tertib; backend/frontend tetap berjalan.
+
+Keterbatasan: tidak menambah/menjalankan suite regresi platform; verifikasi tugas
+ini memakai probe terkait bukti dan browser demo nyata. Auto-repair konservatif
+bukan dukungan semua selector/setup; proposal yang belum valid tetap failed.
+Context overflow Hermes yang muncul pada attempt developer lama dicatat sebagai
+histori; perubahan ini tidak mengaktifkan kompresi Hermes atau menghapus batas
+fisik konteks provider. Retry developer dengan suite benar berhasil membuat
+kandidat baru. Handoff: diff empat modul, instruksi/SOUL QA, arsitektur dan
+`docs/decisions/qa-policy.md`; recipe lokal gitignored
+`data/repair-mini-crm-qa-plan.py` dan artefak audit DB. Belum commit/push.
+
+### QA ringan dan diagnosis sebelum repair — 2026-10-07
+
+Status: DONE (implementasi 2026-10-07). Review: NOT_REVIEWED.
+Rencana: policy QA ringan pada konteks PO/TL/QA, preflight persisten sebelum
+development, pemetaan automated/manual terlihat di detail/UAT, serta diagnosis
+failure sebelum meminta repair aplikasi. Harness/gates/pin/approval tetap wajib;
+mode UAC yang disetujui tidak direlabel otomatis. Tidak membuat batas token baru.
+File: agents, app/pipeline, app/agents/runtime.py, app/http/queries.py,
+contracts/api/types.ts, apps/web/src/components/Ticket.tsx dan docs keputusan.
+Tes belum diminta; tidak ditambah/dijalankan. Pemeriksaan statis setelah perubahan.
+Hasil: policy lightweight diberikan ke PO sebelum scope approval dan ke TL/QA
+saat planning. Planning baru memvalidasi coverage/action/schema dan menolak
+mandatory case yang hanya menduplikasi manual UAC; seluruh-manual tetap smoke
+dengan assertion. Receipt preflight mencatat scope/suite/capability dan mapping.
+Tidak memangkas suite historis atau mengganti mode UAC yang sudah disetujui.
+API detail dan UI menampilkan pembagian otomatis/checklist UAT; checkbox tetap
+kosong dan divalidasi backend sebelum acceptance.
+Failure yang belum dapat dikoreksi melalui fakta DOM menjadwalkan diagnosis
+QA persisten dengan key verification/target. Retry diagnosis memakai evidence
+yang sama. Kontrak memerlukan attribution/expected/observed/reason untuk semua
+failed test; hanya application fault meminta repair dengan bukti dan counter
+biasa. Test/unknown/infrastructure tetap failed di QA. Setelah diagnosis test,
+CSV-escaped tokens dapat dikoreksi sempit dari input fill asli, tanpa mengambil
+actual sebagai expected, lalu target/baseline/kandidat diverifikasi ulang.
+Receipt diagnosis dipakai ulang pada retry; approval, mandatory execution,
+generation/lease, cleanup, budgets/usage kumulatif dan batas suite repair tetap.
+Verifikasi aktual: AST 7 file Python dan import runtime/scheduler/policy/query/
+kontrak/agent lulus; schema diagnosis dan suite dapat di-inline; TypeScript
+`node node_modules/typescript/bin/tsc --noEmit -p apps/web/tsconfig.json` dan
+`git diff --check` lulus. Tidak menambah dependency atau migrasi DB.
+Keterbatasan: tes regresi/browser/provider dan recovery job diagnosis belum
+dijalankan. Pemeriksaan statis tidak membuktikan ketepatan diagnosis model atau
+pengurangan waktu/token. Gap yang nyata, failure campuran dan test fault di luar
+koreksi sempit masih memerlukan intervensi; tidak ada auto-pass/manual downgrade.
+Handoff: policy baru `app/pipeline/qa_policy.py`, contract/dispatch/runtime/
+repair, public DTO/query dan UI, souls/instruksi PO/TL/QA, serta
+`docs/decisions/qa-policy.md` dan spesifikasi/keputusan yang terkait.
+Layanan tidak sedang berjalan saat perubahan dibuat; implementasi berlaku saat
+API/worker dimulai kembali. Tidak menjalankan job model atau demo baru, dan
+commit/push belum diminta untuk assignment ini.
 
 ### Diagnosis expected CSV QA — 2026-10-07
 

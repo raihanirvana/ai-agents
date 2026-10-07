@@ -7,6 +7,14 @@ This file defines the task contract; the structured PO/lead runtime does not run
 
 1. Read the approved acceptance criteria for the ticket and the candidate's target identity.
 2. Propose test cases that cover every criterion; mark which are automated and which need a person.
+   Read verification_policy first. Default to a small set of coherent automated journeys, usually
+   1..3 for a small ticket, with no arbitrary cap for larger/riskier work. Cover all approved automated
+   UAC explicitly and preserve required regression. Approved manual UAC go to the user's checklist;
+   do not add mandatory browser cases solely to duplicate them. If every UAC is manual, include
+   a meaningful app-open smoke case with purpose smoke, empty uac list and an explicit assertion.
+   Check risk-sensitive invalid inputs for money/stock, permissions, persistence and data loss.
+   Do not add cosmetic label/DOM requirements. Accessibility checks should verify approved or
+   necessary behaviour (for example keyboard submission), rather than inventing preferred attributes.
    Keep the suite proportional to the scope: a coherent interaction sequence may cover several UAC,
    with explicit assertions and mapping for each. Preserve required regression coverage; do not add
    redundant cases, cosmetic requirements, or tests for sibling features absent from approved scope.
@@ -28,6 +36,10 @@ This file defines the task contract; the structured PO/lead runtime does not run
    test: a two-click toggle case needs two clicks, with the intermediate and final assertions in the same test.
    Do not rely on state from an earlier test. Prefer approved test-id selectors; avoid global tag counts or invented
    tag requirements unless the approved criteria require them. Preserve previously accepted behavior.
+   Create prerequisite customers/records and select their relationship inside each test before submitting a
+   dependent form. Reload preserves storage, but transient detail selection may require reopening the record.
+   jQuery `:contains()` is not supported. Use a scoped CSS selector with `assert_contains_text`, preserving
+   the exact expected text. Do not invent selector syntax from another testing library.
    `fill` only changes text. For Enter submission, fill the input then use
    `{"action":"press","selector":"input selector","value":"Enter"}` and assert the result.
    Never substitute a newline or literal `\\n` for a keyboard event. `press` accepts only the named keys
@@ -101,6 +113,40 @@ This file defines the task contract; the structured PO/lead runtime does not run
   copy actual output into expected values, unquote legitimate literal input, or ask the developer
   to break valid CSV escaping. When evidence demonstrates an application bug, send that diagnosis
   and reproduction through the existing request-changes workflow.
+
+## Task: `qa_diagnosis`
+
+The independent browser execution has already finished. Return one QaDiagnosis JSON object,
+with fault application/test/infrastructure/unknown, summary, and one finding per failed test:
+test_id, fault, expected, observed, reason. Use the supplied schema. Do not run tools or tests.
+
+- Inspect the approved criteria, original test inputs, exact failed evidence and source excerpt.
+  Cite the failed test and criterion in each reason. Account for all failed tests exactly once.
+- Choose application only with concrete evidence that a valid test exposed shipped behaviour
+  violating scope. Wrong selector/action/CSV representation belongs to the test. A missing DOM
+  element may be an application bug; do not automatically blame the selector. Mixed failures or
+  insufficient source/evidence are unknown. Baseline failure alone does not prove a candidate defect.
+- You cannot approve, pass QA, waive, relabel UAC, remove assertions or return replacement code.
+  The supervisor routes confirmed application defects to development. Test/unknown failures remain
+  in QA with their diagnosis. Only narrow supervisor-qualified repairs are automatic.
+- For legacy CSV suites diagnosed as test faults, the supervisor may replace a serialized CSV token
+  with its original earlier fill input. It preserves test IDs/UAC/actions and creates a new target
+  for full baseline/candidate execution. Actual download values never authorize replacement values.
+- Stop after the structured diagnosis; provider retries reuse failed evidence instead of rerunning
+  the browser. User UAT/manual confirmation remains required even if automated tests later pass.
+
+## Task: `qa_setup_repair`
+
+Return QaSetupRepair using only the supplied passed_setup_prefixes. Each selection names a failed
+test, a fixture_test_id, ascending step_indexes, before_step and a reason grounded in source/UAC.
+Select prerequisite setup from one test that passed on this exact target. Before_step=0 adds setup
+before a test; after reload, only a proven click may reopen transient UI before the failed assertion.
+After-reload repair MUST use before_step equal to failed_step, never zero. Do not prepend actions
+already performed before the failed step: this duplicates customers and can leave forms in edit mode.
+Select only needed existing steps, in original order. You cannot change their inputs, invent actions,
+alter original assertions/expected values, remove tests, or declare pass. The supervisor validates
+indexes and placement, creates a new immutable suite/target, and reruns the full baseline/candidate.
+If no supplied setup can solve the diagnosed failure, do not fabricate a fixture.
 
 ## Rules
 

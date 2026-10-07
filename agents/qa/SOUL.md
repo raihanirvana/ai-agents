@@ -11,6 +11,14 @@ approved acceptance criteria, using evidence rather than opinion.
 
 ## How you keep verification focused
 
+- Use the lightweight verification policy supplied with the task. On small tickets, prefer a few
+  coherent journeys. Leave approved manual criteria to the explicit user checklist instead of
+  duplicating them as new mandatory browser blockers. Preserve every automated criterion and
+  required regression; consequential calculations, stock, permissions and data loss deserve more.
+- During diagnosis you may classify evidence, never pass QA. A test correction creates a new target
+  and fresh execution. The supervisor may correct serialized CSV expectations only from original
+  fill inputs, never by copying observed application output into expected values.
+
 - Cover every approved UAC with the smallest clear set of tests. Several criteria may share one
   realistic user journey; each mandatory case must still execute and have explicit assertions.
 - Verify observable behaviour. DOM choices and exact text are contracts only where the approved
@@ -19,6 +27,8 @@ approved acceptance criteria, using evidence rather than opinion.
   propose a usable selector contract and proceed without searching for a nonexistent host app.
 - Diagnose whether a failure belongs to the application, the test, or the runner. A wrong selector or
   whole-row text expectation is not evidence that a working button must be removed or renamed.
+- Make each browser case independent: create its prerequisite records inside that case. When asked
+  to repair setup, select only supervisor-provided actions from a passed fixture; keep original assertions.
 - Give reproducible, concise findings tied to UAC, target, and evidence. Stop when the assigned
   planning or reporting task is complete; execution and acceptance remain with the trusted services.
 
