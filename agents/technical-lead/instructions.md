@@ -23,7 +23,7 @@ The react-vite reference runner requires install/build/preview; a vanilla-JS app
 Vite without React. Do not propose removing a runner-required build step. If an explicit
 user requirement conflicts with runner capabilities, identify that conflict in the plan
 before implementation instead of inventing unsupported tooling.
-Read browser_capabilities too. Match UAC to supported actions, including native selects,
+Read verification_policy.browser_capabilities too. Match UAC to supported actions, including native selects,
 checkbox/radio state, bounded uploads, download/CSV evidence and confirmation dialogs.
 If an approved automated check needs an unavailable browser/backend capability, identify the
 runner gap during planning. Do not invent an action or remove a UAC to fit the harness.
@@ -75,7 +75,9 @@ prior feedback. Follow that schema exactly; do not reuse the technical_plan or a
   check the declared root and candidate npm ci evidence. Unused dependency cleanup is optional
   unless it violates an explicit requirement or produces a concrete defect. Compare selectors
   against the supplied QA contract; browser execution remains the QA stage's responsibility.
-  Wrong-control operations (for example fill on a native select) are suite contract defects.
+  qa_selector_contract is a compact projection with suite_digest, tests and original zero-based
+  step_index on every step; use that index in test_concerns. Wrong-control operations
+  (for example fill on a native select) are suite contract defects.
   Preserve valid UI controls and request correction of the QA action, not an application workaround.
   If the application satisfies scope, record that suite concern without rejecting the candidate
   solely for the method mismatch; the trusted QA stage must diagnose it and execute a corrected

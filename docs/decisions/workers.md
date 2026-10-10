@@ -172,3 +172,13 @@ sama mereplay receipt; request berbeda untuk parent yang sudah punya child
 ditolak. Retry tidak memperbesar budget atau menghapus approval/generation lama.
 Web menampilkan Perlu tindakan dan alasan, serta Coba lagi untuk run eligible;
 worker tetap berjalan terpisah dari sesi browser pengguna.
+
+## Polling pipeline tanpa write lock idle — 10 Oktober 2026
+
+PipelineScheduler melakukan scan dalam transaksi baca WAL. Hanya tiket dengan
+proposal dispatch membuka transaksi tulis; revision, approval/dependency,
+candidate/target, accepted tip, active jobs/cleanup, idempotency key dan cap
+budget diperiksa ulang sebelum enqueue dalam transaksi yang sama. Perubahan
+saat jeda snapshot ditunda ke tick berikutnya. Tidak meng-upgrade transaksi
+baca menjadi write, tidak memotong usage atau menaikkan kapasitas execution.
+Detail/batas verifikasi: [audit](../audits/source-redaction-and-scheduler-2026-10-10.md).

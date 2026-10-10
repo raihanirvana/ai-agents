@@ -96,7 +96,7 @@ class SourceTools:
             text = '\n'.join(self.sup.list_files(self.started.ref, self.started.credential))
             return bounded_page({**page(text, a), 'format': 'source-file-list'})
         data = self.sup.read_file(self.started.ref, self.started.credential, a['path'])
-        result = {**page(self.redactor.redact(data.decode('utf-8')), a,
+        result = {**page(self.redactor.redact_source(data.decode('utf-8')), a,
                         digest=hashlib.sha256(data).hexdigest()), 'path': a['path']}
         bounded_page(result)
         key = (a['path'], result['digest'], result['offset'], a.get('limit', 4000))
@@ -169,7 +169,7 @@ class SourceTools:
                 result = self.sup.change_file(self.started.ref, self.started.credential,
                                              path, expected_digest=digest, **changes)
             except EditConflict as exc:
-                return self.redactor.redact_value({'error': str(exc), **exc.details})
+                return self.redactor.redact_value({'error': str(exc), **exc.details}, source=True)
             if self.after_write:
                 result['checkpoint_id'] = self.after_write()
             result['read_handle'] = self.new_handle(path, result['digest'])
@@ -180,7 +180,7 @@ class SourceTools:
             raise ValueError('inspect_diff takes optional path and paging fields')
         path = a.get('path') or None
         text = self.sup.inspect_diff(self.started.ref, self.started.credential, stat_only=path is None, path=path)
-        return bounded_page({**page(self.redactor.redact(text), a),
+        return bounded_page({**page(self.redactor.redact_source(text), a),
                 'format': 'file-diff' if path else 'diff-stat',
                 'next': 'Pass path to inspect a file diff; follow next_offset with expected_digest.'})
 

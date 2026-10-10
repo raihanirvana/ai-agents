@@ -273,7 +273,7 @@ class ProductWorkspace:
         message, _ = append_effect(s, project_id=identity['project_id'], ticket_id=identity['ticket_id'],
             thread_id='ticket:' + identity['ticket_id'], sender='agent:' + identity['role'], recipient='user',
             body=self.redactor.redact(body)[:7900], idempotency_key=key, attachment_ids=attachments,
-            meta=self.redactor.redact_value({'intent': intent, 'scope_version': identity['scope_version'],
+            meta=self.redactor.redact_source_fields({'intent': intent, 'scope_version': identity['scope_version'],
                 'job_id': identity['job_id'], 'generation': identity['generation'], 'fake': identity['fake'], **metadata}))
         return message
 

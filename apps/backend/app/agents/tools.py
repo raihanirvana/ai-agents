@@ -32,6 +32,8 @@ NOT_WIRED = frozenset({"read_repo", "review_candidate", "read_file", "read_files
                        "submit_candidate", "propose_tests", "request_test_run", "inspect_app", "report_bug"})
 FORBIDDEN_ARGS = frozenset({"actor", "role", "user", "sender", "project_id", "job_id", "generation", "lease",
                             "lease_owner", "attempt", "scope_version", "ticket_id_override"})
+SOURCE_TOOLS = frozenset({"read_file", "read_files", "read_repo", "inspect_app", "patch_file",
+                          "write_file", "edit_file", "edit_file_batch", "inspect_diff", "propose_tests"})
 
 
 class NotWired(RuntimeError):
@@ -67,8 +69,12 @@ class ToolFacade:
             raise Invalid("identity and permissions come from the run, not from tool arguments")
         if name in NOT_WIRED and name not in self._handlers:
             raise NotWired(f"{name} is wired in DEV-010 (workspace/QA harness)")
-        args = self.threads.redactor.redact_value(args)
-        return self.threads.redactor.redact_value(self._handlers[name](ctx, identity, args))
+        redactor = self.threads.redactor
+        if name in SOURCE_TOOLS:
+            args = redactor.redact_value(args, source=True)
+            return redactor.redact_value(self._handlers[name](ctx, identity, args), source=True)
+        args = redactor.redact_source_fields(args)
+        return redactor.redact_source_fields(self._handlers[name](ctx, identity, args))
 
     @staticmethod
     def _key(identity: dict[str, Any], name: str, args: dict[str, Any]) -> str:

@@ -89,9 +89,12 @@ class StructuredAgentRuntime:
         return identity["root_job_id"]
 
     def _ask(self, ctx: RunContext, identity: dict[str, Any], task: dict[str, Any], union, *, repo_refs=None,
-             context_limits: ContextLimits | None = None):
+             context_limits: ContextLimits | None = None, source_safe: bool = False):
         """Context -> reserved model call -> validated answer, with at most one repair call."""
-        checkpoint_key = hashlib.sha256(json.dumps({"task": task, "answer": ctx.answer},
+        checkpoint = {"task": task, "answer": ctx.answer}
+        if source_safe:
+            checkpoint['source_safe'] = True
+        checkpoint_key = hashlib.sha256(json.dumps(checkpoint,
                                                    sort_keys=True).encode()).hexdigest()
         with self.db.read() as s:
             saved = (s.get(Job, identity["job_id"]).runtime_ref or {}).get("structured_outputs", {}).get(checkpoint_key)
@@ -109,12 +112,13 @@ class StructuredAgentRuntime:
         snapshot = builder.build(identity, task={**{k: v for k, v in task.items() if k not in ('schema', 'output_schema')},
                                                   'output_schema': TypeAdapter(union).json_schema()},
                                  repo_refs=repo_refs, answer=ctx.answer,
-                                 lease=ctx.lease, queue=ctx.queue)
+                                 lease=ctx.lease, queue=ctx.queue, source_safe=source_safe)
         ctx.log(f"context {snapshot.sha256[:12]} ~{snapshot.estimated_tokens} tokens (estimate), "
                 f"{len(snapshot.manifest['gaps']) - 1} gaps")
         prompt, calls, total = snapshot.user, [], {}
         for attempt in (1, 2):
-            result = self.client.complete(ctx, identity["role"], snapshot.system, prompt)
+            result = self.client.complete(ctx, identity["role"], snapshot.system, prompt,
+                                          **({'source_safe': True} if source_safe else {}))
             calls.append(result)
             self._add_usage(total, result)
             try:

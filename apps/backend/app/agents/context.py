@@ -104,7 +104,7 @@ class ContextBuilder:
 
     # -- public ------------------------------------------------------------------------------------------------
     def build(self, identity: dict[str, Any], *, task: dict[str, Any], repo_refs: list[dict[str, Any]] | None = None,
-              answer: str | None = None, lease=None, queue=None) -> ContextSnapshot:
+              answer: str | None = None, lease=None, queue=None, source_safe: bool = False) -> ContextSnapshot:
         role, agent = identity["role"], self.agents[identity["role"]]
         with self.db.read() as s:
             scope = self._scope(s, identity)
@@ -125,7 +125,8 @@ class ContextBuilder:
                          cap=self.limits.summary_tokens, droppable="oldest")
         stable = [layer for layer in (scope, project, decisions, deps, repo) if layer is not None]
         tail = [summary, messages]
-        task_text = self._task(task, answer)
+        safe_task = self.redactor.redact_value(task, source=source_safe)
+        task_text = self._task(safe_task, self.redactor.redact(answer) if answer is not None else None)
         run_text = (f"## Run\njob={identity['job_id']} attempt={identity['attempt']} generation="
                     f"{identity['generation']} stage={identity['stage']} scope_version={identity['scope_version']}\n")
         for layer in (decisions, deps, repo, messages):
@@ -134,8 +135,13 @@ class ContextBuilder:
                      droppable=(messages, repo, decisions))
         gaps = self._gaps(stable + tail) + [{"layer": "history_summary", "omitted": {"id": i},
                                               "reason": "summary_does_not_match_history"} for i in invalid]
+        # Scrub conversational layers before assembly. A second generic pass over
+        # the assembled prompt would corrupt source in task/repository excerpts.
+        for layer in stable + tail:
+            redact = self.redactor.redact_source if layer.name == 'repository' else self.redactor.redact
+            layer.items = [(ref, redact(text)) for ref, text in layer.items]
         prefix = "\n".join(layer.text() for layer in stable if layer.items)
-        user = self.redactor.redact(f"{prefix}\n" + "\n".join(l.text() for l in tail if l.items)
+        user = self.redactor.redact_source(f"{prefix}\n" + "\n".join(l.text() for l in tail if l.items)
                                     + f"\n{task_text}\n{run_text}")
         system = self.redactor.redact(agent.text)
         total = estimate_tokens(system) + estimate_tokens(user)
@@ -144,13 +150,14 @@ class ContextBuilder:
                                   f"{self.limits.total_tokens}")
         manifest = {
             "schema": 1, "estimated": True, "role": role, "agent_digest": agent.digest,
+            "source_safe": source_safe,
             "run": {k: identity[k] for k in ("job_id", "project_id", "ticket_id", "scope_version", "stage",
                                               "attempt", "generation")},
             "layers": [{"name": l.name, "estimated_tokens": l.tokens(), "items": [r for r, _ in l.items]}
                        for l in stable + tail],
             "gaps": [*gaps, RUNTIME_GAP], "estimated_tokens": total, "limit_tokens": self.limits.total_tokens}
         digest = hashlib.sha256(canonical_json({"system": system, "user": user})).hexdigest()
-        prefix_digest = hashlib.sha256(canonical_json({"system": system, "prefix": self.redactor.redact(prefix)})).hexdigest()
+        prefix_digest = hashlib.sha256(canonical_json({"system": system, "prefix": self.redactor.redact_source(prefix)})).hexdigest()
         snapshot = ContextSnapshot(system, user, self.redactor.redact_value(manifest), digest, prefix_digest, total)
         if lease is not None and queue is not None:
             snapshot = self._store(snapshot, identity, lease, queue)

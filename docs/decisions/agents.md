@@ -1,5 +1,17 @@
 # SOUL, context, model client, dan pesan antar-agent — DEV-007
 
+## Source dan redaksi — 10 Oktober 2026
+
+Source read/write/edit/diff, task pipeline berisi source, dan source_excerpt
+memakai exact masking nilai credential terkonfigurasi. Pola generik assignment
+token/password/secret tidak boleh mengubah sintaks aplikasi. Brief, scope,
+pesan/jawaban, log dan error tetap disaring dengan pola generik sebelum konteks
+dirangkai. ModelClient menerima source_safe dari trusted pipeline; agent tidak
+dapat memilih policy redaksi melalui argumen tool. Jalur source_safe tidak
+mengubah izin, lease, digest, budget atau otoritas approval. Artefak lama tidak
+dimodifikasi. Detail dan batas verifikasi:
+[audit redaksi/pipeline](../audits/source-redaction-and-scheduler-2026-10-10.md).
+
 ## Fallback OpenRouter yang dikonfigurasi — 7 Oktober 2026
 
 Role dapat menetapkan `fallback_models` berupa daftar ID cadangan, urut prioritas.

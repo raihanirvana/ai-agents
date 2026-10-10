@@ -509,10 +509,11 @@ class ModelClient:
             cap = min(provider.output_limit(model) for model in (config.model, *config.fallback_models))
         return min(cap, job_cap) if job_cap is not None else cap
 
-    def complete(self, ctx: RunContext, role: str, system: str, user: str) -> ModelResult:
-        """One reserved, limited, accounted model call for this run. Text is redacted in and out."""
+    def complete(self, ctx: RunContext, role: str, system: str, user: str, *, source_safe: bool = False) -> ModelResult:
+        """Account one call; source_safe preserves code in already-scrubbed contexts."""
         config, provider = self.registry.for_role(role), self.provider_for(role)
-        system, user = self.redactor.redact(system), self.redactor.redact(user)
+        redact = self.redactor.redact_source if source_safe else self.redactor.redact
+        system, user = redact(system), redact(user)
 
         def call(job_cap):
             cap = self.output_limit(role, job_cap)
@@ -546,6 +547,6 @@ class ModelClient:
                     ctx._check()
                     ctx.cancelled.wait(min(0.1, max(0, deadline - time.monotonic())))
         ctx.log(self.redactor.redact(f'model.response requested={config.model} actual={response.model or config.model}'))
-        return ModelResult(self.redactor.redact(response.text), response.usage,
+        return ModelResult(redact(response.text), response.usage,
                            self.redactor.redact(response.provider or provider.name),
                            self.redactor.redact(response.model or config.model), bool(provider.fake))

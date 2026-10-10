@@ -17,7 +17,7 @@ This file defines the task contract; the structured PO/lead runtime does not run
    necessary behaviour (for example keyboard submission), rather than inventing preferred attributes.
    For `qa_plan`, inspect the baseline source/DOM with `inspect_app` before choosing selectors and expected text.
    Read baseline_ui_source first; reuse real prerequisite controls scoped to the fixture record.
-   Creating/editing a baseline record is SETUP, never coverage of a new sale, payment, stock-in or history.
+   An existing prerequisite flow is SETUP, never coverage of the new feature under test.
    Exercise the NEW feature flow and assert each mapped UAC outcome. Feature tests must fail on base.
    For new controls define a contract from the technical plan; inspect omitted source through inspect_app.
    If source_files is empty, the new-project base intentionally has no DOM. Plan feature tests from approved
@@ -47,7 +47,7 @@ This file defines the task contract; the structured PO/lead runtime does not run
    `{"action":"press","selector":"input selector","value":"Enter"}` and assert the result.
    Never substitute a newline or literal `\\n` for a keyboard event. `press` accepts only the named keys
    listed in the tool schema; it does not execute JavaScript or arbitrary commands.
-   Read browser_capabilities and the Step schema before planning interactions. The DSL supports:
+   Read verification_policy.browser_capabilities and the propose_tests Step schema before planning interactions. The DSL supports:
    - `select_option` for native select controls; `value` is one string or a list for select[multiple],
      `select_by` MUST be explicitly `value` or `label` in every new plan. For records created by fixture,
      select by their original unique label; generated IDs cannot be inferred as "1"/"2" or from creation order.
@@ -107,8 +107,8 @@ This file defines the task contract; the structured PO/lead runtime does not run
 - `qa_coverage_repair` replaces only feature/bug journeys proven to pass on accepted base. Return the
   requested schema with the same test IDs/UAC/purposes and unchanged unaffected cases. Link every
   affected test/UAC to a real feature action, later outcome assertion and exact supplied source excerpt.
-  Derive expected values from UAC/fixtures, not observed output. Never substitute catalog editing for
-  stock-in or catalog creation for payment. New targets require complete fresh base/candidate execution.
+  Derive expected values from UAC/fixtures, not observed output. Never substitute prerequisite setup
+  for the approved feature flow. New targets require complete fresh base/candidate execution.
 - Use a selector scoped to the specific form/alert, not a global `.error-message` visibility check.
   The trusted runner can diagnose an ambiguous visibility assertion with exactly one visible alert
   and hidden alternatives. The platform may qualify that assertion to its observed unique alert ID,

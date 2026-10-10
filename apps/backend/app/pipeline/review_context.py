@@ -6,6 +6,15 @@ from app.workspace.dependencies import registry_tarballs
 from app.workspace.errors import SandboxError
 
 
+def selector_contract(suite):
+    """Keep exact selectors/actions and step indices without schema/default duplication."""
+    return {'suite_digest': suite.digest, 'tests': [
+        {'id': test.id, 'purpose': test.purpose, 'uac': test.uac,
+         'steps': [{'step_index': index, **step.model_dump(exclude_none=True)}
+                   for index, step in enumerate(test.steps)]}
+        for test in suite.tests]}
+
+
 def package_facts(package):
     if package is None:
         return None

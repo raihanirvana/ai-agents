@@ -14,7 +14,7 @@ def policy_context():
             'Manual UAC belong to the user checklist. Do not add mandatory browser cases solely to duplicate them.',
             'If all UAC are manual, retain a meaningful browser smoke test with purpose smoke and empty uac list.',
             'Build, repository gates, browser health, immutable target and user UAT remain required.',
-            'Money, stock integrity, permissions and data loss need negative/regression cases proportional to risk.',
+            'High-impact state mutations, access control and data loss need negative/regression cases proportional to risk.',
             'Do not add cosmetic DOM/label requirements. Check keyboard/accessibility behaviour when required or needed for the journey.',
             'Detect missing runner capabilities before implementation; never silently turn approved automated UAC into manual.',
             'Before scope approval, propose manual mode for subjective/external checks with a concrete user checklist and reason.',

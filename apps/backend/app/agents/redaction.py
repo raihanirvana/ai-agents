@@ -1,8 +1,9 @@
-"""Secret redaction for everything that leaves a model call: prompts, outputs, logs, errors.
+"""Separate source-safe credential masking from generic prose/log redaction.
 
 Known secret values (provider keys read from the environment) are masked exactly, and common
-secret shapes are masked by pattern. Redaction is applied before text is persisted, logged or
-sent to a provider, so a key pasted into a brief never reaches a message, artifact or event.
+secret shapes are masked by pattern in conversational text, logs and errors.
+Source and exact source witnesses use known values only: variable names or
+assignments involving token/password/secret are programming syntax, not credentials.
 """
 from __future__ import annotations
 
@@ -28,21 +29,38 @@ class Redactor:
         self._secrets = sorted({s for s in secrets if isinstance(s, str) and len(s) >= 8}, key=len, reverse=True)
 
     def redact(self, text: str) -> str:
-        for secret in self._secrets:
-            text = text.replace(secret, MASK)
+        text = self.redact_source(text)
         for pattern, replacement in _PATTERNS:
             text = pattern.sub(replacement, text)
         return text
 
-    def redact_value(self, value: Any) -> Any:
-        """Redact strings anywhere inside JSON-like data, including untrusted metadata keys."""
+    def redact_source(self, text: str) -> str:
+        """Mask actual configured credentials without interpreting programming syntax."""
+        for secret in self._secrets:
+            text = text.replace(secret, MASK)
+        return text
+
+    def redact_value(self, value: Any, *, source: bool = False) -> Any:
+        """Redact JSON-like strings/keys; source=True uses exact configured values only."""
+        redact = self.redact_source if source else self.redact
         if isinstance(value, str):
-            return self.redact(value)
+            return redact(value)
         if isinstance(value, dict):
-            return {self.redact(k) if isinstance(k, str) else k: self.redact_value(v) for k, v in value.items()}
+            return {redact(k) if isinstance(k, str) else k: self.redact_value(v, source=source)
+                    for k, v in value.items()}
         if isinstance(value, (list, tuple)):
-            return [self.redact_value(v) for v in value]
+            return [self.redact_value(v, source=source) for v in value]
         return value
+
+    def redact_source_fields(self, value: Any) -> Any:
+        """Mixed message metadata retains exact source witnesses; prose stays scrubbed."""
+        if isinstance(value, dict):
+            return {self.redact(k) if isinstance(k, str) else k:
+                    (self.redact_value(v, source=True) if k == 'source_excerpt'
+                     else self.redact_source_fields(v)) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self.redact_source_fields(v) for v in value]
+        return self.redact_value(value)
 
     def contains_secret(self, text: str) -> bool:
         return self.redact(text) != text

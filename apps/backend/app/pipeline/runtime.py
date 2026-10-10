@@ -8,7 +8,7 @@ from app.agents.tools import ToolFacade
 from app.agents.context import ContextRefused, ContextTooLarge
 from app.agents.models import ModelError
 from app.agents.outputs import LeadPlanOutput, Clarification, InvalidOutput
-from app.domain import Actor, Attempt
+from app.domain import Actor, Attempt, DomainError
 from app.persistence.models import Candidate, Job, Ticket, TicketVersion, Artifact, Verification, Approval
 from app.workers.runtime import Outcome
 from app.persistence.transactions import bind_service
@@ -32,6 +32,11 @@ class PipelineRuntime:
     def stop(self, ctx):
         ctx.cancelled.set()
         ctx.stop_resources()
+
+    def _ask(self, ctx, identity, task, contract, **kwargs):
+        # ContextBuilder has already scrubbed conversational layers. Source and
+        # exact witnesses must survive both model input and validated output.
+        return self.structured._ask(ctx, identity, task, contract, source_safe=True, **kwargs)
 
     def run(self, ctx):
         identity = ctx.queue.verify(ctx.lease)
@@ -61,6 +66,33 @@ class PipelineRuntime:
             error = self.redactor.redact(str(exc))[:500]
             return Outcome('failed', {'failure_kind': 'provider', 'http_status': getattr(exc, 'http_status', None)},
                 error=error, retryable=exc.retryable)
+        except DomainError as exc:
+            error = self.redactor.redact('Workflow menolak operasi pipeline: ' + str(exc))[:500]
+            ctx.log(error)
+            return Outcome('failed', {'failure_kind': 'workflow'}, error=error, retryable=False)
+        except ValueError as exc:
+            if task != 'diagnose':
+                raise
+            detail = self.redactor.redact(str(exc))[:400]
+            failures = {
+                'no current candidate': ('stale_context', 'candidate_unavailable',
+                    'Kandidat aktif sudah berubah atau tidak tersedia. Diagnosis lama tidak dapat digunakan.'),
+                'diagnosis belongs to an obsolete verification target': ('stale_context', 'verification_obsolete',
+                    'Target atau kandidat telah berubah. Diagnosis ini memakai bukti lama; gunakan verifikasi target aktif.'),
+                'authoritative acceptance report unavailable': ('infrastructure', 'acceptance_report_unavailable',
+                    'Laporan resmi pengujian tidak tersedia. Pulihkan bukti atau jalankan verifikasi baru sebelum diagnosis.'),
+                'incomplete verification is not a proven feature coverage gap': ('test_contract', 'coverage_gap_unproven',
+                    'Pengujian belum lengkap dan belum membuktikan masalah coverage. Periksa bukti runner sebelum memperbaiki suite.'),
+                'failed verification contains no failed test': ('test_contract', 'failed_test_unavailable',
+                    'Laporan menyatakan gagal tetapi tidak memuat tes gagal. Periksa konsistensi bukti runner.'),
+            }
+            kind, reason, explanation = failures.get(str(exc),
+                ('test_contract', 'qa_diagnosis_invalid', 'Data diagnosis QA tidak valid: ' + detail))
+            error = 'Diagnosis QA tidak dapat dilanjutkan. ' + explanation
+            ctx.log(error)
+            return Outcome('failed', {'failure_kind': kind, 'reason': reason,
+                'verification_id': ctx.job['runtime_ref'].get('payload', {}).get('verification_id')},
+                error=error, retryable=False)
 
     def _technical_plan(self, ctx, identity):
         from app.workspace import WorkspaceSupervisor
@@ -68,10 +100,9 @@ class PipelineRuntime:
         manifest, base = self.workspace.configuration(identity)
         broker = WorkspaceSupervisor(self.workspace.root).broker(identity['project_id'])
         files = broker._bare('ls-tree', '-r', '--name-only', base).decode().splitlines()
-        output, meta, snapshot = self.structured._ask(ctx, identity,
+        output, meta, snapshot = self._ask(ctx, identity,
             {'name': 'technical_plan', 'ticket_id': identity['ticket_id'], 'source_files': files,
              'runner_manifest': manifest.to_dict(),
-             'browser_capabilities': browser_capabilities(),
              'verification_policy': policy_context(),
              'reference_bootstrap': bootstrap_contract() if self.workspace.bootstrap_available(identity) else None,
              'onboarding': self._onboarding_context(identity['project_id'])}, LeadPlanOutput)
@@ -111,7 +142,7 @@ class PipelineRuntime:
                     or set(Path(path).parts).intersection(('tests', 'test', '__tests__', 'node_modules'))
                     or Path(path).stem.endswith(('.test', '.spec'))):
                 continue
-            content = self.redactor.redact(sup.read_file(started.ref, started.credential, path).decode(errors='replace'))
+            content = self.redactor.redact_source(sup.read_file(started.ref, started.credential, path).decode(errors='replace'))
             baseline_ui[path] = content[:remaining]
             remaining -= len(baseline_ui[path])
             if remaining <= 0:
@@ -123,8 +154,8 @@ class PipelineRuntime:
         snapshot = planning_builder.build(identity, task={
             'name': 'qa_plan', 'instruction': 'Create mandatory browser assertions from approved UAC and the technical plan. '
             'Use CSS selectors. Every automated UAC must be covered. feature/bug cases must fail on the base when applicable; '
-            'regression cases may pass on both. Baseline catalog creation/editing is fixture setup, never a substitute '
-            'for a new sale, stock-in, history or payment journey. Define new feature controls from the technical plan '
+            'regression cases may pass on both. Existing prerequisite flows are fixture setup, never a substitute '
+            'for the new feature under test. Define new feature controls from the technical plan '
             'and explicitly assert each UAC outcome, including totals, mutations, rejected inputs and persistence. '
             'Use propose_tests with one QaPlan object. Do not edit source or claim pass.',
             'keyboard_guidance': 'fill changes field text and never simulates a key. To test Enter, fill the input '
@@ -134,13 +165,12 @@ class PipelineRuntime:
                 '{"action":"reload"}, then assert the restored state on the same page/context. '
                 'Adding an item and asserting it before reload does not test persistence. '
                 'reload takes no selector or value. Every test starts with a fresh browser context.',
-            'schema': QaPlan.model_json_schema(), 'source_files': source_files,
+            'source_files': source_files,
             'baseline_ui_source': baseline_ui,
             'existing_control_guidance': 'Reuse selectors declared in the supplied accepted baseline UI source for '
                 'existing prerequisite flows. Never invent IDs for controls already implemented by another ticket. '
                 'For generated IDs prefer an existing class scoped to the fixture record. Use inspect_app for '
                 'files not shown or truncated here. Define new selectors only for the new feature.',
-            'browser_capabilities': browser_capabilities(),
             'verification_policy': policy_context(),
             'empty_source_guidance': ('The accepted base is empty; this is expected for a new project. '
                 'There is no DOM or other folder to inspect. Plan feature tests from approved UAC and technical plan, '
@@ -148,7 +178,7 @@ class PipelineRuntime:
                 'only because files are absent. Do not invent new requirements or regression cases for absent features.'
                 if not source_files else None),
             'baseline': {k: v for k, v in baseline.items() if k not in ('source', 'site')}},
-            answer=ctx.answer, lease=ctx.lease, queue=ctx.queue)
+            answer=ctx.answer, lease=ctx.lease, queue=ctx.queue, source_safe=True)
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
         def propose(ctx_, current, args):
@@ -249,7 +279,7 @@ class PipelineRuntime:
             'source_path, exact source_excerpt and reason. QA checks them against immutable source and real browser evidence. '
             'Use the locked dependencies and existing Node tests, not an uninstalled browser unit test library. '
             'Unclear requirements: use request_decision for the lead. Only the trusted harness determines QA.'},
-            answer=ctx.answer, lease=ctx.lease, queue=ctx.queue)
+            answer=ctx.answer, lease=ctx.lease, queue=ctx.queue, source_safe=True)
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
         def read(c, i, a):
@@ -258,7 +288,7 @@ class PipelineRuntime:
                     'To write a file, call patch_file with {"path":"relative/file","content":"full file text"}.')
             if a['path'] == '.':
                 return {'files': sup.list_files(started.ref, started.credential)}
-            return {'content': self.redactor.redact(sup.read_file(started.ref, started.credential, a['path']).decode(errors='replace'))}
+            return {'content': self.redactor.redact_source(sup.read_file(started.ref, started.credential, a['path']).decode(errors='replace'))}
         def patch(c, i, a):
             if set(a) != {'path', 'content'} or (a['content'] is not None and not isinstance(a['content'], str)):
                 raise ValueError('patch_file requires path and string content (or null to delete a file)')
@@ -386,7 +416,7 @@ class PipelineRuntime:
                 evidence = s.get(Artifact, saved.attachment_ids[0])
             else:
                 evidence = self.store.put_bytes(s, project_id=identity['project_id'], kind='report',
-                    name='technical-review-full.diff', data=self.redactor.redact(diff).encode(), run_id=identity['job_id'],
+                    name='technical-review-full.diff', data=self.redactor.redact_source(diff).encode(), run_id=identity['job_id'],
                     meta={'producer': 'review-diff', 'candidate_id': candidate.id, 'base_sha': candidate.base_sha,
                           'commit_sha': candidate.commit_sha, 'generation': identity['generation']})
                 append_message(s, project_id=identity['project_id'], ticket_id=identity['ticket_id'],
@@ -394,11 +424,11 @@ class PipelineRuntime:
                     body='Full candidate diff archived before dependency/context projection.',
                     idempotency_key=evidence_key, attachment_ids=[evidence.id],
                     meta={'runtime_log': True, 'intent': 'review_diff'})
-        output, meta, _ = self.structured._ask(ctx, identity, {'name': 'technical_review', 'candidate_id': candidate.id,
-            **self.redactor.redact_value(projected), 'repo_gates': gate_summary(gates),
+        from .review_context import selector_contract
+        output, meta, _ = self._ask(ctx, identity, {'name': 'technical_review', 'candidate_id': candidate.id,
+            **self.redactor.redact_value(projected, source=True), 'repo_gates': gate_summary(gates),
             'dependency_manifest': self.redactor.redact_value(dependency_manifest),
-            'runner_manifest': current_manifest.to_dict(), 'qa_selector_contract': suite.model_dump(),
-            'browser_capabilities': browser_capabilities(),
+            'runner_manifest': current_manifest.to_dict(), 'qa_selector_contract': selector_contract(suite),
             'full_diff_artifact_id': evidence.id, 'gate_artifact_id': target['gate_artifact_id'],
             'instructions': 'Review the diff against approved scope, including all changes to repo tests and skip/removal. '
             'Return a Review JSON. Report concrete missing-fill selector concerns in test_concerns with test_id, '
@@ -678,7 +708,7 @@ class PipelineRuntime:
             output, meta = persisted_output, {}
             ctx.log('Reusing persisted QA diagnosis for this exact failed target/evidence.')
         else:
-            output, meta, _ = self.structured._ask(ctx, identity, diagnosis_task, QaDiagnosis,
+            output, meta, _ = self._ask(ctx, identity, diagnosis_task, QaDiagnosis,
                 context_limits=replace(self.structured.builder.limits, total_tokens=32768))
         if {f.test_id for f in output.findings} != {t['id'] for t in failed}:
             return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id},
@@ -692,12 +722,12 @@ class PipelineRuntime:
             if previous is not None:
                 diagnosis = s.get(Artifact, previous.attachment_ids[-1])
                 if (previous.meta.get('candidate_id') != candidate.id or previous.meta.get('verification_id') != verification_id
-                        or json.loads(self.store.read_bytes(s, diagnosis.id)) != self.redactor.redact_value(output.model_dump())):
+                        or json.loads(self.store.read_bytes(s, diagnosis.id)) != self.redactor.redact_value(output.model_dump(), source=True)):
                     raise ValueError('persisted QA diagnosis differs from this candidate/evidence')
                 attachments = list(previous.attachment_ids)
             else:
                 diagnosis = self.store.put_json(s, project_id=identity['project_id'], kind='report', name='qa-diagnosis.json',
-                    document=self.redactor.redact_value(output.model_dump()), meta={'producer': 'qa-diagnosis',
+                    document=self.redactor.redact_value(output.model_dump(), source=True), meta={'producer': 'qa-diagnosis',
                         'verification_id': verification_id, 'target_digest': candidate.target_digest, 'fake': self.fake})
                 attachments += [meta['context_artifact_id'], diagnosis.id]
                 self.workspace._post(s, identity, key, output.summary,
@@ -726,7 +756,7 @@ class PipelineRuntime:
                 selectors = fill_selector_candidates(suite, proof, source)
                 if selectors and set(selectors) == {test['id'] for test in failed}:
                     ctx.log('QA selector repair: choosing an observed editable control for the failed fill.')
-                    proposal, selector_meta, _ = self.structured._ask(ctx, identity, {
+                    proposal, selector_meta, _ = self._ask(ctx, identity, {
                         'name': 'qa_selector_repair', 'candidate_id': candidate.id,
                         'verification_id': verification_id, 'approved_criteria': criteria,
                         'diagnosis': output.model_dump(), 'suite': suite.model_dump(), 'source': source,
@@ -761,7 +791,7 @@ class PipelineRuntime:
                 bindings = option_binding_candidates(suite, proof)
                 if bindings and set(bindings) == {test['id'] for test in failed}:
                     ctx.log('QA dropdown repair: binding original fixture names to observed option labels.')
-                    proposal, binding_meta, _ = self.structured._ask(ctx, identity, {
+                    proposal, binding_meta, _ = self._ask(ctx, identity, {
                         'name': 'qa_option_repair', 'candidate_id': candidate.id,
                         'verification_id': verification_id, 'approved_criteria': criteria,
                         'suite': suite.model_dump(), 'failed_tests': failed, 'source': source,
@@ -778,7 +808,7 @@ class PipelineRuntime:
                         with self.db.write() as s:
                             ctx.queue.verify_identity(s, identity)
                             binding_row = self.store.put_json(s, project_id=identity['project_id'], kind='report',
-                                name='qa-option-repair.json', document=self.redactor.redact_value(proposal.model_dump()),
+                                name='qa-option-repair.json', document=self.redactor.redact_value(proposal.model_dump(), source=True),
                                 meta={'producer': 'qa-option-repair', 'verification_id': verification_id,
                                       'target_digest': candidate.target_digest, 'fake': self.fake})
                         return self._repair_qa_target(ctx, identity, candidate, target, repaired,
@@ -790,7 +820,7 @@ class PipelineRuntime:
                 prefixes = passed_setup_prefixes(suite, proof)
                 if prefixes:
                     ctx.log('QA test fault: selecting setup from passed tests; original assertions remain fixed.')
-                    proposal, setup_meta, _ = self.structured._ask(ctx, identity, {
+                    proposal, setup_meta, _ = self._ask(ctx, identity, {
                         'name': 'qa_setup_repair', 'candidate_id': candidate.id,
                         'verification_id': verification_id, 'approved_criteria': criteria,
                         'diagnosis': output.model_dump(), 'suite': suite.model_dump(),
@@ -810,7 +840,7 @@ class PipelineRuntime:
                         with self.db.write() as s:
                             ctx.queue.verify_identity(s, identity)
                             setup_row = self.store.put_json(s, project_id=identity['project_id'], kind='report',
-                                name='qa-setup-repair.json', document=self.redactor.redact_value(proposal.model_dump()),
+                                name='qa-setup-repair.json', document=self.redactor.redact_value(proposal.model_dump(), source=True),
                                 meta={'producer': 'qa-setup-repair', 'verification_id': verification_id,
                                       'target_digest': candidate.target_digest, 'fake': self.fake})
                         return self._repair_qa_target(ctx, identity, candidate, target, repaired,
@@ -868,7 +898,7 @@ class PipelineRuntime:
                         meta={'producer': 'verification', 'test_id': item['test_id'], **pins})
                     attachments.append(row.id)
                 row = self.store.put_json(s, project_id=candidate.project_id, kind='report',
-                    name='qa-contract-preflight.json', document=self.redactor.redact_value({
+                    name='qa-contract-preflight.json', document=self.redactor.redact_source_fields({
                         **pins, 'concerns': concerns, 'proof': proof, 'qa_pass': False}),
                     meta={'producer': 'verification', **pins})
                 attachments.append(row.id)
@@ -894,7 +924,7 @@ class PipelineRuntime:
                 proposal = QaSelectorRepair.model_validate(json.loads(self.store.read_bytes(s, saved_proposal.attachment_ids[-1])))
                 attachments += saved_proposal.attachment_ids
         if not saved_proposal:
-            proposal, meta, _ = self.structured._ask(ctx, identity, {
+            proposal, meta, _ = self._ask(ctx, identity, {
                 'name': 'qa_selector_preflight', **pins, 'approved_criteria': criteria,
                 'test_concerns': concerns, 'suite': suite.model_dump(), 'source': source,
                 'selector_candidates': selectors,
@@ -957,26 +987,25 @@ class PipelineRuntime:
                 'instructions': 'Return QaCoverageRepair. The completed baseline proves the listed feature/bug '
                     'tests are surrogate journeys: they pass without the new feature. Replace ONLY those tests '
                     'with real user journeys derived from approved UAC and shipped source. Keep every test ID, '
-                    'purpose and UAC mapping; keep unaffected cases byte-for-byte unchanged. Catalog creation '
-                    'or editing can set up fixtures but cannot stand in for a sale, payment, stock-in or history. '
+                    'purpose and UAC mapping; keep unaffected cases byte-for-byte unchanged. Existing prerequisite '
+                    'flows can set up fixtures but cannot stand in for the new feature being verified. '
                     'For each affected test/UAC provide a witness linking a relevant user action to a later '
                     'explicit outcome assertion, and an exact source excerpt explaining the feature flow. '
                     'Include EACH required_witnesses pair exactly once. Step indexes are zero-based in the '
                     'materialized test; assertion_step must point to an assert_* action, not a click or reload. '
                     'Calculate expectations independently from fixture values and UAC, never copy observed output. '
-                    'Exercise totals, actual stock changes, rejection with unchanged state, persistence/history '
-                    'and no duplicate payment where required. Verify stock after payment AND after the repeated '
-                    'payment attempt, not only button disabling. Do not click a disabled button: use double_click '
-                    'on the enabled payment control then assert stock changed only once. For money independently '
-                    'compute the numeric total, then use the inspected formatter for its exact displayed text. Scope repeated '
-                    'controls to the fixture product. Read all supplied source before choosing selectors. '
+                    'Assert each approved outcome using inputs and expected state transitions from the criteria. '
+                    'For required invalid/repeated actions, verify resulting state as well as any UI indication. '
+                    'Choose supported actions that can exercise the scenario; do not click a disabled control. '
+                    'Derive numeric expectations independently and use the inspected formatter for displayed text. '
+                    'Scope repeated controls to the fixture record. Read supplied source before choosing selectors. '
                     'You may replace an inadequate journey, not waive or weaken criteria, edit code, relabel '
                     'feature tests as regression/smoke, or declare QA passed. The new suite gets a new target '
                     'and full fresh candidate/base execution. Use only supported browser actions.'
             }
             # Validate before recording a reusable proposal; an invalid proposal never changes the target.
             for attempt in (0, 1):
-                proposal, meta, _ = self.structured._ask(ctx, identity, task, QaCoverageRepair,
+                proposal, meta, _ = self._ask(ctx, identity, task, QaCoverageRepair,
                     context_limits=replace(self.structured.builder.limits, total_tokens=32768))
                 try:
                     repaired = repair_coverage(suite, proof, proposal, criteria, source)

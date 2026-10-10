@@ -187,3 +187,18 @@ proposal are persisted separately with exact pins and retry-stable keys; retries
 can reuse them only for the same candidate/target/concerns. Diagnostics are retained
 as artifacts. Fake provider labels remain enforced. Source/build/review remain pinned;
 prior approval or QA evidence never transfers to a changed target.
+
+## Konteks dan kegagalan validasi diagnosis — 10 Oktober 2026
+
+Prompt planning/coverage repair berlaku umum terhadap UAC proyek, tanpa aturan
+khusus demo kasir atau action pembayaran yang dipaksakan. Capabilities hanya
+dikirim di verification_policy.browser_capabilities pada planning; QaPlan schema
+ada di propose_tests, tidak disalin lagi ke task. TL review memakai kontrak
+selector ringkas dengan indeks step asli dan expected yang tidak null.
+
+Diagnosis dengan target usang, bukti resmi hilang, atau struktur coverage invalid
+berhenti secara non-retryable dengan reason dan penjelasan. Tidak dikirim sebagai
+runtime crash, tidak meminta perubahan source aplikasi untuk error validasi.
+Model/provider retry dan fencing supervisor tetap berlaku. Perubahan ini tidak
+meloloskan mandatory test atau menjadikan browser QA opsional. Detail/batas:
+[audit](../audits/source-redaction-and-scheduler-2026-10-10.md).

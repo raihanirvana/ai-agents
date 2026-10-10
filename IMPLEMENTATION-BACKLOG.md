@@ -49,6 +49,31 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ## Daftar tiket
 
+### Koreksi redaksi source, konteks dan scheduler — 10 Oktober 2026
+
+Status: DONE (implementasi). Review: NOT_REVIEWED.
+Scope: lima temuan review pengguna: redaksi source merusak kode; arahan demo
+di prompt umum; diagnosis invalid menjadi crash/retry; konteks duplikat;
+write lock pada polling scheduler. Pertahankan approval, fencing, budget dan
+idempotensi. Rencana: pisahkan redaksi nilai secret dikenal dari pola generik,
+propagasikan sampai context/model/tool; generalkan prompt; petakan kegagalan
+diagnosis deterministik; ringkas kontrak review; scan scheduler read-only lalu
+revalidasi dalam transaksi tulis singkat hanya untuk calon dispatch.
+File: agents/redaction/tools/context/models/runtime, pipeline/hermes/source_tools/
+runtime/qa_policy/scheduler, instruksi QA dan dokumentasi keputusan.
+Verifikasi: inspeksi diff dan kompilasi Python; tes tidak ditambah/dijalankan
+karena assignment ini tidak meminta tes, sesuai instruksi sesi.
+
+Hasil: source-safe redaction pada facade/Hermes/context/model/read/diff dan
+source witnesses; prompt generik tanpa arahan kasir; diagnosis deterministik
+non-retryable dengan reason; capabilities/schema planning tidak duplikat dan
+kontrak review ringkas; read-only scheduler scan dengan revalidasi per tiket.
+`compileall -q app/agents app/pipeline` dan `git diff --check` lulus.
+Known issues: regresi/concurrency/provider belum dites pada patch ini; artefak
+source lama tidak dipulihkan. Insiden QA #4 selector/date tetap belum selesai.
+Handoff: `docs/audits/source-redaction-and-scheduler-2026-10-10.md`.
+Tidak ada restart worker, retry proyek, commit atau push pada assignment ini.
+
 ### Penjelasan penyesuaian kode pada web — 10 Oktober 2026
 
 Status: DONE. Review: NOT_REVIEWED. Scope: tampilkan alasan kembali ke Development akibat

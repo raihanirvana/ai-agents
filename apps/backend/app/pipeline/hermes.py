@@ -12,6 +12,7 @@ from app.workers.runtime import WaitingForInput, reap_recorded_processes
 from .relay import ProductAdmission
 from .files import allocate_directory
 from .transcript import TranscriptProjection
+from app.agents.tools import SOURCE_TOOLS
 
 class RelayContextError(RuntimeError):
     def __init__(self, detail):
@@ -92,7 +93,10 @@ class HermesDriver:
         def wrapped(name, handler):
             def call(arguments):
                 try:
-                    return self.client.redactor.redact_value(handler(arguments))
+                    redactor = self.client.redactor
+                    result = handler(arguments)
+                    return (redactor.redact_value(result, source=True) if name in SOURCE_TOOLS
+                            else redactor.redact_source_fields(result))
                 except WaitingForInput as exc:
                     waiting.append(exc)
                     return {'status': 'waiting_input'}
