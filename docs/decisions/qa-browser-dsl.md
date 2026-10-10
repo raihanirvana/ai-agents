@@ -82,50 +82,46 @@ Navigasi hanya origin target yang dipin. Hash routing diterima sebagai navigasi
 same-document. Context tetap memblokir jaringan origin lain dan service workers.
 Tidak menambahkan credentials ataupun shared writable mount dengan target.
 
+## Kontrak UI dan locator — 10 Oktober 2026
+
+Plan baru memakai vocabulary TL ui_contract. Runner memetakan semantic locator
+ke get_by_role/get_by_label/get_by_text/get_by_test_id dengan exact name/text.
+Suite legacy tetap dapat memakai CSS/engine syntax sebelumnya. Contoh:
+
+```json
+{"action":"click","selector":"role=button[name=\"Simpan\"]"}
+{"action":"fill","selector":"label=\"Nama\"","value":"Alice"}
+{"action":"assert_text","selector":"testid=customer-name","value":"Alice"}
+{"action":"click","selector":"testid=customer-row >> has_text=\"Alice\" >> role=button[name=\"Hapus\"]"}
+```
+
+Kontrol Hapus di contoh terakhir mempunyai scope_testid customer-row, dan parent
+mempunyai dynamic_text=true. Alice harus original fill input pada test/fixture itu.
+Selector declared boleh memakai suffix ` >> nth=0` (0..99) untuk disambiguasi.
+Role/label bukan CSS tebakan. Hidden state sebaiknya memakai testid karena role
+locator normal tidak mencari hidden controls. Scope data/fixtures tetap terisolasi.
+Supervisor memvalidasi vocabulary sebelum candidate dan pada target revision.
+
 ## Diagnosis dan koreksi
 
-Runner juga merekam alternatif editable ketika selector `fill` tidak ditemukan.
-Diagnosis QA boleh mengusulkan indeks kontrol yang diamati dan sesuai source,
-untuk memperbaiki hanya selector fill pada suite/target baru. Assertions dan input
-tetap; eksekusi penuh wajib. Ini observability/repair supervisor, bukan action DSL
-baru atau izin model menjalankan JavaScript. Rincian ada di qa-policy.md.
+Failure kandidat menyertakan bounded aria snapshot/hash/truncation dan candidate
+locators observed runner. Snapshot/log dipin pada evidence, tanpa expression dari
+model. Kategori action_contract, selector_contract dan expectation_diagnosis tetap
+membantu atribusi; tidak otomatis membuktikan bug aplikasi atau tes salah.
 
-Kesalahan native-control/action yang diamati runner adalah `action_contract`.
-Strict locator ambiguity tetap `selector_contract`. Keduanya menjadi kategori
-`test_contract`; aplikasi tidak otomatis diminta berubah atau dihitung repair.
-Mismatch parsed CSV diberi `expectation_diagnosis` dan tetap di QA untuk diagnosis
-terhadap UAC/input. Ini bukan klaim aplikasi benar atau expected salah. Tidak ada
-repair otomatis expected dari hasil download. Defect aplikasi yang terkonfirmasi
-tetap harus dikirim melalui request-changes dengan bukti/reproduksi.
-Runner membaca fakta DOM dengan fungsi tetap milik runner; model tidak dapat
-menyisipkan expression JavaScript dalam DSL.
+Seluruh koreksi sekarang memakai QaSuiteRevision, dengan explicit origin-step
+mapping/source witnesses dan bounded diff. Identity, UAC, purpose, inputs dan
+original assertions/expected dipertahankan. Penambahan UI action memakai original
+input atau exact proven fixture; no new expected dari actual. Binding label dari
+original fixture dan normalisasi parsed CSV dari input adalah satu-satunya koreksi
+representasi data. Tidak ada jalur otomatis per alert/fill/CSV di runtime lagi.
+Rincian invariant dan coverage witnesses: [policy QA](qa-policy.md).
 
-Koreksi otomatis dibatasi pada kasus berikut:
-
-1. assert_visible ambigu dengan tepat satu visible alert dan ID unik yang aman.
-2. fill pada tepat satu visible/enabled native select, dengan tepat satu enabled
-   option bernilai persis value yang diminta. Operasi berubah menjadi
-   select_option by value; selector/value dan seluruh assertion tidak berubah.
-3. Setelah diagnosis QA mengidentifikasi test fault pada parsed CSV, token
-   berbungkus/doubled quotes dapat diganti dengan nilai fill asli sebelumnya
-   pada tes yang sama. Hanya representasi encoding yang dikoreksi; nilai actual
-   tidak dipakai sebagai replacement. Nilai literal yang memang dimasukkan
-   berbungkus kutip tidak dikoreksi. Helper harus mengenali semua failed tests;
-   kekeliruan lain tetap gagal pada eksekusi berikutnya atau memerlukan diagnosis.
-
-Semua kegagalan harus memenuhi syarat untuk koreksi. Mixed/unknown failure,
-missing option tanpa binding fixture yang terbukti, ambiguous option, salah control lain, atau batas dua koreksi
-per rantai target tetap failed dan memerlukan diagnosis QA. Tidak ada waiver,
-assertion dihapus, expected disalin dari actual, aplikasi ditulis ulang, atau pass
-yang diperoleh dari diagnosis. Verification lama tetap immutable. Suite/target
-baru pada source/build/config/runner yang sama harus menjalankan ulang semua
-candidate tests dan baseline bila applicable sebelum UAT pengguna.
-
-Diagnosis yang belum dapat diperbaiki dengan fakta DOM dijalankan sebagai job QA
-terpisah pada verification/target yang sama. Retry model memakai report lama;
-browser tidak dijalankan ulang untuk retry diagnosis. Job ini hanya mengirim
-application fault yang terdiagnosis ke development. Test/unknown/infrastructure
-tidak membuka UAT dan tidak merelabel kriteria menjadi manual.
+Setiap revision menciptakan target/suite baru, mempertahankan histori dan menuntut
+full candidate plus exact baseline verification. Diagnosis/DOM/concern tidak
+approve QA, waive, drop test, downgrade manual atau membuka UAT tanpa execution.
+Unsupported/unknown/infra tetap explicit; hanya qualified application defect
+meminta source repair. Batas existing suite repair tidak direset.
 
 ## Kompatibilitas dan keterbatasan
 
@@ -197,7 +193,8 @@ hasil model bukan jaminan semantik, dan kontrak yang ambigu tetap di QA.
 
 ## Diagnostik runner — 10 Oktober 2026
 
-Runner tetap mengeluarkan report setiap test. Kandidat menyimpan screenshot dan
+Runner tetap mengeluarkan report setiap test, termasuk bounded aria/locator observations
+pada failure kandidat. Snapshot disimpan pada report dan artefak log. Kandidat menyimpan screenshot dan
 zip action trace hanya untuk test gagal; test lulus membuang trace tanpa export.
 Trace tidak merekam snapshot DOM atau screenshot per langkah. Eksekusi baseline
 mematikan trace/screenshot karena kegagalan fitur pada base memang diharapkan.

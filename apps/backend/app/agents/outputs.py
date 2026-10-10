@@ -10,7 +10,8 @@ import json
 import re
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator, model_serializer
+from .ui_contract import UiContract
 
 KEY = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
 ID = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
@@ -157,6 +158,19 @@ class LeadPlan(Contract):
     decisions: list[DecisionProposal] = Field(default_factory=list, max_length=10)
     risks: list[str] = Field(default_factory=list, max_length=10)
     needs_user: bool = False
+    # None is only for reading historical output. New pipeline plans require a contract.
+    ui_contract: UiContract | None = None
+
+    @model_serializer(mode='wrap')
+    def legacy_shape(self, handler):
+        document = handler(self)
+        if document.get('ui_contract') is None:
+            document.pop('ui_contract', None)
+        return document
+
+
+class UiLeadPlan(LeadPlan):
+    ui_contract: UiContract = Field(...)
 
 
 class LeadAnswer(Contract):
@@ -169,6 +183,7 @@ class LeadAnswer(Contract):
 PoOutput = Annotated[Union[PoProposal, PoRevision, Clarification], Field(discriminator="kind")]
 PoReviseOutput = Annotated[Union[PoRevision, Clarification], Field(discriminator="kind")]
 LeadPlanOutput = Annotated[Union[LeadPlan, Clarification], Field(discriminator="kind")]
+UiLeadPlanOutput = Annotated[Union[UiLeadPlan, Clarification], Field(discriminator="kind")]
 
 
 class InvalidOutput(ValueError):

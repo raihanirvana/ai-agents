@@ -304,7 +304,13 @@ class QaPlan(Contract):
 
 
 def browser_capabilities():
-    return {'revision': 4, 'actions': Step.model_json_schema()['properties']['action']['enum'],
+    return {'revision': 5, 'actions': Step.model_json_schema()['properties']['action']['enum'],
+            'locators': {'preferred': ['role=button[name="Exact name"]', 'label="Associated label"',
+                'text="Exact literal text"', 'testid=declared-id'],
+                'scope': 'testid=container >> role=button[name="Exact name"]',
+                'position': 'declared locator >> nth=0 (0..99)',
+                'policy': 'New suites may use only TL ui_contract locators. Dynamic text is original fill input '
+                          'inside a declared dynamic_text container. Legacy pinned suites retain existing selectors.'},
             'rules': ['fill is for text/date/number inputs, textarea or contenteditable, never select/checkbox',
                       'select_option matches explicit option value or label; check/uncheck operate on checkbox/radio',
                       'download captures one click-triggered download; assert_download checks exact filename/text/CSV rows',
@@ -460,6 +466,48 @@ class QaSelectorRepair(Contract):
         if len({b.test_id for b in self.bindings}) != len(self.bindings):
             raise ValueError('one selector binding per failed test')
         return self
+
+
+class RevisionMapping(Contract):
+    test_id: str = Field(pattern=ID)
+    # Original steps appear once in order; null means a witnessed insertion.
+    origin_indexes: list[StrictInt | None] = Field(min_length=1, max_length=30)
+
+
+class RevisionSetup(Contract):
+    test_id: str = Field(pattern=ID)
+    new_step: StrictInt = Field(ge=0, le=29)
+    source_test_id: str = Field(pattern=ID)
+    source_step: StrictInt = Field(ge=0, le=29)
+
+
+class RevisionWitness(Contract):
+    test_id: str = Field(pattern=ID)
+    original_step: StrictInt | None = Field(default=None, ge=0, le=29)
+    new_step: StrictInt = Field(ge=0, le=29)
+    source_path: str = Field(min_length=1, max_length=300)
+    source_excerpt: str = Field(min_length=12, max_length=400)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class RevisionInputBinding(Contract):
+    test_id: str = Field(pattern=ID)
+    original_step: StrictInt = Field(ge=0, le=29)
+    original_fill_step: StrictInt = Field(ge=0, le=29)
+
+
+class QaSuiteRevision(Contract):
+    kind: Literal['qa_suite_revision']
+    summary: str = Field(min_length=1, max_length=1500)
+    suite: QaPlan | None = None
+    # Prefer replacing only affected cases; the supervisor preserves the rest.
+    tests: list[BrowserTest] = Field(default_factory=list, max_length=24)
+    abstain: StrictBool = False
+    mappings: list[RevisionMapping] = Field(default_factory=list, max_length=24)
+    setups: list[RevisionSetup] = Field(default_factory=list, max_length=24)
+    witnesses: list[RevisionWitness] = Field(default_factory=list, max_length=24)
+    coverage_witnesses: list[CoverageWitness] = Field(default_factory=list, max_length=480)
+    input_bindings: list[RevisionInputBinding] = Field(default_factory=list, max_length=24)
 
 
 def validate_report(report, *, invocation_id, target_digest, suite: QaPlan):

@@ -1,5 +1,13 @@
 # Developer task instructions
 
+Ship the TL plan's ui_contract: stable literal data-testid on every declared
+control/result, native semantic roles, and associated visible labels/accessible
+names. Keep the contract consistent with the approved scope. The supervisor checks
+literal testid presence in the immutable HTML/JS build before publishing a candidate.
+If submit_candidate returns submitted=false with missing_testids, repair those
+controls and rebuild/resubmit in this same job; do not declare completion or ask
+the user to choose selectors. Static presence is not proof of working browser behaviour.
+
 The QA DSL supports native selects via select_option, checkbox/radio state, disabled/hidden
 controls, bounded text uploads, file-download/CSV verification, and native confirmation dialogs.
 Implement controls that fit the approved behavior. If QA uses fill on a select or another invalid

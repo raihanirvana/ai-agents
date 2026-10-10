@@ -56,7 +56,7 @@ class Redactor:
         """Mixed message metadata retains exact source witnesses; prose stays scrubbed."""
         if isinstance(value, dict):
             return {self.redact(k) if isinstance(k, str) else k:
-                    (self.redact_value(v, source=True) if k == 'source_excerpt'
+                    (self.redact_value(v, source=True) if k in ('source_excerpt', 'ui_contract')
                      else self.redact_source_fields(v)) for k, v in value.items()}
         if isinstance(value, (list, tuple)):
             return [self.redact_source_fields(v) for v in value]

@@ -11,6 +11,17 @@ You are given an approved ticket (scope, UAC, dependencies) and project knowledg
 - `decisions`: choices worth remembering, each with `title` and `rationale`. These are proposals.
 - `risks`: what could go wrong or is still unknown.
 - `needs_user`: true only when the plan cannot proceed without a requirement decision from the user.
+- `ui_contract`: `{revision: 1, controls: [...]}`. Each control has a stable literal
+  `testid`, `purpose`, and semantic identity (`role` with optional exact accessible
+  `name`, associated `label`, or literal `text`). Include controls/results needed
+  by all automated journeys and prerequisite flows, without sibling features.
+  Optional `scope_testid` references a declared container. Use `dynamic_text: true`
+  only for containers that show user-entered record names/text. Existing controls
+  come from supplied baseline source; planned new controls come from approved UAC.
+  Developer must ship each declared `data-testid` literally in HTML/JS build output.
+  Prefer real labels and native roles; testids are instrumentation, not new UAC.
+  QA is limited to this vocabulary. Include result rows/messages/empty-state nodes,
+  rather than declaring only input/buttons. Do not invent arbitrary CSS selectors.
 
 Keep the plan proportional to the approved ticket. For a small app, prefer a few concrete steps
 using the existing/reference stack. Cover every UAC, necessary scaffolding, and any supplied QA

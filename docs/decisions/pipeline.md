@@ -3,6 +3,17 @@
 Status implementasi: DEV-010 DONE. Review independen R6: NOT_REVIEWED.
 Sumber kebutuhan: ARCHITECTURE §5–10, AGENTS.md, AC DEV-010 di backlog.
 
+## Kontrak UI dan suite revision — 11 Oktober 2026
+
+Keputusan terbaru untuk QA adalah [policy QA](qa-policy.md) dan
+[audit UI contract/revision](../audits/ui-contract-suite-revision-2026-10-10.md).
+Bagian historis di bawah tentang narrow selector/alert/setup repair adalah catatan
+implementasi sebelumnya. Runtime sekarang memakai satu QaSuiteRevision, dengan
+UI contract dari TL, inventory testid build sebelum candidate publication, exact
+semantic locators dan bounded aria failure evidence. Setiap koreksi tetap membuat
+target/suite baru dan memerlukan full baseline/candidate verification, tanpa
+approval otomatis atau penggunaan repair cycle aplikasi untuk test fault.
+
 ## Alur dan sumber otoritas
 
 Worker `--runtime pipeline` mendaftarkan runtime structured untuk PO/lead dan pipeline

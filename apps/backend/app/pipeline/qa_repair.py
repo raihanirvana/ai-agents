@@ -26,7 +26,7 @@ def baseline_coverage_gaps(suite, proof):
             if test.purpose in ('feature', 'bug') and statuses[test.id] == 'passed']
 
 
-def repair_coverage(suite, proof, proposal, criteria, source):
+def repair_coverage(suite, proof, proposal, criteria, source, *, permitted_test_repairs=()):
     """Permit new journeys only for proven coverage gaps; keep other cases and UAC fixed.
 
     Source witnesses make the proposed behaviour reviewable. They do not establish
@@ -35,6 +35,10 @@ def repair_coverage(suite, proof, proposal, criteria, source):
     affected = set(baseline_coverage_gaps(suite, proof))
     if not affected:
         raise ValueError('coverage repair requires completed baseline evidence')
+    permitted = set(permitted_test_repairs)
+    if not permitted <= {row['id'] for row in (proof.get('report') or {}).get('tests', [])
+                         if row.get('status') == 'failed'}:
+        raise ValueError('additional contract repairs require failed candidate observations')
     repaired = proposal.suite.materialize_fixtures()
     repaired.check_criteria(criteria)
     repaired.check_selector_contracts()
@@ -48,7 +52,7 @@ def repair_coverage(suite, proof, proposal, criteria, source):
         updated = new[key]
         if updated.uac != original.uac or updated.purpose != original.purpose:
             raise ValueError('coverage repair cannot change test UAC or purpose')
-        if key not in affected and updated.model_dump() != original.model_dump():
+        if key not in affected | permitted and updated.model_dump() != original.model_dump():
             raise ValueError('coverage repair cannot alter unaffected/regression cases')
         if key in affected and updated.steps == original.steps:
             raise ValueError('coverage repair must replace the surrogate journey')

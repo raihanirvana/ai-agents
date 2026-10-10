@@ -14,6 +14,123 @@ from playwright.sync_api import sync_playwright, expect
 
 
 MAX_DOWNLOAD_BYTES = 1024 * 1024
+MAX_ARIA_BYTES = 16 * 1024
+
+
+def locate(page, selector):
+    """Canonical semantic selectors use the public locator APIs with exact matching.
+
+    Historical CSS/Playwright selectors remain executable on pinned legacy suites.
+    New plans are separately limited to the supervisor's UI contract vocabulary.
+    """
+    if not selector.startswith(('testid=', 'role=', 'label="', 'text="')):
+        return page.locator(selector)  # Preserve historical CSS/engine parsing exactly.
+    # Split only outside quoted JSON strings, so a label containing >> stays literal.
+    parts, start, quoted, escaped = [], 0, False, False
+    index = 0
+    while index < len(selector):
+        char = selector[index]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif selector[index:index + 4] == ' >> ':
+            parts.append(selector[start:index])
+            index += 3
+            start = index + 1
+        index += 1
+    parts.append(selector[start:])
+    current = page
+    for part in parts:
+        if re.fullmatch(r'testid=[A-Za-z][A-Za-z0-9_.:-]{0,79}', part):
+            current = current.get_by_test_id(part[7:])
+        elif part.startswith(('label="', 'text="', 'has_text="')):
+            kind, value = part.split('=', 1)
+            value = json.loads(value)
+            if kind == 'has_text':
+                current = current.filter(has_text=value)
+            else:
+                current = (current.get_by_label(value, exact=True) if kind == 'label'
+                           else current.get_by_text(value, exact=True))
+        elif (role := re.fullmatch(r'role=([a-z]+)(?:\[name=("(?:[^"\\]|\\.)*")\])?', part)):
+            args = {'name': json.loads(role[2]), 'exact': True} if role[2] else {}
+            current = current.get_by_role(role[1], **args)
+        elif re.fullmatch(r'nth=(?:[0-9]|[1-9][0-9])', part):
+            current = current.nth(int(part[4:]))
+        else:
+            current = current.locator(part)
+    return current
+
+
+def dom_observation(page):
+    """Fixed bounded reads, not script from the target/model; observations are untrusted data."""
+    snapshot = page.locator('body').aria_snapshot(timeout=1500, depth=12)
+    raw = snapshot.encode('utf-8')
+    text = raw[:MAX_ARIA_BYTES].decode('utf-8', errors='ignore')
+    # These locator candidates are vocabulary evidence only, never expected values.
+    candidates = []
+    controls = page.locator('[data-testid], button, input, select, textarea, a, [role], label')
+    total_controls, deadline, omitted = controls.count(), time.monotonic() + 1.5, False
+    for index in range(min(total_controls, 120)):
+        remaining = deadline - time.monotonic()
+        if remaining < 0.05:
+            omitted = True
+            break
+        control = controls.nth(index)
+        try:
+            facts = control.evaluate(r"""el => {
+                const tag = el.tagName.toLowerCase();
+                const type = (el.getAttribute('type') || 'text').toLowerCase();
+                const roles = {button:'button', a:'link', textarea:'textbox', select:'combobox'};
+                const role = el.getAttribute('role') || (tag === 'input' ?
+                    ({checkbox:'checkbox', radio:'radio', number:'spinbutton', search:'searchbox',
+                      button:'button', submit:'button', reset:'button'}[type] ||
+                     (type === 'password' || type === 'hidden' ? null : 'textbox')) : roles[tag]);
+                const labelled = (el.getAttribute('aria-labelledby') || '').split(/\s+/).slice(0, 4)
+                    .map(id => document.getElementById(id)?.textContent || '').join(' ').trim();
+                const name = el.getAttribute('aria-label') || labelled ||
+                    (role === 'button' || role === 'link' ? el.textContent || el.value || '' : '');
+                return {testid: el.getAttribute('data-testid')?.slice(0, 81), id: el.id.slice(0, 101), tag,
+                    role: role?.slice(0, 31),
+                    name: name.trim().slice(0, 161),
+                    labels: [...(el.labels || [])].map(x => x.textContent.trim().slice(0, 161)).slice(0, 3)};
+            }""", timeout=min(500, remaining * 1000))
+        except Exception:
+            omitted = True
+            continue
+        values = []
+        if facts['testid'] and re.fullmatch(r'[A-Za-z][A-Za-z0-9_.:-]{0,79}', facts['testid']):
+            values.append('testid=' + facts['testid'])
+        if facts['id'] and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,99}', facts['id']):
+            values.append('#' + facts['id'])
+        for label in facts['labels']:
+            if label and len(label) <= 160:
+                values.append('label=' + json.dumps(label, ensure_ascii=False))
+        if facts['role'] and re.fullmatch(r'[a-z]{1,30}', facts['role']):
+            role = 'role=' + facts['role']
+            values.append(role)
+            if facts['name'] and len(facts['name']) <= 160:
+                values.append(role + '[name=' + json.dumps(facts['name'], ensure_ascii=False) + ']')
+        for selector in values:
+            candidates.append({'selector': selector, 'tag': facts['tag'], 'role': facts['role']})
+    record = {'aria_snapshot': text, 'aria_snapshot_truncated': len(raw) > MAX_ARIA_BYTES,
+              'locator_candidates': candidates[:240],
+              'locator_candidates_truncated': omitted or len(candidates) > 240 or total_controls > 120}
+    # Bound the whole JSON observation as well as raw aria bytes (escaping/unicode expand on transport).
+    while len(json.dumps(record).encode()) > 32 * 1024:
+        if record['locator_candidates']:
+            record['locator_candidates'].pop()
+            record['locator_candidates_truncated'] = True
+        else:
+            record['aria_snapshot'] = record['aria_snapshot'][:len(record['aria_snapshot']) // 2]
+            record['aria_snapshot_truncated'] = True
+    record['aria_snapshot_sha256'] = hashlib.sha256(record['aria_snapshot'].encode()).hexdigest()
+    return record
 
 
 class BrowserContractError(RuntimeError):
@@ -59,7 +176,7 @@ def internal_url(base, path):
 
 def missing_fill_controls(page, step):
     """Observe alternatives only; absence is not a diagnosis or a passing test."""
-    if step.get('action') != 'fill' or page.locator(step['selector']).count() != 0:
+    if step.get('action') != 'fill' or locate(page, step['selector']).count() != 0:
         return None
     controls = page.locator('input, textarea')
     if controls.count() > 80:
@@ -196,7 +313,7 @@ def run_step(page, step, base_url, last_download):
     if action == 'assert_download':
         download_assertions(last_download, step['download'])
         return last_download
-    loc = page.locator(step['selector'])
+    loc = locate(page, step['selector'])
     control_contract(loc, step)
     if action == 'click': loc.click()
     elif action == 'click_dialog':
@@ -293,6 +410,11 @@ def main():
                 record['error'] = str(exc)[:3000]
                 record['failure_kind'] = 'assertion_or_application'
                 record['failed_step'] = step_index
+                if diagnostics_enabled:
+                    try:
+                        record['dom'] = dom_observation(page)
+                    except Exception:
+                        record.setdefault('diagnostic_errors', []).append('DOM snapshot unavailable')
                 try:
                     missing = missing_fill_controls(page, step) if step else None
                     if missing is not None:
@@ -314,7 +436,7 @@ def main():
                 if (step and step['action'] == 'assert_visible' and
                         'strict mode violation' in str(exc)):
                     try:
-                        loc = page.locator(step['selector'])
+                        loc = locate(page, step['selector'])
                         count = loc.count()
                         visible = [loc.nth(i) for i in range(count) if loc.nth(i).is_visible()] if count <= 100 else []
                         if count > 1 and len(visible) == 1:
@@ -332,6 +454,8 @@ def main():
                 trace = Path('/tmp') / (test['id'].replace(':', '_') + '.zip')
                 diagnostics = []
                 if diagnostics_enabled and record['status'] != 'passed':
+                    if record.get('dom', {}).get('aria_snapshot'):
+                        diagnostics.append(('aria_snapshot', record['dom']['aria_snapshot'].encode('utf-8')))
                     try:
                         diagnostics.append(('screenshot', page.screenshot(timeout=3000)))
                     except Exception:

@@ -54,6 +54,7 @@ class DockerHarness:
         return {'runner_code_digest': code_digest(), 'runner_image_id': self.sandbox.image_id(self.image)}
 
     def run(self, ctx, site, target_digest, suite, node_image, *, expected_runner, diagnostics=True):
+        diagnostics_enabled = diagnostics
         identity = self.identity()
         if identity != expected_runner:
             raise ValueError('runner configuration changed: a new target is required')
@@ -113,9 +114,11 @@ class DockerHarness:
         for item in items if isinstance(items, list) else []:
             try:
                 raw = base64.b64decode(item['data'], validate=True)
-                if (item['kind'] in ('screenshot', 'trace') and len(raw) <= 1024 * 1024 and
+                if (item['kind'] in ('screenshot', 'trace', 'aria_snapshot') and len(raw) <=
+                    (16 * 1024 if item['kind'] == 'aria_snapshot' else 1024 * 1024) and
                     item['test_id'] in {t.id for t in suite.tests} and hashlib.sha256(raw).hexdigest() == item['sha256']):
-                    diagnostics.append({**item, 'data': raw})
+                    diagnostics.append({**item, 'data': raw, 'diagnostic_kind': item['kind'],
+                                        'kind': 'log' if item['kind'] == 'aria_snapshot' else item['kind']})
             except (KeyError, ValueError, TypeError):
                 pass
         if isinstance(report, dict):
@@ -124,7 +127,7 @@ class DockerHarness:
             report = None
         duration = time.monotonic() - started
         from app.workers.telemetry import record_phase
-        record_phase(ctx, 'browser' if diagnostics else 'baseline_browser', duration,
+        record_phase(ctx, 'browser' if diagnostics_enabled else 'baseline_browser', duration,
                      status='passed' if result['status'] == 'passed' else 'failed')
         return {**result, 'invocation_id': invocation, 'target_digest': target_digest, 'suite_digest': suite.digest,
             'runner': identity, 'report': report, 'exit_code': exit_code, 'error': error,

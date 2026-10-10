@@ -302,10 +302,24 @@ class ProductWorkspace:
             suite.check_criteria(version.uac)
             return suite, row.attachment_ids[-1]
 
+    def ui_contract(self, identity):
+        """Latest plan for the exact approved scope; never borrow from another ticket/version."""
+        from app.agents.ui_contract import UiContract
+        with self.db.read() as s:
+            rows = s.scalars(select(Message).where(Message.ticket_id == identity['ticket_id'])
+                             .order_by(Message.seq.desc()))
+            row = next((m for m in rows if m.meta.get('intent') == 'technical_plan' and
+                        m.meta.get('scope_version') == identity['scope_version']), None)
+            value = (row.meta.get('plan') or {}).get('ui_contract') if row else None
+            return UiContract.model_validate(value) if value is not None else None
+
     def submit(self, ctx, sup, started, manifest, message, *, handoff='', test_concerns=None):
-        record = sup.submit_candidate(started.ref, started.credential, message)
         identity = ctx.queue.verify(ctx.lease)
         suite, suite_id = self.suite(identity)
+        ui_contract = self.ui_contract(identity)
+        if ui_contract is not None:
+            ui_contract.check_suite(suite)
+        record = sup.submit_candidate(started.ref, started.credential, message)
         from .test_concerns import qualify_concerns
         concerns, _, ignored = qualify_concerns(test_concerns or [], suite,
                                                 sup.broker(identity['project_id']), record['sha'])
@@ -319,6 +333,30 @@ class ProductWorkspace:
             ctx.queue.verify(ctx.lease)
             built, build_files = None, None
             build_error = self.redactor.redact(str(exc))[:2000]
+        ui_check = None
+        if built and ui_contract is not None:
+            from .ui_inventory import check_build
+            site = sup.run_dir(started.ref) / 'builds' / built['build_id'] / 'artifact'
+            from app.workspace.errors import WorkspaceError
+            try:
+                ui_check = check_build(site, ui_contract)
+            except (WorkspaceError, OSError, ValueError) as exc:
+                ui_check = {'status': 'incomplete', 'missing_testids': [], 'qa_pass': False,
+                            'reason': self.redactor.redact(str(exc))[:400]}
+            with self.db.write() as s:
+                ctx.queue.verify_identity(s, identity)
+                row = self.store.put_json(s, project_id=identity['project_id'], kind='report',
+                    name='ui-contract-check.json', document={**ui_check, 'source_sha': record['sha'],
+                        'build_digest': built['build_digest'], 'ui_contract_digest': digest_of(ui_contract.model_dump())},
+                    meta={'producer': 'ui-contract-check', 'fake': self.fake})
+                self._post(s, identity, 'ui-check:' + identity['job_id'] + ':' + str(identity['generation']) + ':' + row.id,
+                    'Static UI contract inventory: ' + ui_check['status'] + '. Not browser acceptance.',
+                    [row.id], 'ui_contract_check', runtime_log=True)
+            ui_check['artifact_id'] = row.id
+            if ui_check['status'] != 'passed':
+                return {'submitted': False, 'failure_kind': 'ui_contract', 'ui_check': ui_check,
+                    'next': 'Keep working in this job. Add literal data-testid attributes to the shipped controls '
+                            'listed in missing_testids, rebuild and submit again. Do not change the contract or UAC.'}
         gate = None
         if built:
             source = sup.run_dir(started.ref) / 'verify' / built['build_id'] / 'src'
@@ -369,10 +407,14 @@ class ProductWorkspace:
                         'toolchain_digest': digest_of(built['toolchain']), 'config_digest': digest_of(manifest.effective_config()),
                         'fixture_digest': digest_of(manifest.fixture), 'migration_digest': digest_of(manifest.migrations),
                         'runner': runner, 'execution_manifest': manifest.to_dict(), 'node_image_id': built['toolchain']['image_id'],
+                        **({'ui_contract': ui_contract.model_dump(), 'ui_contract_digest': digest_of(ui_contract.model_dump()),
+                            'ui_check_artifact_id': ui_check['artifact_id']} if ui_check else {}),
                         'gate_artifact_id': gate_artifact.id}, meta={'producer': 'builder', 'source_attempt': source_attempt})
                 workflow.attach_target(Actor('service:builder', 'builder', t.project_id), t.id, t.revision,
                     candidate.id, build_artifact_id=build.id, target_artifact_id=target.id, target_digest=target.checksum)
                 attachments += [bundle.id, build.id, target.id]
+                if ui_check:
+                    attachments.append(ui_check['artifact_id'])
             self._post(s, identity, 'candidate:' + identity['root_job_id'],
                 handoff or 'Candidate submitted; technical review and separate QA execution are required.', attachments,
                 'candidate_handoff', candidate_id=candidate.id, build_error=build_error, gate=gate,

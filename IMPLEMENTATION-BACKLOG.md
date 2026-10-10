@@ -49,6 +49,29 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ## Daftar tiket
 
+### Kontrak UI dan revisi suite QA generik — 10 Oktober 2026
+
+Status: IN_PROGRESS. Review: NOT_REVIEWED.
+Scope: kontrak UI dari TL, validator locator QA, pemeriksaan testid build sebelum
+publish kandidat, snapshot aria saat gagal dan satu jalur revisi suite dengan
+invariant test/UAC/purpose/input/assertion serta batas diff.
+Rencana/file: agents/{outputs,ui_contract,instructions}; pipeline/{runtime,
+workspace,contracts,suite_revision,harness}; contracts/verification/acceptance.py.
+Worker tetap mati. Tidak menjalankan/menambah tes tanpa permintaan pengguna;
+catat pemeriksaan statis dan keterbatasan verifikasi perilaku.
+Hasil: schema UI real TL wajib; validator vocabulary/fixtures; inventory guarded
+HTML/JS mengembalikan submitted=false sebelum domain candidate; kontrak/check
+evidence dipin. Exact role/label/text/testid/scoped record locators; failure aria
+snapshot dan log bounded. Satu QaSuiteRevision menggantikan branch repair runtime,
+dengan origin mapping, source witnesses, input/expected guard dan diff limits.
+Historical/fake contract-less output tetap kompatibel; tidak ada migrasi/retry.
+Verifikasi: syntax 12 Python files dan git diff --check lulus; modul tidak
+dieksekusi. Tidak menambah/menjalankan tests, browser/provider atau worker.
+Handoff: docs/audits/ui-contract-suite-revision-2026-10-10.md, termasuk pemetaan
+AC/file, limits, kompatibilitas dan skenario regresi. Sisa: verifikasi perilaku
+schema/inventory/locator/Hermes submit=false, invariant repair/recovery/fencing,
+runner/provider compatibility serta benchmark. Belum DONE/independent review.
+
 ### Developer checks, konteks QA dan telemetry — 10 Oktober 2026
 
 Status: IN_PROGRESS. Review: NOT_REVIEWED.
