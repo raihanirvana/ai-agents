@@ -1,7 +1,8 @@
 """Private, bounded snapshots published only after the fixed offline installer.
 
-Targets never mount this cache. Every restore verifies tree contents, and the
-caller publishes before any project build/test/start process can change them.
+Targets never mount this cache. Contents are hashed when published and once per
+supervisor process before reuse; later restores of an unchanged entry (same
+inodes/metadata) hardlink files instead of copying and re-hashing them.
 """
 import fcntl
 import hashlib
@@ -62,6 +63,24 @@ class InstallationCache:
                                for name in ('installation_cache.py', 'sandbox.py', 'bounded_io.py', 'dependencies.py')}},
             sort_keys=True).encode()).hexdigest()
 
+    # Content digests verified in this supervisor process, keyed by entry path and
+    # bound to the entry's metadata fingerprint (same inodes, sizes, modes, mtimes).
+    _verified: dict = {}
+
+    def _verify(self, entry, key):
+        record = json.loads(fsutil.read_file_beneath(entry, 'receipt.json', max_bytes=16384))
+        tree = entry / 'node_modules'
+        entries = fsutil.scan_tree(tree, limits=self.tree_limits)
+        if record.get('key') != key:
+            raise SandboxError('installation cache integrity mismatch')
+        fingerprint = fsutil.tree_fingerprint(tree, entries)
+        if self._verified.get(str(entry)) != (record.get('tree_digest'), fingerprint):
+            # Full content hash once per process, or whenever metadata changed.
+            if fsutil.sha256_tree(tree, entries) != record.get('tree_digest'):
+                raise SandboxError('installation cache integrity mismatch')
+            self._verified[str(entry)] = (record['tree_digest'], fingerprint)
+        return record, tree, entries, fingerprint
+
     def restore(self, key, source, check):
         with self.locked():
             entry = self.root / key
@@ -69,12 +88,9 @@ class InstallationCache:
                 return None
             self._trusted(entry)
             try:
-                record = json.loads(fsutil.read_file_beneath(entry, 'receipt.json', max_bytes=16384))
-                tree = entry / 'node_modules'
-                entries = fsutil.scan_tree(tree, limits=self.tree_limits)
-                if record.get('key') != key or fsutil.sha256_tree(tree, entries) != record.get('tree_digest'):
-                    raise SandboxError('installation cache integrity mismatch')
+                record, tree, entries, fingerprint = self._verify(entry, key)
             except (OSError, ValueError, TypeError, AttributeError, WorkspaceError):
+                self._verified.pop(str(entry), None)
                 shutil.rmtree(entry)
                 return None  # Corruption is a miss; run the installer again.
             check()
@@ -82,10 +98,23 @@ class InstallationCache:
                 stage = Path(temporary) / 'node_modules'
                 stage.mkdir(mode=0o755)
                 stage.chmod(0o755)
-                fsutil.copy_entries(tree, entries, stage, sandbox_visible=True)
-                copied = fsutil.scan_tree(stage, limits=self.tree_limits)
-                if fsutil.sha256_tree(stage, copied) != record['tree_digest']:
-                    raise SandboxError('restored installation digest mismatch')
+                try:
+                    # Hardlinks share the verified inodes: no copy and no second hash.
+                    # Dependencies are mounted readonly into targets, and any later
+                    # in-place change alters this fingerprint and forces a re-hash.
+                    fsutil.link_entries(tree, entries, stage)
+                    linked = fsutil.tree_fingerprint(stage, fsutil.scan_tree(stage, limits=self.tree_limits))
+                    if linked != fingerprint:
+                        raise SandboxError('restored installation fingerprint mismatch')
+                    record = {**record, 'restore': 'hardlink'}
+                except (OSError, NotImplementedError):
+                    shutil.rmtree(stage)  # e.g. EXDEV: workspace on another filesystem.
+                    stage.mkdir(mode=0o755)
+                    fsutil.copy_entries(tree, entries, stage, sandbox_visible=False)
+                    copied = fsutil.scan_tree(stage, limits=self.tree_limits)
+                    if fsutil.sha256_tree(stage, copied) != record['tree_digest']:
+                        raise SandboxError('restored installation digest mismatch')
+                    record = {**record, 'restore': 'copy'}
                 check()
                 destination, previous = source / 'node_modules', Path(temporary) / 'previous'
                 had_previous = destination.exists() or destination.is_symlink()
@@ -146,3 +175,7 @@ class InstallationCache:
                 atomic_write_json(stage / 'receipt.json', record)
                 check()
                 os.replace(stage, self.root / key)
+                # Contents were just hashed; the first restore needs no second hash.
+                self._verified[str(self.root / key)] = (tree_digest, fsutil.tree_fingerprint(
+                    self.root / key / 'node_modules', fsutil.scan_tree(self.root / key / 'node_modules',
+                                                                       limits=self.tree_limits)))

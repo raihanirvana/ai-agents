@@ -1,6 +1,7 @@
 """User resolution of complete but inconclusive QA, separate from QA pass/UAT.
 
-Only test-contract/unknown diagnoses qualify. Missing evidence, infrastructure,
+Only test-contract/unknown diagnoses qualify, on complete failed runs or proven
+coverage gaps (candidate passed, feature/bug assertions also passed on base). Missing evidence, infrastructure,
 repo gates, smoke, stale targets, and proven application failures cannot be waived.
 """
 from sqlalchemy import select, func, or_
@@ -38,8 +39,9 @@ def qualify(s, store, candidate, verification_id, diagnosis_id, *, historical=Fa
                 or_(Job.status.in_(('queued', 'running', 'waiting_input', 'waiting_quota')),
                     func.json_type(Job.runtime_ref, '$.cleanup') == 'object')).limit(1)):
             raise Conflict('QA or its cleanup is still active; wait before a manual decision')
-    if v.status != 'failed' or v.results.get('fake_provider') is not False or v.results.get('infrastructure_failure') is not False:
-        raise Invalid('Only complete non-fake failed tests can receive a user QA decision')
+    if (v.status not in ('failed', 'incomplete') or v.results.get('fake_provider') is not False
+            or v.results.get('infrastructure_failure') is not False):
+        raise Invalid('Only complete non-fake failed tests or proven coverage gaps can receive a user QA decision')
     target = evidence.document(s, store, v.target_artifact_id)
     suite = QaPlan.model_validate(evidence.document(s, store, target['suite_artifact_id']))
     if suite.digest != v.suite_digest or suite.digest != target['runner_manifest_digest']:
@@ -63,14 +65,20 @@ def qualify(s, store, candidate, verification_id, diagnosis_id, *, historical=Fa
             proof.get('commands') != commands):
         raise Invalid('The authoritative runner command is missing or did not complete normally')
     admitted = validate_report(report, invocation_id=v.evidence_id, target_digest=v.target_digest, suite=suite)
+    # incomplete qualifies only as a proven coverage gap: every candidate test ran
+    # and passed, but feature/bug assertions also passed on the accepted base.
+    from app.pipeline.qa_repair import baseline_coverage_gaps
+    gaps = baseline_coverage_gaps(suite, proof) if v.status == 'incomplete' else []
+    if v.status == 'incomplete' and not gaps:
+        raise Invalid('Incomplete QA without a proven coverage gap cannot receive a user QA decision')
     if (not isinstance(target.get('runner'), dict) or proof.get('runner') != target['runner'] or
-            admitted['status'] != 'failed' or admitted['counts'] != v.counts or
+            admitted['status'] != ('failed' if v.status == 'failed' else 'passed') or admitted['counts'] != v.counts or
             v.expected_test_ids != [test.id for test in suite.tests] or
             set(admitted['executed']) != set(v.expected_test_ids) or
             admitted['coverage'] != v.uac_coverage or
             len(v.results.get('executed_test_ids', [])) != len(v.expected_test_ids) or
             set(v.results.get('executed_test_ids', [])) != set(v.expected_test_ids) or
-            proof.get('status') != 'failed' or proof.get('infrastructure_failure') is not False or
+            proof.get('status') != v.status or proof.get('infrastructure_failure') is not False or
             report.get('smoke_passed') is not True or (proof.get('required_checks') or {}).get('status') != 'passed'):
         raise Invalid('Incomplete execution, smoke, baseline or repository gate failure cannot be waived')
     diagnosis_row = evidence.artifact(s, store, candidate.project_id, diagnosis_id, 'report')
@@ -84,7 +92,8 @@ def qualify(s, store, candidate, verification_id, diagnosis_id, *, historical=Fa
         if latest != diagnosis_id:
             raise Conflict('QA diagnosis changed; reload before deciding')
     diagnosis = QaDiagnosis.model_validate(evidence.document(s, store, diagnosis_id))
-    failed = {test['id'] for test in report['tests'] if test['status'] == 'failed'}
+    failed = ({test['id'] for test in report['tests'] if test['status'] == 'failed'} if v.status == 'failed'
+              else set(gaps))
     if (diagnosis.fault not in ('test', 'unknown') or {f.test_id for f in diagnosis.findings} != failed
             or any(f.fault in ('application', 'infrastructure') for f in diagnosis.findings)):
         raise Invalid('Proven application/infrastructure failures cannot receive a manual QA decision')
@@ -127,12 +136,15 @@ def available(s, store, ticket):
         return None
     v = s.scalar(select(Verification).where(Verification.candidate_id == c.id,
         Verification.target_digest == c.target_digest).order_by(Verification.created_at.desc(), Verification.id.desc()).limit(1))
-    if not v or v.status != 'failed':
+    if not v or v.status not in ('failed', 'incomplete'):
         return None
     a = s.scalar(select(Artifact).where(func.json_extract(Artifact.meta, '$.producer') == 'qa-diagnosis',
         func.json_extract(Artifact.meta, '$.verification_id') == v.id).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
     if a is None:
-        return {'eligible': False, 'reason': 'Menunggu diagnosis QA untuk target ini.'}
+        active = s.scalar(select(Job.id).where(Job.ticket_id == ticket.id, Job.scope_version == c.scope_version,
+            Job.stage == 'qa', Job.status.in_(('queued', 'running', 'waiting_input', 'waiting_quota'))).limit(1))
+        return {'eligible': False, 'reason': 'Menunggu diagnosis QA untuk target ini.' if active else
+                'Diagnosis QA tidak tersedia dan tidak ada job QA aktif; jalankan ulang QA untuk target ini.'}
     try:
         q = qualify(s, store, c, v.id, a.id)
     except (Invalid, Conflict, ValueError, ArtifactUnavailable, KeyError, TypeError) as exc:

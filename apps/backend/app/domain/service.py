@@ -115,6 +115,12 @@ class Workflow:
         profile = document.get('qa_profile')
         if profile not in (None, 'lightweight', 'manual'):
             raise Invalid('Invalid QA profile')
+        if profile is None and t.current_version:
+            # A revision without an explicit choice keeps the version's QA profile;
+            # it never silently switches a manual-test scope back to automated QA.
+            previous = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id,
+                                                            TicketVersion.version == t.current_version))
+            profile = (previous.scope or {}).get('qa_profile') if previous is not None else None
         title, uac, deps = document.get("title"), document.get("uac"), document.get("dependencies", [])
         if not isinstance(title, str) or not title.strip() or not isinstance(document.get("description", ""), str):
             raise Invalid("scope title/description invalid")
@@ -256,6 +262,8 @@ class Workflow:
             job = s.get(Job, actor.job_id)
             if job.ticket_id != t.id or job.scope_version != t.current_version:
                 raise Conflict("proposal belongs to stale scope")
+            # QA profile is the user's/project's choice; a PO proposal inherits it.
+            document = {k: v for k, v in document.items() if k != 'qa_profile'} if isinstance(document, dict) else document
             doc = self._scope(s, actor, t, document)
             self._dag(s, actor, (t.id, doc["dependencies"]))
             message, created = append_message(s, project_id=t.project_id, ticket_id=t.id,

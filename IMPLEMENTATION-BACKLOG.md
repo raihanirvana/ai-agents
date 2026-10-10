@@ -79,6 +79,14 @@ hingga demo; instrumentasi memory optional tersedia, peak memory belum terukur.
 Status IN_PROGRESS untuk validasi demo yang ditunda; review NOT_REVIEWED.
 Handoff dan batas bukti: bagian F audit sandbox-dependency-ui-amendment-2026-10-11.md.
 Tidak ada commit/push/restart otomatis.
+Tindak lanjut review a908ce7: tunggu QA plan toleran jeda amendment TL→QA dan
+dibatasi 240 dtk; submit_candidate dikunci terhadap retry paralel; revisi scope
+mewarisi qa_profile; diagnosis unknown turunan supervisor + coverage gap
+terbukti dapat diputuskan user (migration 0008). Detail: bagian G audit yang sama.
+Lanjutan: restore cache install memakai hardlink + hash sekali per proses;
+receipt install berbasis metadata; penantian QA plan dipindah ke run_checks;
+error aturan amendment TL diperbaiki di putaran repair job yang sama. Token nyata
+belum diukur (butuh demo provider nyata). Detail: bagian H audit.
 
 
 ### Salinan dependency sandbox dan pemulihan kontrak UI — 11 Oktober 2026

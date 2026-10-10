@@ -261,3 +261,49 @@ Bukti domain/HTTP memakai receipt fixture terkontrol, bukan QA model nyata.
 Sampling memory hanya observational, lower bound jika memakai memory.current;
 OOM, recovery SIGKILL, runtime provider dan workload proyek besar belum dibuktikan
 oleh selection ini. Tidak ada independent review, commit, push atau restart.
+
+## G. Tindak lanjut review a908ce7 (temuan a–e)
+
+Status IN_PROGRESS / NOT_REVIEWED. Dikerjakan implementer; belum commit/push,
+worker tidak di-restart. Bukan independent review.
+
+| Temuan | Perubahan | Bukti |
+| --- | --- | --- |
+| a. Developer gagal di jeda TL→QA amendment | `_qa_plan_state` menganggap `waiting`: job planning aktif, QA meminta amendment, atau TL plan sukses yang revisinya belum punya job qa_plan. Developer baru menyerah setelah 3 observasi `dead` berturut-turut. | `tests/pipeline/test_qa_plan_wait.py` (race persis dari review) |
+| b. Waktu submit tidak dibatasi + submit paralel | Tunggu QA plan dibatasi 240 dtk; habis → `qa_plan_pending` tanpa commit. `submit_candidate` memakai lock: retry setelah timeout tool menunggu submit pertama (maks 900 dtk) lalu mengembalikan hasil yang sama, atau `submission_in_progress`. | `test_wait_is_bounded_and_returns_suite_when_ready` |
+| c. `qa_profile: manual` hilang saat revisi | Revisi tanpa field mewarisi profil versi sebelumnya; proposal PO selalu mewarisi (PO tidak dapat mengganti profil). Pilihan eksplisit user tetap berlaku. | `tests/domain/test_qa_decision_coverage.py` (edit user, proposal PO) |
+| d. Keputusan user hanya menutup sebagian QA macet | Supervisor menyimpan diagnosis `unknown` turunan (`supervisor_derived`) saat atribusi aplikasi ditolak validator (diagnosis model tetap tersimpan, `derived_from`), output diagnosis tidak valid/tidak lengkap, atau revisi coverage gap gagal. `qualify` menerima verifikasi `incomplete` hanya untuk coverage gap terbukti: semua test kandidat lulus, base run lengkap, smoke/gate lulus, tanpa infrastruktur gagal. Migration 0008 membuka trigger waiver untuk status `incomplete`; downgrade menolak jika ada waiver semacam itu. Tanpa diagnosis dan tanpa job QA aktif, UI tidak lagi "menunggu" selamanya. | coverage gap → UAT; 5 kasus penolakan; pesan tanpa job aktif; migrasi up/down di tests/persistence |
+| e. Polling memuat semua job | Query terbatas (`LIMIT 1`, `count`) per poll. | sama dengan (a) |
+| f. test.cjs release | Tidak diubah; tetap dipantau di demo. | — |
+
+Verifikasi (apps/backend, PATH Git modern): test baru 15 passed;
+`tests/domain tests/persistence` + test baru 152 passed; `tests/domain` +
+pipeline amendment/coverage repair/selector repair/test concerns/product loop/
+UI submission/scheduler 219 passed. Suite penuh tidak dijalankan ulang.
+
+Keterbatasan: provider error yang retryable tetap tidak membuat diagnosis turunan
+(job retry dulu); bila job akhirnya gagal, UI menampilkan instruksi menjalankan
+ulang QA, bukan keputusan. Submit pada cache dingin (base_build + build + gate)
+masih bisa melebihi 1020 dtk; lock mencegah submit ganda tetapi tidak
+memperpendek build. Developer tetap memegang slot execution selama menunggu.
+
+## H. Rekomendasi kecepatan dan role (lanjutan G)
+
+Status IN_PROGRESS / NOT_REVIEWED; belum commit/push/restart. Bukan independent review.
+
+| Rekomendasi | Perubahan | Bukti |
+| --- | --- | --- |
+| 3.1 Cache install tanpa salin | Entry di-hash saat publish dan sekali per proses supervisor, lalu diikat ke fingerprint metadata (ukuran/mode/mtime/inode). Restore memakai hardlink (tanpa salin, tanpa hash ulang); fallback salin + verifikasi digest jika hardlink tidak didukung (mis. EXDEV). Bukan bind-mount langsung ke entry cache: entry dapat dievict (LRU) saat workspace masih memakainya, dan direktori cache tetap privat supervisor. Perubahan in-place lewat hardlink mana pun mengubah fingerprint → hash ulang → entry dibuang. File hasil restore 0644 (dependency di-mount readonly). | `tests/workspace/test_installation_cache_restore.py` (4); Docker nyata `test_readonly_dependencies_docker.py` 4 passed (restore tanpa download + build Vite) |
+| 3.2 Receipt install metadata | Receipt `run_checks` memakai `meta:` fingerprint metadata, bukan hash isi. | `test_install_receipt_digest_ignores_tmpfs_masked_scratch` |
+| 1a/1b Penantian QA plan | `run_checks` yang lulus menunggu QA plan (maks 240 dtk, tetap di bawah 900 dtk per tool) dan melaporkan `qa_plan` ready/pending/unavailable; submit hanya menunggu 30 dtk, lalu `qa_plan_pending` tanpa commit. Lock submit dari G tetap. | `tests/pipeline/test_qa_plan_wait.py` |
+| TL: error amendment sampai ke TL | `_ask` menerima `check`; aturan plan TL (ui_contract wajib, revisi +1, aditif, tanpa keputusan scope) dijalankan di dalam putaran repair, dengan detail kontrol yang berubah. Tetap dicek ulang setelahnya untuk output yang sudah di-checkpoint. | `test_rejected_amendment_is_repaired_by_tl_in_the_same_job` |
+
+Verifikasi: tests/agents, tests/domain, pipeline (amendment, qa_plan_wait,
+review followups, product loop, coverage repair, test concerns, UI submission)
+dan workspace (installation cache, fsutil, bounded dependency export): 415 passed.
+Docker readonly dependencies: 4 passed.
+
+Belum dikerjakan: pengukuran token nyata (butuh demo dengan provider nyata;
+bandingkan dengan audit Mini Perpustakaan 19,5 juta token); belum ada benchmark
+waktu restore cache sebelum/sesudah. Instruksi role tidak ditambah pada putaran
+ini (pesan `next` di output tool yang menjelaskan qa_plan/submit).

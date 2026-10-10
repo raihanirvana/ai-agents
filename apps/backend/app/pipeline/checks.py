@@ -53,7 +53,10 @@ class DeveloperChecks:
         # Scratch mountpoints are masked by tmpfs in every sandbox command, so
         # their contents never affect execution and must not void the receipt.
         entries = fsutil.scan_tree(tree, exclude=DEPENDENCY_SCRATCH, limits=DEPENDENCY_LIMITS)
-        return fsutil.sha256_tree(tree, entries)
+        # Metadata identity (path/size/mode/mtime/inode), not a content hash: the
+        # receipt only avoids a redundant local install. Contents are hashed when an
+        # installation is published to the cache; submission rebuilds independently.
+        return 'meta:' + fsutil.tree_fingerprint(tree, entries)
 
     def _ui_inventory(self, manifest, source):
         """Early static testid feedback on this workspace's own build output.

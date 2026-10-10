@@ -110,3 +110,21 @@ def test_amendment_rejects_replacing_existing_control_or_scope_decision(agent_en
         assert runtime.workspace.ui_contract(env.queue.verify(ctx.lease)).revision == 1
     finally:
         ctx.stop_resources()
+
+
+def test_rejected_amendment_is_repaired_by_tl_in_the_same_job(agent_env, tmp_path):
+    env = agent_env
+    runtime, _, scheduler = setup(env, tmp_path, AmendmentDriver())
+    replaced = plan(2, [{**CONTROL, 'name': 'Different Add'}, {'testid': 'total', 'role': 'status', 'purpose': 'result'}])
+    additive = plan(2, [CONTROL, {'testid': 'total', 'role': 'status', 'purpose': 'result'}])
+    env.script(plan(1, [CONTROL]), replaced, additive)
+    ticket = env.approved_ticket()
+    finish(env, runtime, scheduler, 'technical_plan')
+    finish(env, runtime, scheduler, 'qa_plan')
+    before = len(env.provider.requests)
+    amended = finish(env, runtime, scheduler, 'technical_plan')
+    assert amended.result['ui_contract_revision'] == 2
+    assert len(env.provider.requests) == before + 2  # One repair turn, no failed job.
+    assert 'Amendment is additive' in str(env.provider.requests[-1])
+    assert 'Changed or removed: add' in str(env.provider.requests[-1])
+    assert env.world.ticket(ticket.id).phase == 'ready'

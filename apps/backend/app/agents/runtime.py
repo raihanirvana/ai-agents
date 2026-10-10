@@ -89,8 +89,11 @@ class StructuredAgentRuntime:
         return identity["root_job_id"]
 
     def _ask(self, ctx: RunContext, identity: dict[str, Any], task: dict[str, Any], union, *, repo_refs=None,
-             context_limits: ContextLimits | None = None, source_safe: bool = False):
-        """Context -> reserved model call -> validated answer, with at most one repair call."""
+             context_limits: ContextLimits | None = None, source_safe: bool = False, check=None):
+        """Context -> reserved model call -> validated answer, with at most one repair call.
+
+        check(parsed) may raise InvalidOutput for task rules beyond the schema; its
+        errors reach the model in the same repair turn instead of failing the job."""
         checkpoint = {"task": task, "answer": ctx.answer}
         if source_safe:
             checkpoint['source_safe'] = True
@@ -123,6 +126,8 @@ class StructuredAgentRuntime:
             self._add_usage(total, result)
             try:
                 parsed = parse_output(result.text, union)
+                if check is not None:
+                    check(parsed)
                 break
             except InvalidOutput as exc:
                 ctx.log(f"invalid output (attempt {attempt}): {exc}")

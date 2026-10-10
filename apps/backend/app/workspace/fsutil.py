@@ -257,6 +257,54 @@ def clear_dir(dest: Path, *, keep: Iterable[str] = ()) -> None:
             os.unlink(child.path)
 
 
+def tree_fingerprint(root: Path, entries: list[TreeEntry]) -> str:
+    """Cheap metadata identity of a scanned tree: path, kind, size, mode, mtime and inode.
+
+    Not a content proof. Callers hash contents when a tree is first trusted and use
+    this only to notice that the same inodes have been changed or replaced since."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    for entry in sorted(entries, key=lambda e: e.rel):
+        row = f"{entry.kind}\0{entry.rel}\0{entry.target}"
+        if entry.kind == "file":
+            st = os.lstat(os.path.join(root, entry.rel))
+            if not stat.S_ISREG(st.st_mode):
+                raise PathViolation(f"file changed type: {entry.rel}")
+            row += f"\0{st.st_size}\0{stat.S_IMODE(st.st_mode)}\0{st.st_mtime_ns}\0{st.st_dev}:{st.st_ino}"
+        digest.update(row.encode() + b"\n")
+    return digest.hexdigest()
+
+
+def link_entries(src_root: Path, entries: list[TreeEntry], dest_root: Path) -> None:
+    """Materialise scanned entries with hardlinked files (no content copy).
+
+    Only for immutable supervisor trees whose consumers never write in place
+    (readonly mounts). Raises OSError (e.g. EXDEV) when linking is unsupported."""
+    for entry in entries:
+        parts = validate_relpath(entry.rel).parts
+        parent = _open_parent(dest_root, parts, create=True, mode=0o755)
+        try:
+            name = parts[-1]
+            if entry.kind == "dir":
+                try:
+                    os.mkdir(name, 0o755, dir_fd=parent)
+                except FileExistsError:
+                    pass
+            elif entry.kind == "symlink":
+                os.symlink(entry.target, name, dir_fd=parent)
+            else:
+                sfd = open_beneath(src_root, entry.rel, os.O_RDONLY)
+                try:
+                    if not stat.S_ISREG(os.fstat(sfd).st_mode):
+                        raise PathViolation(f'file changed into a special file: {entry.rel}')
+                finally:
+                    os.close(sfd)
+                os.link(os.path.join(src_root, entry.rel), name, dst_dir_fd=parent, follow_symlinks=False)
+        finally:
+            os.close(parent)
+
+
 def copy_entries(src_root: Path, entries: list[TreeEntry], dest_root: Path, *, sandbox_visible: bool) -> None:
     """Copy scanned entries without following links; dest must be empty/cleared.
 

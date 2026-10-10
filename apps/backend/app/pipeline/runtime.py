@@ -1,5 +1,6 @@
 """Lead plan -> Hermes developer -> lead review -> trusted QA. Approval stays in Workflow."""
 import json
+import threading
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -144,6 +145,25 @@ class PipelineRuntime:
         previous_contract = self.workspace.ui_contract(identity) if amendment else None
         if amendment and (previous_contract is None or previous_contract.revision != amendment['revision']):
             raise InvalidOutput(['Contract amendment refers to an obsolete revision; use the current plan.'])
+        def plan_rules(output):
+            """Raised inside the repair turn, so TL sees and fixes them in this job."""
+            if isinstance(output, Clarification):
+                return
+            if output.ui_contract is None and not self.fake:
+                raise InvalidOutput(['New technical plans require ui_contract with literal testids and semantic locators.'])
+            if previous_contract is not None:
+                if output.needs_user:
+                    raise InvalidOutput(['Instrumentation amendment must not change scope or create an approval decision.'])
+                if output.ui_contract is None or output.ui_contract.revision != previous_contract.revision + 1:
+                    raise InvalidOutput([f'Contract amendment must advance revision exactly once: '
+                                         f'use revision {previous_contract.revision + 1}.'])
+                before = {c.testid: c.model_dump() for c in previous_contract.controls}
+                after = {c.testid: c.model_dump() for c in output.ui_contract.controls}
+                changed = sorted(key for key, value in before.items() if after.get(key) != value)
+                if changed or len(after) <= len(before):
+                    raise InvalidOutput(['Amendment is additive: retain all previous controls/identities and add '
+                        'the missing controls.' + (' Changed or removed: ' + ', '.join(changed[:20]) if changed else
+                        ' No new control was added.')])
         output, meta, snapshot = self._ask(ctx, identity,
             {'name': 'technical_plan', 'contract_amendment': amendment,
              'previous_ui_contract': previous_contract.model_dump() if previous_contract else None, 'ticket_id': identity['ticket_id'], 'source_files': files,
@@ -152,23 +172,13 @@ class PipelineRuntime:
              'verification_policy': policy_context(),
              'reference_bootstrap': bootstrap_contract() if self.workspace.bootstrap_available(identity) else None,
              'onboarding': self._onboarding_context(identity['project_id'])},
-             LeadPlanOutput if self.fake else UiLeadPlanOutput)
+             LeadPlanOutput if self.fake else UiLeadPlanOutput, check=plan_rules)
         if isinstance(output, Clarification):
             ctx.request_input(output.as_text(), {}, 'pipeline-clarify:' + identity['root_job_id'] + ':' + str(identity['generation']))
-        if output.ui_contract is None and not self.fake:
-            raise InvalidOutput(['New technical plans require ui_contract with literal testids and semantic locators.'])
+        plan_rules(output)  # Backstop for outputs checkpointed before this rule ran in _ask.
         if output.ui_contract is not None:
             from app.agents.ui_contract import UiContract
             output.ui_contract = UiContract.model_validate({**output.ui_contract.model_dump(), 'action_locators': 'testid'})
-        if previous_contract is not None:
-            if output.needs_user:
-                raise InvalidOutput(['Instrumentation amendment must not change scope or create an approval decision.'])
-            if output.ui_contract is None or output.ui_contract.revision != previous_contract.revision + 1:
-                raise InvalidOutput(['Contract amendment must advance revision exactly once.'])
-            before = {c.testid: c.model_dump() for c in previous_contract.controls}
-            after = {c.testid: c.model_dump() for c in output.ui_contract.controls}
-            if any(after.get(key) != value for key, value in before.items()) or len(after) <= len(before):
-                raise InvalidOutput(['Amendment is additive: retain all previous controls/identities and add the missing controls.'])
         key = 'pipeline-plan:' + identity['root_job_id'] + ':' + snapshot.sha256
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
@@ -329,10 +339,46 @@ class PipelineRuntime:
         # The relay reserves each invocation. _execute verifies role/arguments/lease without a second reservation.
         return {name: (lambda args, tool=name: facade._execute(ctx, tool, args)) for name in parameters}
 
-    def _await_qa_plan(self, ctx, identity):
-        """Wait without more model calls; heartbeat/cancellation remain active."""
+    SUBMIT_RETRY_WAIT_S = 900  # Below the 1020 s tool timeout.
+    QA_PLAN_WAIT_S = 240  # run_checks waits for QA planning, inside the 1020 s tool timeout.
+    CHECKS_TOOL_BUDGET_S = 900
+    SUBMIT_QA_PLAN_WAIT_S = 30  # Submit only waits briefly; build/gates need the rest.
+    QA_PLAN_DEAD_POLLS = 3  # Scheduler hand-offs (TL -> QA) leave at least one idle tick.
+
+    def _qa_plan_state(self, identity):
+        """'waiting' while planning can still produce a suite for this scope; 'dead' otherwise.
+
+        Bounded SQL reads only (no full job history per poll)."""
+        from sqlalchemy import func
+        from .scheduler import ACTIVE
+        scope = (Job.ticket_id == identity['ticket_id'], Job.scope_version == identity['scope_version'],
+                 Job.stage.in_(('qa_plan', 'technical_plan')))
+        with self.db.read() as s:
+            if s.scalar(select(Job.id).where(*scope, Job.status.in_(ACTIVE)).limit(1)) is not None:
+                return 'waiting'
+            latest = s.scalar(select(Job).where(*scope).order_by(Job.created_at.desc(), Job.id.desc()).limit(1))
+            if latest is None or latest.status != 'succeeded':
+                return 'dead'
+            result = latest.result or {}
+            if result.get('contract_amendment'):
+                return 'waiting'  # QA asked TL; the scheduler enqueues the TL amendment next.
+            if latest.stage == 'technical_plan':
+                # A successful (amended) TL plan whose revision has no QA planning job yet:
+                # the scheduler enqueues qa_plan on its next tick.
+                revision = result.get('ui_contract_revision', 1)
+                planned = s.scalar(select(func.count()).select_from(Job).where(*scope, Job.stage == 'qa_plan',
+                    func.coalesce(func.json_extract(Job.runtime_ref, '$.payload.ui_contract_revision'), 1) == revision))
+                return 'waiting' if not planned else 'dead'
+            return 'dead'
+
+    def _await_qa_plan(self, ctx, identity, *, timeout_s=None):
+        """Wait without more model calls; heartbeat/cancellation remain active.
+
+        Returns the suite, or None when planning is still legitimately pending at
+        the deadline. Raises only after repeated observations of no recoverable path."""
         import time
-        started, announced = time.monotonic(), False
+        timeout_s = self.QA_PLAN_WAIT_S if timeout_s is None else timeout_s
+        started, announced, dead = time.monotonic(), False, 0
         try:
             while True:
                 ctx._check()
@@ -340,18 +386,16 @@ class PipelineRuntime:
                 try:
                     return self.workspace.suite(identity)
                 except ValueError:
-                    with self.db.read() as session:
-                        jobs = list(session.scalars(select(Job).where(Job.ticket_id == identity['ticket_id'],
-                            Job.scope_version == identity['scope_version'], Job.stage.in_(('qa_plan', 'technical_plan')))))
-                        active = any(j.status in ('queued', 'running', 'waiting_input', 'waiting_quota') for j in jobs)
-                        latest = max(jobs, key=lambda j: (j.created_at, j.id)) if jobs else None
-                        if not active and (latest is None or latest.status in ('failed', 'stopped', 'cancelled') or
-                                           not latest.result.get('contract_amendment')):
-                            raise InvalidOutput(['QA planning has no validated suite or recoverable planning job.'])
-                    if not announced:
-                        ctx.log('Menunggu rencana QA sebelum submit; tidak ada panggilan model tambahan.')
-                        announced = True
-                    ctx.cancelled.wait(2)
+                    pass
+                dead = dead + 1 if self._qa_plan_state(identity) == 'dead' else 0
+                if dead >= self.QA_PLAN_DEAD_POLLS:
+                    raise InvalidOutput(['QA planning has no validated suite or recoverable planning job.'])
+                if time.monotonic() - started >= timeout_s:
+                    return None
+                if not announced:
+                    ctx.log('Menunggu rencana QA sebelum submit; tidak ada panggilan model tambahan.')
+                    announced = True
+                ctx.cancelled.wait(2)
         finally:
             if announced:
                 from app.workers.telemetry import record_phase
@@ -449,25 +493,51 @@ class PipelineRuntime:
                     response['next'] = ('Repository test evidence is incomplete. Create and run actual Node tests; '
                         'npm exit code 0 alone is insufficient. Read repository_gate counts before submitting.')
             return response
+        submit_lock = threading.Lock()
         def submit(c, i, a):
             submission = CandidateSubmission.model_validate(a)
-            if result:
+            # A tool-timeout retry must never run a second submission concurrently
+            # in the same workspace; it waits for the first and returns its result.
+            if not submit_lock.acquire(timeout=self.SUBMIT_RETRY_WAIT_S):
+                return {'submitted': False, 'failure_kind': 'submission_in_progress',
+                        'next': 'An earlier submit_candidate call is still running. Call submit_candidate '
+                                'again later with the same arguments; do not edit files meanwhile.'}
+            try:
+                if result:
+                    return {**result, 'submitted': True}
+                if self._await_qa_plan(ctx, i, timeout_s=self.SUBMIT_QA_PLAN_WAIT_S) is None:
+                    return {'submitted': False, 'failure_kind': 'qa_plan_pending',
+                            'next': 'QA planning is still in progress; nothing was committed. Call '
+                                    'submit_candidate again with the same arguments.'}
+                response = self.workspace.submit(ctx, sup, started, manifest, submission.message,
+                    handoff=submission.handoff, test_concerns=[c.model_dump() for c in submission.test_concerns])
+                if response.get('submitted') is False:
+                    return response
+                result.update(response)
                 return {**result, 'submitted': True}
-            self._await_qa_plan(ctx, i)
-            response = self.workspace.submit(ctx, sup, started, manifest, submission.message,
-                handoff=submission.handoff, test_concerns=[c.model_dump() for c in submission.test_concerns])
-            if response.get('submitted') is False:
-                return response
-            result.update(response)
-            return {**result, 'submitted': True}
+            finally:
+                submit_lock.release()
         def run_checks(c, i, a):
             if a:
                 raise ValueError('run_checks takes no arguments; commands and identity come from the supervisor')
+            import time
+            began = time.monotonic()
             from app.workers.telemetry import measure
             with measure(ctx, 'checks') as metric:
                 response = checks.run()
                 metric['status'] = response['status']
-                return response
+            if response['status'] == 'passed':
+                # Wait for QA planning here, before any commit/build in submit_candidate,
+                # within the same tool timeout and without extra model calls.
+                budget = max(0.0, min(self.QA_PLAN_WAIT_S, self.CHECKS_TOOL_BUDGET_S - (time.monotonic() - began)))
+                try:
+                    response['qa_plan'] = 'ready' if self._await_qa_plan(ctx, i, timeout_s=budget) else 'pending'
+                except InvalidOutput:
+                    response['qa_plan'] = 'unavailable'
+                if response['qa_plan'] != 'ready':
+                    response['next'] = ('Checks passed but QA planning is ' + response['qa_plan'] + '. Call '
+                        'run_checks again later (it waits without model calls), then submit_candidate.')
+            return response
         def decision(c, i, a):
             if set(a) != {'question'}:
                 raise ValueError('request_decision requires question')
@@ -794,7 +864,7 @@ class PipelineRuntime:
             if v.status == 'incomplete' and not coverage_gaps:
                 raise ValueError('incomplete verification is not a proven feature coverage gap')
             attachments = list(v.evidence_artifact_ids)
-            verification_id = v.id
+            verification_id, verification_status = v.id, v.status
             from app.persistence.models import Message
             previous = s.scalar(select(Message).where(Message.project_id == identity['project_id'],
                 Message.idempotency_key == 'qa-diagnosis:' + identity['root_job_id']))
@@ -840,9 +910,16 @@ class PipelineRuntime:
             remaining -= len(source[path])
             if remaining <= 0:
                 break
+        undecided = ([t['id'] for t in failed] if verification_status == 'failed' else list(coverage_gaps))
         if coverage_gaps:
-            return self._revise_suite(ctx, identity, candidate, target, suite,
+            outcome = self._revise_suite(ctx, identity, candidate, target, suite,
                 proof, verification_id, attachments, criteria, source)
+            if outcome.status == 'failed':
+                self._unknown_diagnosis(ctx, identity, candidate, verification_id, undecided,
+                    'Supervisor: the suite could not be revised automatically for this coverage gap '
+                    '(feature/bug assertions also pass on the accepted base). '
+                    + (outcome.error or '')[:600], 'coverage_gap_unresolved')
+            return outcome
         diagnosis_task = {
             'name': 'qa_diagnosis', 'candidate_id': candidate.id, 'verification_id': verification_id,
             'verification_policy': policy_context(), 'approved_criteria': criteria,
@@ -861,10 +938,23 @@ class PipelineRuntime:
             output, meta = persisted_output, {}
             ctx.log('Reusing persisted QA diagnosis for this exact failed target/evidence.')
         else:
-            output, meta, _ = self._ask(ctx, identity, diagnosis_task, QaDiagnosis,
-                context_limits=replace(self.structured.builder.limits, total_tokens=32768))
+            try:
+                output, meta, _ = self._ask(ctx, identity, diagnosis_task, QaDiagnosis,
+                    context_limits=replace(self.structured.builder.limits, total_tokens=32768))
+            except InvalidOutput as exc:
+                derived = self._unknown_diagnosis(ctx, identity, candidate, verification_id, undecided,
+                    'Supervisor: QA could not produce a valid diagnosis; failures remain unexplained.',
+                    'diagnosis_invalid')
+                return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id,
+                    'qa_status': 'failed', 'diagnosis_fault': 'unknown', 'diagnosis_artifact_id': derived,
+                    'evidence_artifact_ids': attachments},
+                    error='QA diagnosis output was invalid: ' + self.redactor.redact(str(exc))[:500])
         if {f.test_id for f in output.findings} != {t['id'] for t in failed}:
-            return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id},
+            derived = self._unknown_diagnosis(ctx, identity, candidate, verification_id, undecided,
+                'Supervisor: QA diagnosis did not account for every failed test exactly once.',
+                'diagnosis_incomplete')
+            return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id,
+                                      'diagnosis_fault': 'unknown', 'diagnosis_artifact_id': derived},
                            error='QA diagnosis must account for every failed test exactly once.')
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
@@ -891,9 +981,14 @@ class PipelineRuntime:
             issues = application_repair_issues(suite, proof, output, criteria, source)
             if issues:
                 ctx.log('Application attribution withheld: ' + '; '.join(issues))
+                # The rejected attribution is retained; the decision surface sees it as unknown.
+                derived = self._unknown_diagnosis(ctx, identity, candidate, verification_id, undecided,
+                    'Supervisor: application attribution was withheld (' + '; '.join(issues)[:900] + ').',
+                    'application_attribution_withheld', derived_from=diagnosis.id)
                 return Outcome('failed', {'verification_id': verification_id, 'evidence_artifact_ids': attachments,
                     'qa_status': 'failed', 'failure_kind': 'test_contract', 'diagnosis_fault': 'unknown',
-                    'diagnosis_artifact_id': diagnosis.id, 'application_repair_issues': issues},
+                    'diagnosis_artifact_id': derived, 'model_diagnosis_artifact_id': diagnosis.id,
+                    'application_repair_issues': issues},
                     error='QA application diagnosis lacks qualified evidence: ' + '; '.join(issues))
             detail = '\n'.join(f"{f.test_id}: expected {f.expected}; observed {f.observed}. {f.reason}" for f in output.findings)
             return self._reject(ctx, identity, candidate, 'QA diagnosed an application defect: ' + output.summary + '\n' + detail,
@@ -907,6 +1002,34 @@ class PipelineRuntime:
             'diagnosis_artifact_id': diagnosis.id, 'diagnosis_fault': output.fault},
             error='QA diagnosis: ' + output.summary + '. A corrected suite/runner and fresh evidence are required; '
                   'application repair was not requested.')
+
+    def _unknown_diagnosis(self, ctx, identity, candidate, verification_id, test_ids, summary, reason,
+                           *, derived_from=None):
+        """Supervisor-derived 'unknown' diagnosis, so a stuck QA reaches a user decision.
+
+        It asserts nothing about the application, cannot pass QA and authorizes no
+        repair; qualify() still requires complete, non-fake, smoke/gate-passing evidence."""
+        from app.persistence.models import Message
+        key = f"qa-diagnosis-derived:{identity['root_job_id']}:{verification_id}:{reason}"
+        with self.db.write() as s:
+            ctx.queue.verify_identity(s, identity)
+            previous = s.scalar(select(Message).where(Message.project_id == identity['project_id'],
+                                                      Message.idempotency_key == key))
+            if previous is not None:
+                return previous.attachment_ids[-1]
+            if not test_ids:
+                return None
+            document = QaDiagnosis(kind='qa_diagnosis', fault='unknown', summary=summary[:1500], findings=[
+                {'test_id': test_id, 'fault': 'unknown', 'expected': 'Unresolved by automated QA',
+                 'observed': 'See authoritative runner evidence', 'reason': summary[:1000]}
+                for test_id in test_ids[:24]]).model_dump()
+            row = self.store.put_json(s, project_id=identity['project_id'], kind='report', name='qa-diagnosis.json',
+                document=self.redactor.redact_value(document, source=True), meta={'producer': 'qa-diagnosis',
+                    'verification_id': verification_id, 'target_digest': candidate.target_digest, 'fake': self.fake,
+                    'supervisor_derived': reason, **({'derived_from': derived_from} if derived_from else {})})
+            self.workspace._post(s, identity, key, summary, [row.id], 'qa_diagnosis', candidate_id=candidate.id,
+                verification_id=verification_id, fault='unknown', supervisor_derived=reason)
+            return row.id
 
     def _concern_preflight(self, ctx, identity, candidate, target, suite, criteria, site):
         """Observe advisory concerns early; reuse the full candidate run, never claim QA pass here."""
