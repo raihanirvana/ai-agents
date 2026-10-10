@@ -28,7 +28,8 @@ class InstallationCache:
         self.root, self.limits = Path(root), limits
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._trusted(self.root)
-        self.tree_limits = fsutil.TreeLimits(limits.max_snapshot_files, limits.max_snapshot_bytes)
+        from .bounded_io import DEPENDENCY_LIMITS
+        self.tree_limits = DEPENDENCY_LIMITS
 
     @staticmethod
     def _trusted(path):
@@ -58,7 +59,7 @@ class InstallationCache:
             'env': env, 'installer': 'npm-ci-offline-ignore-scripts',
             'max_bytes': limits.max_snapshot_bytes, 'max_files': limits.max_snapshot_files,
             'installer_code': {name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
-                               for name in ('installation_cache.py', 'sandbox.py', 'dependencies.py')}},
+                               for name in ('installation_cache.py', 'sandbox.py', 'bounded_io.py', 'dependencies.py')}},
             sort_keys=True).encode()).hexdigest()
 
     def restore(self, key, source, check):

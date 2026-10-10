@@ -282,6 +282,7 @@ class WorkspaceSupervisor:
             name=name, image=image_id, source=source, argv=argv, network=network, limits=spec.limits,
             env=manifest.env, labels=self._labels(spec, generation), timeout_s=timeout_s, secrets=secrets_to_redact,
             is_cancelled=lambda: self._revoked(store, generation),
+            install_phase=label == 'phase-install',
         )
         self._record_command(store.dir / "evidence", seq, label, spec, generation, manifest, result, image_id=image_id)
         return result
@@ -557,7 +558,7 @@ class WorkspaceSupervisor:
                 name=self.sandbox.container_name(spec.project_id, spec.run_id, generation), image=image_id,
                 source=src, argv=list(cmd.argv), network=cmd.network, limits=spec.limits, env=manifest.env,
                 labels=self._labels(spec, generation), timeout_s=min(cmd.timeout_s, spec.limits.command_timeout_s),
-                is_cancelled=lambda: self._revoked(store, generation))
+                is_cancelled=lambda: self._revoked(store, generation), install_phase=phase == 'install')
             records.append(self._record_command(store.dir / "evidence", seq, f"{build_id}-{phase}", spec, generation, manifest, result, image_id=image_id))
             if result.exit_code != 0:
                 failed = phase

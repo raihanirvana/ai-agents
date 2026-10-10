@@ -21,7 +21,7 @@ def policy_context():
             'Reuse named UI fixtures; supervisor expands their setup independently before pinning each test.',
             'Select fixture-created records by unique original labels; never infer generated IDs from creation order.',
             'Application diagnosis must cite approved UAC and an exact relevant shipped-source excerpt.',
-            'TL declares ui_contract before QA planning. Use exact declared role/name, label, text or testid locators; '
+            'TL declares ui_contract before QA planning. Use declared testid locators for actions and exact role/name, label, text or testid for assertions; '
             'scope dynamic records with original fixture inputs instead of guessing IDs.',
             'A failed assertion needs diagnosis against criteria, inputs, source and runner evidence before application repair.'
         ]}

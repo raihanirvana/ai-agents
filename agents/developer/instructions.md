@@ -103,3 +103,8 @@ This file defines the task contract; the structured PO/lead runtime does not run
   was reached, a person decides whether to continue.
 - Never modify files outside the project or the acceptance criteria. Existing lockfiles are preserved;
   a new-project lockfile is generated through the reference bootstrap and reviewed with the candidate.
+
+Actions in new QA contracts use data-testid identity; implement all declared IDs.
+Preserve role/name/label/text semantics when required by assertions or approved UAC.
+Installed dependencies are readonly during test/build; temporary Vite caches live
+in bounded tmpfs. Do not modify installed package files or work around mount policy.

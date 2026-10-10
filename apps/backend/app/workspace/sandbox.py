@@ -35,14 +35,17 @@ _NAME_PART = re.compile(r"[^a-z0-9-]")
 _SEED_SOURCE = (
     "const fs=require('node:fs'); const path=require('node:path'); "
     "const skip=process.argv[1] ? path.join('/source',process.argv[1]) : null; "
-    "fs.cpSync('/source','/work',{recursive:true,verbatimSymlinks:true,"
-    "filter:p=>!skip || (p!==skip && !p.startsWith(skip+'/'))});"
+    "for(const entry of fs.readdirSync('/source')) fs.cpSync(path.join('/source',entry),path.join('/work',entry),"
+    "{recursive:true,verbatimSymlinks:true,"
+    "filter:p=>(!skip || (p!==skip && !p.startsWith(skip+'/'))) && "
+    "(!process.argv[2] || (p!=='/source/node_modules' && !p.startsWith('/source/node_modules/')))}); "
+    "if(process.argv[2]==='readonly') fs.symlinkSync('/installed/node_modules','/work/node_modules');"
 )
 
 
-def seeded_command(argv, *, skip=''):
-    return ['sh', '-c', 'NODE_OPTIONS= NODE_PATH= node -e "$1" "$2" || exit $?; shift 2; exec "$@"',
-            'sandbox-seed', _SEED_SOURCE, skip, *argv]
+def seeded_command(argv, *, skip='', readonly_dependencies=False, install_phase=False):
+    return ['sh', '-c', 'NODE_OPTIONS= NODE_PATH= node -e "$1" "$2" "$3" || exit $?; shift 3; cd /work || exit $?; exec "$@"',
+            'sandbox-seed', _SEED_SOURCE, skip, 'readonly' if readonly_dependencies else 'install' if install_phase else '', *argv]
 
 
 @dataclass(frozen=True)
@@ -116,7 +119,8 @@ class DockerSandbox:
     def create(self, *, name: str, image: str, source: Path, argv: Sequence[str], network: str,
                limits: ResourceLimits, env: dict[str, str], labels: dict[str, str],
                artifact: Path | None = None, build_output: str = "dist",
-               dependency_cache: Path | None = None, writable_work: bool = False) -> None:
+               dependency_cache: Path | None = None, writable_work: bool = False,
+               readonly_dependencies: Path | None = None, install_phase: bool = False) -> None:
         if network != "none":
             raise SandboxError("target containers must use network none")
         limits.validate()
@@ -126,15 +130,17 @@ class DockerSandbox:
             "--memory", f"{limits.memory_mb}m", "--memory-swap", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpus), "--pids-limit", str(limits.pids),
             "--ulimit", "nofile=4096:4096", "--ulimit", "core=0",
-            "--tmpfs", f"/tmp:rw,nosuid,nodev,size={limits.tmpfs_mb}m",
+            "--tmpfs", f"/tmp:rw,nosuid,nodev,size={limits.tmpfs_mb if install_phase else min(limits.tmpfs_mb, max(16, limits.memory_mb // 4))}m",
             "--network", "none",
             "--log-driver", "json-file", "--log-opt", "max-size=4m", "--log-opt", "max-file=1",
-            "--workdir", "/work",
+            # Docker 24's create-time working-dir setup chmods a mounted /work
+            # to 0755. Keep the tmpfs mountpoint intact; seed/exec select cwd later.
+            "--workdir", "/" if writable_work else "/work",
             "-e", "HOME=/tmp", "-e", "npm_config_cache=/tmp/npm-cache", "-e", "npm_config_update_notifier=false",
         ]
         if writable_work:
             args += ["--mount", f"type=bind,source={source},target=/source,readonly",
-                     "--tmpfs", f"/work:rw,nosuid,nodev,size={limits.work_mb}m,mode=1777"]
+                     "--tmpfs", f"/work:rw,nosuid,nodev,size={min(limits.work_mb, max(16, limits.memory_mb // 2))}m,mode=1777"]
         else:
             # Explicit readonly source mode; normal commands/start use tmpfs.
             args += ["--mount", f"type=bind,source={source},target=/work,readonly"]
@@ -145,6 +151,11 @@ class DockerSandbox:
             args += ["--label", f"{key}={value}"]
         if dependency_cache is not None:
             args += ["--mount", f"type=bind,source={dependency_cache},target=/dependencies,readonly"]
+        if readonly_dependencies is not None:
+            args += ["--mount", f"type=bind,source={readonly_dependencies},target=/installed/node_modules,readonly"]
+            from .bounded_io import DEPENDENCY_SCRATCH
+            for scratch in DEPENDENCY_SCRATCH:
+                args += ['--tmpfs', f'/installed/node_modules/{scratch}:rw,nosuid,nodev,size=32m,mode=1777,uid=1000,gid=1000']
         if artifact is not None:
             args += ["--mount", f"type=bind,source={artifact},target=/work/{build_output},readonly"]
         args += [image, "-c", 'exec "$@"', "sandbox", *argv]
@@ -200,7 +211,7 @@ class DockerSandbox:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 or cancelled():
                     raise SandboxError("dependency acquisition cancelled or timed out")
-                offline = {**kwargs, "network": "none", "dependency_cache": cache, "timeout_s": remaining}
+                offline = {**kwargs, "network": "none", "dependency_cache": cache, "timeout_s": remaining, "install_phase": True}
                 if installed is not None:
                     offline['image'] = image  # Execute the exact image used by the snapshot key.
                 offline["argv"] = ["sh", "-c",
@@ -232,22 +243,32 @@ class DockerSandbox:
     def _run(self, *, name: str, image: str, source: Path, argv: Sequence[str], network: str,
             limits: ResourceLimits, env: dict[str, str], labels: dict[str, str], timeout_s: float,
             secrets: Sequence[str] = (), is_cancelled=lambda: False,
-             dependency_cache: Path | None = None) -> CommandResult:
+             dependency_cache: Path | None = None, install_phase: bool = False) -> CommandResult:
         """Run one command to completion (or timeout/cancel) and remove the container."""
         if is_cancelled():
             return CommandResult(tuple(argv), None, False, True, False, 0, b"", b"", False, network, name)
         from .bounded_io import stream_command, import_work
         # PID 1 stays alive after docker exec completes so /work tmpfs remains
         # mounted until the trusted supervisor freezes and exports its bytes.
-        idle = seeded_command(['sh', '-c', 'touch /tmp/supervisor-ready && exec sleep 2147483647'])
         started = time.monotonic()
         deadline = started + min(timeout_s, limits.command_timeout_s)
         timed_out = cancelled = False
         stdout = stderr = b''
         truncated, exit_code, oom = False, None, False
         try:
+            from . import fsutil
+            from .bounded_io import DEPENDENCY_LIMITS, prepare_dependency_scratch
+            dependencies = Path(source) / 'node_modules'
+            readonly_dependencies = None
+            if not install_phase and (dependencies.exists() or dependencies.is_symlink()):
+                fsutil.scan_tree(dependencies, limits=DEPENDENCY_LIMITS)
+                prepare_dependency_scratch(dependencies)
+                readonly_dependencies = dependencies.resolve()
+            idle = seeded_command(['sh', '-c', 'touch /tmp/supervisor-ready && exec sleep 2147483647'],
+                                  readonly_dependencies=readonly_dependencies is not None, install_phase=install_phase)
             self.create(name=name, image=image, source=source, argv=idle, network=network,
-                        limits=limits, env=env, labels=labels, dependency_cache=dependency_cache, writable_work=True)
+                        limits=limits, env=env, labels=labels, dependency_cache=dependency_cache, writable_work=True,
+                        readonly_dependencies=readonly_dependencies, install_phase=install_phase)
             self._docker("start", name, timeout=max(0.1, deadline-time.monotonic()))
             while True:
                 cancelled, timed_out = is_cancelled(), time.monotonic() >= deadline
@@ -256,6 +277,9 @@ class DockerSandbox:
                 state = self._state(name)
                 if not state.get('Running'):
                     oom = bool(state.get('OOMKilled'))
+                    init_out, init_err = self.logs(name, limits.max_log_bytes)
+                    stdout = init_out[:limits.max_log_bytes]
+                    stderr = init_err[:limits.max_log_bytes]
                     raise SandboxError('sandbox source initialization failed')
                 ready = self._docker('exec', name, 'test', '-f', '/tmp/supervisor-ready',
                                      timeout=max(0.1, min(10, deadline-time.monotonic())), check=False)
@@ -264,13 +288,13 @@ class DockerSandbox:
                 time.sleep(0.1)
             if not (cancelled or timed_out):
                 exit_code, stdout, stderr, timed_out, cancelled, truncated = stream_command(
-                    [self.docker, 'exec', name, *argv], deadline=deadline,
+                    [self.docker, 'exec', '--workdir', '/work', name, *argv], deadline=deadline,
                     cancelled=is_cancelled, cap=limits.max_log_bytes)
                 state = self._state(name)
                 oom = bool(state.get('OOMKilled'))
                 if not (timed_out or cancelled or oom) and state.get('Running'):
-                    self._docker('pause', name, timeout=max(0.1, min(15, deadline-time.monotonic())))
-                    import_work(self.docker, name, source, limits, deadline=deadline, cancelled=is_cancelled)
+                    import_work(self.docker, name, source, limits, deadline=deadline, cancelled=is_cancelled,
+                                preserve_dependencies=readonly_dependencies is not None, install_phase=install_phase)
                 elif not state.get('Running') and exit_code == 0:
                     raise SandboxError('sandbox stopped before source export')
         except (WorkspaceError, OSError, ValueError, tarfile.TarError) as exc:
@@ -286,10 +310,19 @@ class DockerSandbox:
     def start_detached(self, *, name: str, image: str, source: Path, argv: Sequence[str],
                        limits: ResourceLimits, env: dict[str, str], labels: dict[str, str],
                        artifact: Path | None = None, build_output: str = "dist") -> None:
+        from . import fsutil
+        from .bounded_io import DEPENDENCY_LIMITS, prepare_dependency_scratch
+        dependencies = Path(source) / 'node_modules'
+        readonly_dependencies = None
+        if dependencies.exists() or dependencies.is_symlink():
+            fsutil.scan_tree(dependencies, limits=DEPENDENCY_LIMITS)
+            prepare_dependency_scratch(dependencies)
+            readonly_dependencies = dependencies.resolve()
         self.create(name=name, image=image, source=source,
-                    argv=seeded_command(argv, skip=build_output if artifact is not None else ''), network="none",
+                    argv=seeded_command(argv, skip=build_output if artifact is not None else '',
+                                        readonly_dependencies=readonly_dependencies is not None), network="none",
                     limits=limits, env=env, labels=labels, artifact=artifact, build_output=build_output,
-                    writable_work=True)
+                    writable_work=True, readonly_dependencies=readonly_dependencies)
         try:
             self._docker("start", name)
         except BaseException:

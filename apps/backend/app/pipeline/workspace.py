@@ -348,7 +348,7 @@ class ProductWorkspace:
                 row = self.store.put_json(s, project_id=identity['project_id'], kind='report',
                     name='ui-contract-check.json', document={**ui_check, 'source_sha': record['sha'],
                         'build_digest': built['build_digest'], 'ui_contract_digest': digest_of(ui_contract.model_dump())},
-                    meta={'producer': 'ui-contract-check', 'fake': self.fake})
+                    meta={'producer': 'ui-contract-check', 'fake': identity['fake']})
                 self._post(s, identity, 'ui-check:' + identity['job_id'] + ':' + str(identity['generation']) + ':' + row.id,
                     'Static UI contract inventory: ' + ui_check['status'] + '. Not browser acceptance.',
                     [row.id], 'ui_contract_check', runtime_log=True)
@@ -540,7 +540,7 @@ class ProductWorkspace:
             execution = sup.sandbox.run(name=sup.sandbox.container_name(spec.project_id, spec.run_id, generation),
                 image=image, source=source, argv=list(cmd.argv), network=cmd.network, limits=spec.limits, env=manifest.env,
                 labels=sup._labels(spec, generation), timeout_s=cmd.timeout_s,
-                is_cancelled=lambda: sup._revoked(local, generation))
+                is_cancelled=lambda: sup._revoked(local, generation), install_phase=phase == 'install')
             sup._record_command(local.dir / 'evidence', seq, 'baseline-' + phase, spec, generation, manifest, execution, image_id=image)
             if execution.exit_code != 0:
                 result['error'] = 'baseline ' + phase + ' failed'

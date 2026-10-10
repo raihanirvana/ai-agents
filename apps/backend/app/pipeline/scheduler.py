@@ -52,7 +52,8 @@ class PipelineScheduler:
             .order_by(Job.created_at, Job.id)))
         if any(j.status in ACTIVE or j.runtime_ref.get("cleanup") for j in jobs):
             return None
-        revalidation = None
+        revalidation, amendment = None, None
+        contract_revision = 1
         if t.blocker:
             from .dependency_revalidation import pending_contract
             revalidation = pending_contract(s, t, p)
@@ -62,13 +63,23 @@ class PipelineScheduler:
         elif t.phase in ("ready", "development"):
             if not self.workflow._eligible(s, t):
                 return None
-            done = {j.runtime_ref.get("payload", {}).get("task") for j in jobs if j.status == "succeeded"}
-            if "technical_plan" not in done:
-                stage, role, task = "technical_plan", "technical-lead", "technical_plan"
-            elif "qa_plan" not in done:
-                stage, role, task = "qa_plan", "qa", "qa_plan"
+            plans = [j for j in jobs if j.status == 'succeeded' and
+                     j.runtime_ref.get('payload', {}).get('task') == 'technical_plan']
+            contract_revision = max((j.result.get('ui_contract_revision', 1) for j in plans), default=1)
+            requests = [j for j in jobs if j.status == 'succeeded' and
+                        j.result.get('contract_amendment', {}).get('revision') == contract_revision]
+            qa_done = any(j.status == 'succeeded' and j.result.get('suite_artifact_id') and
+                          j.result.get('ui_contract_revision', 1) == contract_revision and
+                          j.runtime_ref.get('payload', {}).get('task') == 'qa_plan' for j in jobs)
+            if requests:
+                amendment = requests[-1]
+                stage, role, task = 'technical_plan', 'technical-lead', 'technical_plan'
+            elif not plans:
+                stage, role, task = 'technical_plan', 'technical-lead', 'technical_plan'
+            elif not qa_done:
+                stage, role, task = 'qa_plan', 'qa', 'qa_plan'
             else:
-                stage, role, task = "development", "developer", "implement"
+                stage, role, task = 'development', 'developer', 'implement'
         else:
             stage = t.phase
             role, task = ("technical-lead", "review") if stage == "technical_review" else ("qa", "verify")
@@ -78,6 +89,14 @@ class PipelineScheduler:
         legacy_key = key
         suite_repaired = False
         payload = {"task": task, "candidate_id": candidate}
+        if amendment is not None:
+            payload['contract_amendment'] = amendment.result['contract_amendment']
+            payload['amendment_request_job_id'] = amendment.id
+            key += ':amendment-' + amendment.id
+            legacy_key = key
+        elif stage == 'qa_plan' and contract_revision > 1:
+            key += ':ui-r' + str(contract_revision)
+            legacy_key = key
         if revalidation:
             from .contracts import digest_of
             payload = revalidation

@@ -30,7 +30,7 @@ def test_scheduler_does_not_go_around_failed_or_exhausted_plan(world):
     world.approve(world.new())
     scheduler, queue = configure(world)
     job_id = scheduler.tick()[0]
-    lease = queue.claim('worker', 'execution', capacity=1, runtimes=('pipeline',))
+    lease = queue.claim('worker', 'interactive', capacity=2, runtimes=('pipeline',))
     queue.fail(lease, error='invalid plan', retryable=False)
     assert scheduler.tick() == []
 
@@ -43,10 +43,57 @@ def test_plan_then_qa_plan_then_developer_share_scope_budget(world):
         with world.db.read() as s:
             j = s.get(Job, job_id)
             assert j.stage == expected
-        lease = queue.claim('worker', 'execution', capacity=1, runtimes=('pipeline',))
+        lane = 'interactive' if expected == 'technical_plan' else 'execution'
+        lease = queue.claim('worker', lane, capacity=2 if lane == 'interactive' else 1, runtimes=('pipeline',))
         queue.reserve(lease, 'model')
-        queue.complete(lease, {})
+        queue.complete(lease, {'suite_artifact_id': 'suite-fixture'} if expected == 'qa_plan' else {})
     with world.db.read() as s:
         jobs = list(s.scalars(select(Job).where(Job.ticket_id == t.id)))
         assert len({j.limits['budget_key'] for j in jobs}) == 1
         assert sum(j.usage['model_calls'] for j in jobs) == 3
+
+
+def test_amendment_dispatches_light_tl_then_new_qa_revision_without_reset(world):
+    t = world.approve(world.new())
+    scheduler, queue = configure(world)
+    def finish(result):
+        job_id = scheduler.tick()[0]
+        with world.db.read() as s:
+            job = s.get(Job, job_id)
+        lease = queue.claim('worker', job.lane, capacity=2 if job.lane == 'interactive' else 1,
+                            runtimes=('pipeline',))
+        queue.reserve(lease, 'model')
+        queue.complete(lease, result)
+        return job
+    finish({'ui_contract_revision': 1})
+    requested = finish({'contract_amendment': {'revision': 1, 'reason': 'Missing result control for UAC-1'},
+                        'ui_contract_revision': 1})
+    amendment = finish({'ui_contract_revision': 2})
+    assert amendment.stage == 'technical_plan' and amendment.lane == 'interactive'
+    assert amendment.runtime_ref['payload']['amendment_request_job_id'] == requested.id
+    qa = finish({'suite_artifact_id': 'revision-2-suite', 'ui_contract_revision': 2})
+    assert qa.stage == 'qa_plan' and ':ui-r2' in qa.idempotency_key
+    with world.db.read() as s:
+        rows = list(s.scalars(select(Job).where(Job.ticket_id == t.id)))
+    assert len({j.limits['budget_key'] for j in rows}) == 1
+    assert sum(j.usage.get('model_calls', 0) for j in rows) == 4
+    next_id = scheduler.tick()[0]
+    with world.db.read() as s:
+        assert s.get(Job, next_id).stage == 'development'
+
+
+def test_failed_amendment_does_not_spin_automatic_new_attempt(world):
+    t = world.approve(world.new())
+    scheduler, queue = configure(world)
+    for result in ({'ui_contract_revision': 1},
+                   {'contract_amendment': {'revision': 1, 'reason': 'Missing control for UAC-1'}}):
+        job_id = scheduler.tick()[0]
+        with world.db.read() as s:
+            job = s.get(Job, job_id)
+        lease = queue.claim('worker', job.lane, capacity=2 if job.lane == 'interactive' else 1,
+                            runtimes=('pipeline',))
+        queue.complete(lease, result)
+    job_id = scheduler.tick()[0]
+    lease = queue.claim('worker', 'interactive', capacity=2, runtimes=('pipeline',))
+    queue.fail(lease, error='invalid contract amendment', retryable=False)
+    assert scheduler.tick() == []

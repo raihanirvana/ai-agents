@@ -17,7 +17,7 @@ helper kompatibilitas; bukan jalur approval/repair tambahan.
 
 ## A. Kontrak sebelum development
 
-TL mengeluarkan ui_contract revision 1: controls dengan testid literal, purpose,
+TL mengeluarkan ui_contract revision awal 1, action_locators=testid: controls dengan testid literal, purpose,
 role/name, label terkait atau text; scope_testid boleh menunjuk container yang
 juga dideklarasikan. Contract mencakup kontrol, hasil, empty-state dan prerequisite
 journey sesuai scope, tanpa pekerjaan tiket saudara. Semantic identity dan scope
@@ -42,12 +42,14 @@ serta UAT tetap diperlukan. Jangan menyebut inventory sebagai QA pass.
 
 ## B. Vocabulary locator
 
-Utamakan role/name exact, label associated dan teks exact; gunakan testid untuk
-fallback/elemen hidden. Native labels/roles berasal dari UI yang diimplementasikan.
+Aksi memakai testid pada kontrol akhir locator, termasuk tombol di scoped row.
+Assertion boleh memakai role/name exact, label associated, teks exact atau testid;
+state hidden sebaiknya memakai testid. Kontrak lama tanpa action_locators mempertahankan
+vocabulary historisnya; kontrak baru dipin dengan kebijakan testid untuk aksi. Native labels/roles berasal dari UI yang diimplementasikan.
 Vocabulary tidak menebak generated IDs. Scope memakai container declared; nth
 hanya disambiguasi posisi 0..99 pada locator declared, bukan arbitrary expression.
 
-Dynamic text hanya dari original fill input dalam test/fixture canonical, di
+Dynamic text hanya dari original fill/select input dalam test/fixture canonical, di
 container dynamic_text. Tombol record berulang dapat memakai has_text dari input
 asli di scope parent, lalu role/name atau testid child. Ini bukan izin expected
 dari output aplikasi. Lihat sintaks di [DSL browser](qa-browser-dsl.md).
@@ -126,7 +128,24 @@ menjadi histori. Scope approval, lease, budgets dan usage kumulatif tetap.
 
 ## Verifikasi batch ini
 
-Pemeriksaan sintaks dan diff dilakukan; tests/regression/browser/provider tidak
-ditambah atau dijalankan. Runtime/Hermes tetap mati. Status backlog IN_PROGRESS/
-NOT_REVIEWED sampai verifikasi perilaku. Detail/handoff:
-[audit implementasi](../audits/ui-contract-suite-revision-2026-10-10.md).
+Batch awal hanya melakukan pemeriksaan sintaks/diff. Review mendalam 11 Oktober
+kemudian menjalankan 250 test IDs unik terarah, termasuk DB/Git/build/browser
+nyata, static UI repair pada job yang sama, amendment/retry dan readonly dependency.
+Bug metadata submit UI diperbaiki; coverage fixture mengikuti QaSuiteRevision
+dan mempertahankan expected/original steps. Model integration tetap fake dan
+tidak memberi QA pass/UAT produk. Worker demo/Hermes tetap mati. Status keseluruhan
+IN_PROGRESS / NOT_REVIEWED; benchmark dan independent review belum dilakukan.
+Detail: [audit verifikasi](../audits/sandbox-dependency-ui-amendment-2026-10-11.md).
+
+## Amendment sebelum development
+
+QA dapat memanggil request_contract_amendment dengan alasan/UAC/kontrol yang kurang.
+Request dipersist idempotent dan menyelesaikan job QA sebagai handoff, bukan QA pass.
+Scheduler membuat technical_plan TL pada lane ringan dengan key request; TL wajib
+menambah kontrol, mempertahankan semua identitas lama, dan menaikkan revision tepat
+satu. QA planning kemudian mendapat key revision baru, memakai budget pool yang sama.
+Approval scope, usage/retry history dan kandidat tidak direset. Tidak ada fallback
+expected dari output atau downgrade automated UAC. Seed statis dapat dideklarasikan
+sebagai literal text dalam kontrak; dynamic text berasal dari fill/select_option
+asli, termasuk multi-select. Native confirm memakai click_dialog, bukan kontrol DOM.
+Amendment ini untuk planning sebelum development; target QA lama tetap immutable.

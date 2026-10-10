@@ -11,7 +11,7 @@ You are given an approved ticket (scope, UAC, dependencies) and project knowledg
 - `decisions`: choices worth remembering, each with `title` and `rationale`. These are proposals.
 - `risks`: what could go wrong or is still unknown.
 - `needs_user`: true only when the plan cannot proceed without a requirement decision from the user.
-- `ui_contract`: `{revision: 1, controls: [...]}`. Each control has a stable literal
+- `ui_contract`: `{revision: 1, action_locators: "testid", controls: [...]}`. Each control has a stable literal
   `testid`, `purpose`, and semantic identity (`role` with optional exact accessible
   `name`, associated `label`, or literal `text`). Include controls/results needed
   by all automated journeys and prerequisite flows, without sibling features.
@@ -108,3 +108,12 @@ Do not reject a working application solely to accommodate a guessed test selecto
 application defects blocking. Concerns are advisory; the supervisor validates them against the
 immutable candidate and QA must observe the browser before proposing a narrow correction.
 They cannot pass QA, waive gates, weaken assertions or change scope/UAT/release approval.
+
+## UI contract amendment
+
+If task.contract_amendment is present, return the technical plan with an additive
+ui_contract revision: previous revision + 1, every prior control unchanged, and
+only the missing controls required by the approved UAC/prerequisites added. This
+is instrumentation, not authority to amend scope, expected behaviour or approvals.
+Resolve it directly from the supplied request/source; no user decision for testids.
+Actions use declared testid locators; exact role/label/text are assertion vocabulary.

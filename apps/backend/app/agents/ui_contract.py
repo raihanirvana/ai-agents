@@ -1,7 +1,8 @@
 """Supervisor-owned UI vocabulary. No arbitrary selector syntax in new contracts."""
 import json
 import re
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, model_validator, model_serializer
 
 TESTID = r'^[A-Za-z][A-Za-z0-9_.:-]{0,79}$'
 # Public Playwright get_by_role vocabulary; container/widget roles are not restricted
@@ -45,8 +46,16 @@ class UiControl(BaseModel):
 
 class UiContract(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    revision: int = Field(default=1, ge=1, le=1)
+    revision: int = Field(default=1, ge=1, le=1000)
+    action_locators: Literal['testid'] = 'testid'
     controls: list[UiControl] = Field(min_length=1, max_length=96)
+
+    @model_serializer(mode='wrap')
+    def historical_shape(self, handler):
+        document = handler(self)
+        if 'action_locators' not in self.model_fields_set:
+            document.pop('action_locators', None)
+        return document
 
     @model_validator(mode='after')
     def unique(self):
@@ -102,7 +111,9 @@ class UiContract(BaseModel):
     def check_suite(self, suite):
         suite = suite.materialize_fixtures()
         for test in suite.tests:
-            inputs = {s.value for s in test.steps if s.action == 'fill'}
+            inputs = {value for s in test.steps if s.action in ('fill', 'select_option')
+                      for value in (s.value if isinstance(s.value, list) else [s.value])
+                      if isinstance(value, str)}
             allowed = self.selectors(inputs)
             for index, step in enumerate(test.steps):
                 if step.selector is None:
@@ -110,7 +121,11 @@ class UiContract(BaseModel):
                 selector = step.selector
                 # Positional disambiguation is bounded, and only extends a declared locator.
                 base = re.sub(r' >> nth=(?:[0-9]|[1-9][0-9])$', '', selector)
+                if 'action_locators' in self.model_fields_set and not step.action.startswith('assert_') and not (
+                        base.rsplit(' >> ', 1)[-1].startswith('testid=') or base.startswith('[data-testid=')):
+                    raise ValueError(f'test {test.id}, step {index}: actions require a declared testid locator; '
+                                     'role/label/text locators are for assertions')
                 if base not in allowed:
                     raise ValueError(f'test {test.id}, step {index}: locator is outside ui_contract: {selector}. '
                                      'Use a declared exact role/name, associated label, text or testid; '
-                                     'dynamic text must come from original fill input within a declared container.')
+                                     'dynamic text must come from original fill/select input within a declared container.')

@@ -89,14 +89,14 @@ ke get_by_role/get_by_label/get_by_text/get_by_test_id dengan exact name/text.
 Suite legacy tetap dapat memakai CSS/engine syntax sebelumnya. Contoh:
 
 ```json
-{"action":"click","selector":"role=button[name=\"Simpan\"]"}
-{"action":"fill","selector":"label=\"Nama\"","value":"Alice"}
+{"action":"click","selector":"testid=customer-save"}
+{"action":"fill","selector":"testid=customer-name-input","value":"Alice"}
 {"action":"assert_text","selector":"testid=customer-name","value":"Alice"}
-{"action":"click","selector":"testid=customer-row >> has_text=\"Alice\" >> role=button[name=\"Hapus\"]"}
+{"action":"click","selector":"testid=customer-row >> has_text=\"Alice\" >> testid=customer-delete"}
 ```
 
 Kontrol Hapus di contoh terakhir mempunyai scope_testid customer-row, dan parent
-mempunyai dynamic_text=true. Alice harus original fill input pada test/fixture itu.
+mempunyai dynamic_text=true. Alice harus original fill/select input pada test/fixture itu.
 Selector declared boleh memakai suffix ` >> nth=0` (0..99) untuk disambiguasi.
 Role/label bukan CSS tebakan. Hidden state sebaiknya memakai testid karena role
 locator normal tidak mencari hidden controls. Scope data/fixtures tetap terisolasi.
@@ -200,3 +200,7 @@ Trace tidak merekam snapshot DOM atau screenshot per langkah. Eksekusi baseline
 mematikan trace/screenshot karena kegagalan fitur pada base memang diharapkan.
 Laporan baseline input identik dapat dipakai kembali dengan provenance asal;
 QA kandidat tetap dieksekusi baru. Detail: [audit performa](../audits/performance-caches-context-2026-10-10.md).
+
+Kontrak baru memakai action_locators=testid: kontrol akhir untuk aksi harus testid.
+Role/name/label/text tetap tersedia untuk assertion. QA dapat meminta additive
+contract amendment ke TL sebelum development melalui request_contract_amendment.

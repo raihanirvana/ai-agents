@@ -114,9 +114,21 @@ from tests.pipeline.test_product_regressions import seed_baseline, prepare, star
 @pytest.mark.parametrize('invalid_first', [False, True])
 def test_surrogate_suite_schedules_qa_repair_and_fresh_execution_without_developer(agent_env, tmp_path, invalid_first):
     env = agent_env
-    html = FILES['index.html'] + '<button id="pay" onclick="document.querySelector(\'#total\').textContent=\'8\'">Pay</button>'
+    # Current revision admission keeps the original assertion/inputs intact.
+    # A new, pinned action makes this journey fail on the baseline instead of
+    # changing its expected value to match candidate output.
+    baseline = {**FILES, 'index.html': FILES['index.html'].replace('id="add"', 'id="add" data-testid="add"')
+                .replace('id="total"', 'id="total" data-testid="total"')}
+    html = baseline['index.html'] + '<button id="pay" data-testid="pay" onclick="document.querySelector(\'#total\').textContent=\'4\'">Pay</button>'
+    from tests.pipeline.test_contracts import PLAN
+    proposed = deepcopy(PLAN)
+    proposed['tests'][0]['steps'][0]['selector'] = 'testid=add'
+    proposed['tests'][0]['steps'][1]['selector'] = 'testid=total'
     class Driver(ScriptedDriver):
         def run(self, ctx, identity, snapshot, tools, parameters):
+            if identity['role'] == 'qa':
+                ctx.tool_call('propose_tests', lambda: tools['propose_tests']({'plan': proposed}))
+                return {}
             if identity['role'] == 'developer':
                 for name, content in {**FILES, 'index.html': html}.items():
                     ctx.tool_call('patch_file', lambda n=name, c=content: tools['patch_file']({'path': n, 'content': c}))
@@ -124,18 +136,25 @@ def test_surrogate_suite_schedules_qa_repair_and_fresh_execution_without_develop
                 return {}
             return super().run(ctx, identity, snapshot, tools, parameters)
     runtime, _, scheduler = setup(env, tmp_path, Driver())
-    seed_baseline(env, runtime, FILES)
-    from tests.pipeline.test_contracts import PLAN
-    fixed = deepcopy(PLAN)
-    fixed['tests'][0]['steps'] = [{'action': 'click', 'selector': '#pay'},
-                                {'action': 'assert_text', 'selector': '#total', 'value': '8'}]
-    reply = {'kind': 'qa_coverage_repair', 'summary': 'Real payment journey', 'suite': fixed,
-        'witnesses': [{'test_id': 'total', 'criterion_id': 'UAC-1', 'action_step': 0,
-                      'assertion_step': 1, 'source_path': 'index.html', 'source_excerpt': '<button id="pay" onclick=',
+    seed_baseline(env, runtime, baseline)
+    fixed = deepcopy(proposed['tests'][0])
+    fixed['steps'].insert(1, {'action': 'click', 'selector': 'testid=pay'})
+    excerpt = '<button id="pay" data-testid="pay" onclick='
+    reply = {'kind': 'qa_suite_revision', 'summary': 'Real payment journey', 'tests': [fixed],
+        'mappings': [{'test_id': 'total', 'origin_indexes': [0, None, 1]}],
+        'witnesses': [{'test_id': 'total', 'new_step': 1, 'source_path': 'index.html',
+                      'source_excerpt': excerpt, 'reason': 'Exercise the declared new control.'}],
+        'coverage_witnesses': [{'test_id': 'total', 'criterion_id': 'UAC-1', 'action_step': 1,
+                      'assertion_step': 2, 'source_path': 'index.html', 'source_excerpt': excerpt,
                       'reason': 'New payment action exercises the approved feature.'}]}
     invalid = deepcopy(reply)
-    invalid['witnesses'][0]['assertion_step'] = 0
-    env.script(plan(), {'kind': 'review', 'accept': True, 'summary': 'Correct'},
+    invalid['coverage_witnesses'][0]['assertion_step'] = 1
+    technical = plan()
+    technical['ui_contract'] = {'controls': [
+        {'testid': 'add', 'role': 'button', 'name': 'Add', 'purpose': 'Original action'},
+        {'testid': 'total', 'role': 'status', 'purpose': 'Result'},
+        {'testid': 'pay', 'role': 'button', 'name': 'Pay', 'purpose': 'New action'}]}
+    env.script(technical, {'kind': 'review', 'accept': True, 'summary': 'Correct'},
                *([invalid] if invalid_first else []), reply)
     t = env.approved_ticket()
     prepare(env, runtime, scheduler, t)
@@ -164,7 +183,7 @@ def test_surrogate_suite_schedules_qa_repair_and_fresh_execution_without_develop
             raise AssertionError('persisted proposal must be reused without a model call')
         runtime.structured._ask = no_new_model
         result = runtime.run(ctx)
-        assert result.result['repair_kind'] == 'feature_coverage'
+        assert result.result['repair_kind'] == 'suite_revision'
         with env.db.read() as s:
             current = s.get(Candidate, candidate.id)
             assert current.target_digest != old_target

@@ -104,6 +104,19 @@ class PipelineRuntime:
     def _technical_plan(self, ctx, identity):
         from app.workspace import WorkspaceSupervisor
         from .bootstrap import bootstrap_contract
+        payload = ctx.job['runtime_ref'].get('payload', {})
+        request_id = payload.get('amendment_request_job_id')
+        if request_id:
+            from app.persistence.models import Message
+            with self.db.read() as s:
+                saved = next((m for m in s.scalars(select(Message).where(Message.ticket_id == identity['ticket_id'])
+                    .order_by(Message.seq.desc())) if m.meta.get('intent') == 'technical_plan' and
+                    m.meta.get('scope_version') == identity['scope_version'] and
+                    m.meta.get('amendment_request_job_id') == request_id), None)
+                if saved and not saved.meta['plan'].get('needs_user'):
+                    return Outcome('succeeded', {'plan_message_id': saved.id,
+                        'ui_contract_revision': saved.meta['plan']['ui_contract']['revision'],
+                        'needs_user': False, 'authoritative': False, 'fake': self.fake})
         manifest, base = self.workspace.configuration(identity)
         broker = WorkspaceSupervisor(self.workspace.root).broker(identity['project_id'])
         files = broker._bare('ls-tree', '-r', '--name-only', base).decode().splitlines()
@@ -126,8 +139,13 @@ class PipelineRuntime:
             remaining -= len(source[path])
             if remaining <= 0:
                 break
+        amendment = ctx.job['runtime_ref'].get('payload', {}).get('contract_amendment')
+        previous_contract = self.workspace.ui_contract(identity) if amendment else None
+        if amendment and (previous_contract is None or previous_contract.revision != amendment['revision']):
+            raise InvalidOutput(['Contract amendment refers to an obsolete revision; use the current plan.'])
         output, meta, snapshot = self._ask(ctx, identity,
-            {'name': 'technical_plan', 'ticket_id': identity['ticket_id'], 'source_files': files,
+            {'name': 'technical_plan', 'contract_amendment': amendment,
+             'previous_ui_contract': previous_contract.model_dump() if previous_contract else None, 'ticket_id': identity['ticket_id'], 'source_files': files,
              'baseline_ui_source': source, 'baseline_ui_source_unavailable': unavailable,
              'runner_manifest': manifest.to_dict(),
              'verification_policy': policy_context(),
@@ -138,18 +156,31 @@ class PipelineRuntime:
             ctx.request_input(output.as_text(), {}, 'pipeline-clarify:' + identity['root_job_id'] + ':' + str(identity['generation']))
         if output.ui_contract is None and not self.fake:
             raise InvalidOutput(['New technical plans require ui_contract with literal testids and semantic locators.'])
+        if output.ui_contract is not None:
+            from app.agents.ui_contract import UiContract
+            output.ui_contract = UiContract.model_validate({**output.ui_contract.model_dump(), 'action_locators': 'testid'})
+        if previous_contract is not None:
+            if output.needs_user:
+                raise InvalidOutput(['Instrumentation amendment must not change scope or create an approval decision.'])
+            if output.ui_contract is None or output.ui_contract.revision != previous_contract.revision + 1:
+                raise InvalidOutput(['Contract amendment must advance revision exactly once.'])
+            before = {c.testid: c.model_dump() for c in previous_contract.controls}
+            after = {c.testid: c.model_dump() for c in output.ui_contract.controls}
+            if any(after.get(key) != value for key, value in before.items()) or len(after) <= len(before):
+                raise InvalidOutput(['Amendment is additive: retain all previous controls/identities and add the missing controls.'])
         key = 'pipeline-plan:' + identity['root_job_id'] + ':' + snapshot.sha256
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
             message = self.workspace._post(s, identity, key, output.summary, [snapshot.artifact_id], 'technical_plan',
-                plan=output.model_dump(), authoritative=False)
+                plan=output.model_dump(), authoritative=False, amendment_request_job_id=request_id)
         decisions = [self.structured.threads.propose_decision(identity, title=d.title, rationale=d.rationale,
                      key=key + ':decision:' + str(i)) for i, d in enumerate(output.decisions)]
         if output.needs_user:
             ctx.request_input('Technical plan still needs a user decision. Review the plan and its decision proposals.',
                 {'plan_message_id': message.id}, key)
         return self.structured._result(meta, plan_message_id=message.id, decision_proposal_ids=decisions,
-                                       needs_user=False, authoritative=False)
+                                       needs_user=False, authoritative=False,
+                                       ui_contract_revision=output.ui_contract.revision if output.ui_contract else 1)
 
     def _onboarding_context(self, project_id):
         from app.persistence.models import Project
@@ -163,7 +194,13 @@ class PipelineRuntime:
         with self.db.read() as s:
             saved = s.get(Job, identity['job_id']).runtime_ref.get('pipeline_qa_plan')
         if saved:
-            return Outcome('succeeded', {'suite_artifact_id': saved, 'fake': self.fake})
+            return Outcome('succeeded', {'suite_artifact_id': saved, 'fake': self.fake,
+                'ui_contract_revision': ui_contract.revision if ui_contract else 1})
+        with self.db.read() as s:
+            requested = s.get(Job, identity['job_id']).runtime_ref.get('pipeline_contract_amendment')
+        if requested:
+            return Outcome('succeeded', {'contract_amendment': requested, 'fake': self.fake,
+                'ui_contract_revision': requested['revision']})
         baseline = self.workspace.base_build(ctx)
         sup, started, manifest = self.workspace.start(ctx)
         source_files = sup.list_files(started.ref, started.credential)
@@ -184,7 +221,7 @@ class PipelineRuntime:
             limits=replace(builder.limits, total_tokens=max(32768, builder.limits.total_tokens)))
         snapshot = planning_builder.build(identity, task={
             'name': 'qa_plan', 'instruction': 'Plan from approved UAC, technical plan and supplied source. '
-                'Submit one validated QaPlan through propose_tests; this task does not execute or pass QA.',
+                'Use declared testid locators for actions. If a required control is missing, call request_contract_amendment with concrete UAC/control details. Otherwise submit one validated QaPlan through propose_tests; this task does not execute or pass QA.',
             'source_files': source_files, 'baseline_ui_source': baseline_ui,
             'ui_contract': ui_contract.model_dump() if ui_contract else None,
             'ui_locators': sorted(ui_contract.selectors()) if ui_contract else [],
@@ -195,6 +232,8 @@ class PipelineRuntime:
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
         def propose(ctx_, current, args):
+            if result.get('contract_amendment'):
+                raise ValueError('contract amendment was already requested; TL must revise the contract first')
             if set(args) != {'plan'}:
                 raise ValueError('propose_tests requires only plan')
             authored = QaPlan.model_validate(args['plan'])
@@ -223,19 +262,41 @@ class PipelineRuntime:
                 result['suite_artifact_id'] = artifact.id
                 result['preflight_artifact_id'] = receipt.id
             return {'submitted': True, 'suite_digest': suite.digest}
+        def request_amendment(c, current, args):
+            if set(args) != {'reason'} or not isinstance(args['reason'], str) or not 12 <= len(args['reason']) <= 2000:
+                raise ValueError('request_contract_amendment requires a concrete reason, 12..2000 characters')
+            if result.get('suite_artifact_id'):
+                raise ValueError('suite was already submitted')
+            if ui_contract is None:
+                raise ValueError('historical contract-less plans need a new technical plan')
+            request = {'reason': args['reason'], 'revision': ui_contract.revision}
+            with self.db.write() as s:
+                ctx.queue.verify_identity(s, current)
+                job = s.get(Job, current['job_id'])
+                prior = job.runtime_ref.get('pipeline_contract_amendment')
+                if prior is not None and prior != request:
+                    raise ValueError('this job already requested another amendment')
+                self.workspace._post(s, current, 'ui-amendment:' + current['root_job_id'],
+                    args['reason'], [snapshot.artifact_id], 'ui_contract_amendment', request=request)
+                job.runtime_ref = {**job.runtime_ref, 'pipeline_contract_amendment': request}
+                result['contract_amendment'] = request
+            return {'submitted': True, 'contract_amendment_requested': True}
         def inspect(c, i, a):
             if set(a) != {'path'}:
                 raise ValueError('inspect_app requires a relative path; use . to list source files')
             if a['path'] == '.':
                 return {'files': sup.list_files(started.ref, started.credential)}
             return {'content': sup.read_file(started.ref, started.credential, a['path']).decode(errors='replace')}
-        facade._handlers.update({'propose_tests': propose, 'inspect_app': inspect})
-        parameters = {'propose_tests': {'plan': tool_schema(QaPlan)}, 'read_criteria': {}, 'inspect_app': {'path': {'type': 'string'}},
+        facade._handlers.update({'propose_tests': propose, 'inspect_app': inspect,
+                                 'request_contract_amendment': request_amendment})
+        parameters = {'request_contract_amendment': {'reason': {'type': 'string', 'minLength': 12, 'maxLength': 2000}},
+                      'propose_tests': {'plan': tool_schema(QaPlan)}, 'read_criteria': {}, 'inspect_app': {'path': {'type': 'string'}},
                       'request_input': {'question': {'type': 'string'}}}
         self.driver.run(ctx, identity, snapshot, self._tools(ctx, facade, parameters), parameters)
         if not result:
             return Outcome('failed', error='QA finished without a validated suite')
-        return Outcome('succeeded', {**result, 'fake': self.fake})
+        return Outcome('succeeded', {**result, 'fake': self.fake,
+            'ui_contract_revision': ui_contract.revision if ui_contract else 1})
 
     @staticmethod
     def _tools(ctx, facade, parameters):
@@ -871,7 +932,7 @@ class PipelineRuntime:
                 'in order. Null is a copied passed setup step with its reference, or a new witnessed UI action '
                 'using a declared/observed control and only original input data. Preserve test IDs, '
                 'UAC, purpose, inputs, every assertion type/expected value and all original steps. Each changed original '
-                'step needs an exact source witness and reason. Prefer declared exact role/label/testid locators. '
+                'step needs an exact source witness and reason. Use declared testid locators for actions, role/label/text or testid for assertions. '
                 'Legacy replacement locators must be observed runner candidates. An observed fill-on-select can '
                 'become select_option by value only with the same original input. Coverage gaps also need one '
                 'coverage_witness per affected test/UAC linking an actual feature action to an outcome assertion. '

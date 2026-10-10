@@ -49,6 +49,31 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ## Daftar tiket
 
+### Salinan dependency sandbox dan pemulihan kontrak UI — 11 Oktober 2026
+
+Status: IN_PROGRESS. Review: NOT_REVIEWED.
+Scope: readonly dependency mount tanpa seed/export ulang pada test/build;
+batas dependency terpisah; testid untuk aksi; amendment QA → TL dengan revision
+dan job planning baru, tanpa mengubah scope/approval atau mereset budget.
+File: workspace/{sandbox,bounded_io,installation_cache}; agents/ui_contract,
+tools; pipeline/{runtime,scheduler}; instruksi dan keputusan QA.
+Worker demo tetap mati; pengguna meminta review mendalam dan verifikasi ulang.
+Hasil: dependency readonly terpisah dari seed/export test/build/start; install
+tidak seed tree lama; batas dependency 100k entries/512 MiB, scratch bounded.
+Kontrak baru mewajibkan testid untuk aksi, legacy shape dipertahankan. QA dapat
+meminta amendment additive TL dengan request/revision idempotent dan key QA baru;
+dynamic text menerima fill/select_option asli. Scope/approval/usage tidak direset.
+Review menemukan dan memperbaiki permission tmpfs Docker 24, export tmpfs kosong,
+resolusi peer dependency Node, crash metadata static UI, dan install_phase offline.
+Verifikasi: 250 test IDs unik pada selection terarah lulus, termasuk Docker/Vite,
+cache restore tanpa download, dependency >20k files, static UI repair pada job
+yang sama, amendment retry/idempotency, archive guards/rollback, dan browser
+coverage revision. Model integration tetap fake, tidak dapat memberi QA pass/UAT.
+Compile/source dan git diff --check diperiksa. Handoff: docs/audits/
+sandbox-dependency-ui-amendment-2026-10-11.md. Sisa: benchmark workload demo,
+peak memory install besar, recovery SIGKILL/publication dan independent review;
+belum DONE. Tidak commit/push atau restart worker.
+
 ### Kontrak UI dan revisi suite QA generik — 10 Oktober 2026
 
 Status: IN_PROGRESS. Review: NOT_REVIEWED.

@@ -12,6 +12,48 @@ from . import fsutil
 from .errors import SandboxError, LimitExceeded, PathViolation
 
 
+# Dependency limits are separate from the editable source/output snapshot.
+DEPENDENCY_LIMITS = fsutil.TreeLimits(100_000, 512 * 1024 * 1024)
+DEPENDENCY_SCRATCH = ('.vite', '.vite-temp', '.cache')
+
+# docker cp reads the container rootfs, not its live tmpfs mounts (Docker 24
+# returns an empty /work). Freeze every target process before using the image's
+# readonly tar binary. PID 1 is the trusted idle sleep; only this exporter can
+# run afterward. Never add host capabilities or a writable host mount.
+_EXPORT_WORK = r"""
+const fs=require('node:fs'), cp=require('node:child_process');
+function targets() { return fs.readdirSync('/proc').filter(n=>/^\d+$/.test(n)
+  && Number(n)!==1 && Number(n)!==process.pid); }
+let frozen=false;
+for(let attempt=0;attempt<100;attempt++) {
+  for(const pid of targets()) {
+    try { process.kill(Number(pid),'SIGSTOP'); }
+    catch(e) { if(e.code!=='ESRCH') throw e; }
+  }
+  frozen=targets().every(pid=> {
+    try { return /^State:\s+[TtZX]/m.test(fs.readFileSync('/proc/'+pid+'/status','utf8')); }
+    catch(e) { if(e.code==='ENOENT') return true; throw e; }
+  });
+  if(frozen) break;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);
+}
+if(!frozen) throw new Error('sandbox processes did not quiesce');
+const result=cp.spawnSync('/bin/tar',['-C','/work','-cf','-','.'],
+  {stdio:'inherit',env:{PATH:'/usr/local/bin:/usr/bin:/bin',LANG:'C'}});
+if(result.error) throw result.error;
+process.exit(result.status===null ? 1 : result.status);
+"""
+
+
+def prepare_dependency_scratch(tree):
+    """Empty mountpoints only; target scratch lives in bounded container tmpfs."""
+    import stat
+    for name in DEPENDENCY_SCRATCH:
+        path = Path(tree) / name
+        path.mkdir(mode=0o755, exist_ok=True)
+        if not stat.S_ISDIR(path.lstat().st_mode):
+            raise PathViolation('dependency scratch mountpoint must be a real directory')
+
 def stream_command(argv, *, deadline, cancelled, cap, output=None):
     """Drain both pipes; keep bounded logs or abort an oversized archive."""
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -53,8 +95,8 @@ def stream_command(argv, *, deadline, cancelled, cap, output=None):
         proc.stderr.close()
 
 
-def import_work(docker, name, source, limits, *, deadline, cancelled):
-    """Pause first. Import only validated files; never extract target tar paths directly."""
+def import_work(docker, name, source, limits, *, deadline, cancelled, preserve_dependencies=False, install_phase=False):
+    """Freeze, stream, pause, then validate; never extract target tar paths directly."""
     source = Path(source)
     tree_limits = fsutil.TreeLimits(limits.max_snapshot_files, limits.max_snapshot_bytes)
     with tempfile.TemporaryDirectory(dir=source.parent, prefix='.work-export-') as temporary:
@@ -62,13 +104,22 @@ def import_work(docker, name, source, limits, *, deadline, cancelled):
         archive, stage = root / 'work.tar', root / 'tree'
         stage.mkdir(mode=0o755)
         stage.chmod(0o755)
+        export_files = tree_limits.max_files + (DEPENDENCY_LIMITS.max_files if install_phase else 0)
+        export_bytes = tree_limits.max_bytes + (DEPENDENCY_LIMITS.max_bytes if install_phase else 0)
         with archive.open('wb') as output:
             code, _, error, timed_out, stopped, _ = stream_command(
-                [docker, 'cp', name + ':/work/.', '-'], deadline=deadline, cancelled=cancelled,
-                cap=limits.max_snapshot_bytes + limits.max_snapshot_files * 4096 + 1024 * 1024, output=output)
+                [docker, 'exec', '-e', 'NODE_OPTIONS=', '-e', 'NODE_PATH=',
+                 '-e', 'PATH=/usr/local/bin:/usr/bin:/bin', name, 'node', '-e', _EXPORT_WORK],
+                deadline=deadline, cancelled=cancelled,
+                cap=export_bytes + export_files * 4096 + 1024 * 1024, output=output)
         if code != 0 or timed_out or stopped:
             raise SandboxError('sandbox export failed or interrupted: ' + error.decode(errors='replace')[:300])
+        code, _, error, timed_out, stopped, _ = stream_command(
+            [docker, 'pause', name], deadline=deadline, cancelled=cancelled, cap=limits.max_log_bytes)
+        if code != 0 or timed_out or stopped:
+            raise SandboxError('sandbox pause failed or interrupted: ' + error.decode(errors='replace')[:300])
         seen, links, total = set(), [], 0
+        dependency_count, dependency_bytes, source_count = 0, 0, 0
         try:
             tar = tarfile.open(archive, mode='r:')
         except tarfile.TarError as exc:
@@ -85,10 +136,25 @@ def import_work(docker, name, source, limits, *, deadline, cancelled):
                 if member.isdir():
                     rel = rel.rstrip('/')
                 fsutil.validate_relpath(rel)
-                if rel in seen or len(seen) >= tree_limits.max_files:
+                dependency = rel == 'node_modules' or rel.startswith('node_modules/')
+                if preserve_dependencies and dependency:
+                    if rel != 'node_modules' or not member.issym() or member.linkname != '/installed/node_modules':
+                        raise PathViolation('readonly dependency mount reference was modified')
+                    if rel in seen:
+                        raise PathViolation('duplicate readonly dependency reference')
+                    seen.add(rel)
+                    continue
+                if dependency:
+                    dependency_count += 1
+                    dependency_bytes += member.size
+                    if not install_phase or dependency_count > DEPENDENCY_LIMITS.max_files or dependency_bytes > DEPENDENCY_LIMITS.max_bytes:
+                        raise LimitExceeded('dependency export exceeds separate installation limits')
+                else:
+                    source_count += 1
+                    total += member.size
+                if rel in seen or source_count > tree_limits.max_files:
                     raise LimitExceeded('duplicate or too many sandbox archive entries')
                 seen.add(rel)
-                total += member.size
                 if total > tree_limits.max_bytes or member.size > tree_limits.max_file_bytes or member.size < 0:
                     raise LimitExceeded('sandbox archive exceeds snapshot byte bound')
                 if member.isdir():
@@ -111,7 +177,11 @@ def import_work(docker, name, source, limits, *, deadline, cancelled):
         for rel, target in links:
             (stage / rel).unlink()
             os.symlink(target, stage / rel)
-        entries = fsutil.scan_tree(stage, limits=tree_limits)
+        entries = fsutil.scan_tree(stage, exclude=('node_modules',), limits=tree_limits)
+        if install_phase and ((stage / 'node_modules').exists() or (stage / 'node_modules').is_symlink()):
+            fsutil.scan_tree(stage / 'node_modules', limits=DEPENDENCY_LIMITS)
+            prepare_dependency_scratch(stage / 'node_modules')
+            fsutil.scan_tree(stage / 'node_modules', limits=DEPENDENCY_LIMITS)
         for entry in entries:
             if entry.kind == 'dir':
                 (stage / entry.rel).chmod(0o755)
@@ -120,9 +190,15 @@ def import_work(docker, name, source, limits, *, deadline, cancelled):
         # Caller serializes source operations; old bytes survive failed validation.
         backup = root / 'previous'
         os.replace(source, backup)
+        dependency_moved = False
         try:
+            if preserve_dependencies:
+                os.replace(backup / 'node_modules', stage / 'node_modules')
+                dependency_moved = True
             os.replace(stage, source)
         except BaseException:
+            if dependency_moved:
+                os.replace(stage / 'node_modules', backup / 'node_modules')
             os.replace(backup, source)
             raise
         shutil.rmtree(backup)

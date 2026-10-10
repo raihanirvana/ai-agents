@@ -23,11 +23,15 @@ Read criteria, the technical plan and supplied baseline source first. Inspect on
 relevant omitted source via inspect_app; unchanged files need no repeated reads.
 An empty new-project base intentionally has no DOM: define the new controls from
 approved scope and plan, without asking for nonexistent code or searching host paths.
-Use the TL ui_contract and supplied ui_locators for new plans. Prefer exact
-role/name, associated label and text locators over CSS guesses; testid is the stable
-fallback, especially for hidden nodes. Scope duplicate controls to a declared container. For dynamic record text,
-use original fill input within a declared dynamic_text container. The supervisor
+Use the TL ui_contract and supplied ui_locators for new plans. Use declared testid locators for actions, so the static inventory covers their identity.
+Use exact role/name, associated label and text locators for assertions that need them;
+testid is also appropriate for hidden nodes. Scope duplicate controls to a declared container. For dynamic record text,
+use original fill/select input within a declared dynamic_text container. The supervisor
 rejects out-of-contract selectors. Historical pinned suites retain their vocabulary.
+If a required control is missing from ui_contract, call request_contract_amendment
+with the approved UAC and concrete missing controls. TL handles an additive revision;
+do not ask the user to resolve instrumentation or invent selectors. Native click_dialog
+already handles confirmation dialogs without a DOM selector for the dialog itself.
 Existing prerequisite flows are setup, not feature coverage.
 Feature/bug journeys must fail on the applicable base; existing regression may pass.
 

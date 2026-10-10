@@ -48,7 +48,8 @@ class DeveloperChecks:
         tree = source / 'node_modules'
         if not tree.exists() and not tree.is_symlink():
             return None
-        entries = fsutil.scan_tree(tree, limits=fsutil.TreeLimits(limits.max_snapshot_files, limits.max_snapshot_bytes))
+        from app.workspace.bounded_io import DEPENDENCY_LIMITS
+        entries = fsutil.scan_tree(tree, limits=DEPENDENCY_LIMITS)
         return fsutil.sha256_tree(tree, entries)
 
     def _phase(self, phase):

@@ -25,15 +25,16 @@ TOOL_POLICY: dict[str, frozenset[str]] = {
     "developer": frozenset({"read_file", "read_files", "patch_file", "write_file", "edit_file", "edit_file_batch", "run_command", "run_checks", "inspect_diff", "submit_candidate",
                             "send_message", "request_decision"}),
     "qa": frozenset({"read_criteria", "propose_tests", "request_test_run", "inspect_app", "report_bug",
-                     "send_message", "request_input"}),
+                     "send_message", "request_input", "request_contract_amendment"}),
 }
 # Allowed by policy but implemented by later tickets (workspace/Hermes/QA harness, DEV-010): they fail explicitly.
 NOT_WIRED = frozenset({"read_repo", "review_candidate", "read_file", "read_files", "patch_file", "write_file", "edit_file", "edit_file_batch", "run_command", "inspect_diff",
-                       "run_checks", "submit_candidate", "propose_tests", "request_test_run", "inspect_app", "report_bug"})
+                       "run_checks", "submit_candidate", "propose_tests", "request_test_run", "inspect_app", "report_bug",
+                       "request_contract_amendment"})
 FORBIDDEN_ARGS = frozenset({"actor", "role", "user", "sender", "project_id", "job_id", "generation", "lease",
                             "lease_owner", "attempt", "scope_version", "ticket_id_override"})
 SOURCE_TOOLS = frozenset({"read_file", "read_files", "read_repo", "inspect_app", "patch_file",
-                          "write_file", "edit_file", "edit_file_batch", "inspect_diff", "propose_tests", "run_checks"})
+                          "write_file", "edit_file", "edit_file_batch", "inspect_diff", "propose_tests", "run_checks", "request_contract_amendment"})
 
 
 class NotWired(RuntimeError):
