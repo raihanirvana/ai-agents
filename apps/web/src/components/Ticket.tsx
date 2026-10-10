@@ -304,6 +304,18 @@ function QaResolution({ detail }: { detail: TicketDetail }) {
     <h3>QA tidak konklusif</h3>
     <p>Anda dapat mengambil alih pemeriksaan berikut untuk target <code>{short(resolution.target_digest, 12)}</code>.
       Hasil QA tetap gagal. Setelah ini, buka preview dan konfirmasikan hasil Anda pada UAT.</p>
+    {resolution.diagnosis && <div className="diagnosis">
+      <p><strong>Diagnosis QA:</strong> {resolution.diagnosis.summary}</p>
+      {resolution.diagnosis.withheld_application && <div className="notice">
+        <p><Badge tone="bad">QA sempat mencurigai bug aplikasi</Badge>{" "}
+          {resolution.diagnosis.withheld_application.summary}</p>
+        <ul>{resolution.diagnosis.withheld_application.findings.filter((f) => f.fault === "application").map((f) =>
+          <li key={f.test_id}><code>{f.test_id}</code>{f.criterion_id ? ` (${f.criterion_id})` : ""}: diharapkan {f.expected};
+            teramati {f.observed}. {f.reason}</li>)}</ul>
+        <p>Klaim ini ditolak validator karena: {resolution.diagnosis.withheld_application.validator_issues.join("; ") || "bukti tidak memenuhi syarat"}.
+          Periksa bagian ini dengan teliti sebelum mengambil alih.</p>
+      </div>}
+    </div>}
     <div className="evidence">{resolution.evidence_ids?.map((id) => <ArtifactChip key={id} id={id} label="bukti diagnosis" />)}</div>
     <fieldset><legend>Kriteria yang akan saya periksa sendiri</legend>{criteria.map((c) =>
       <label key={c.id}><input type="checkbox" checked={owned.has(c.id)} onChange={(e) => setOwned((previous) => {

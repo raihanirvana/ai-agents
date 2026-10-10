@@ -108,3 +108,21 @@ def test_persistent_database_failure_keeps_buffer_bounded_without_losing_counts(
     assert ctx.flush_metrics()
     assert phases(env, job.id)['tool'] == {'count': count, 'total_s': count * 0.5,
         'max_s': 0.5, 'failed': count, 'cache_hits': count, 'last_generation': 1}
+
+
+def test_supervisor_owned_wait_is_not_charged_as_active_time(env, monkeypatch):
+    from app.workers import supervisor as module
+    _, lease, ctx = context(env)
+    clock = [100.0]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+    import app.workers.runtime as runtime_module
+    monkeypatch.setattr(runtime_module.time, 'monotonic', lambda: clock[0])
+    handle = module._Handle(lease, {}, ctx, None)
+    clock[0] += 10  # real work
+    with ctx.uncharged_wait():
+        clock[0] += 200  # waiting for QA planning
+        assert handle.charge_delta() == 10  # heartbeat during the wait charges only the work
+        clock[0] += 40
+    clock[0] += 5
+    assert handle.charge_delta() == 5
+    assert handle.charge_delta() == 0

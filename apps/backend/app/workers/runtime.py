@@ -15,6 +15,7 @@ import sys
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -62,6 +63,8 @@ class RunContext:
         self._stoppers: list = []  # e.g. WorkspaceSupervisor.stop_run for this attempt's containers
         self._log: list[str] = []
         self._metrics: list[dict[str, Any]] = []
+        self._idle_since: float | None = None  # supervisor-owned waits not charged as active_s
+        self._idle_s = 0.0
         self._lock = threading.Lock()
         self._stop_lock = threading.Lock()
         self._stopped = False
@@ -100,6 +103,30 @@ class RunContext:
             full = len(self._metrics) >= self.MAX_BUFFERED_METRICS
         if full:  # Contexts driven without a supervisor heartbeat stay bounded.
             self.flush_metrics()
+
+    @contextmanager
+    def uncharged_wait(self):
+        """A wait owned by the supervisor (no model/tool work), excluded from active_s.
+
+        Lease heartbeats continue; only the budget charge is reduced. Not reentrant."""
+        with self._lock:
+            self._idle_since = time.monotonic()
+        try:
+            yield
+        finally:
+            with self._lock:
+                if self._idle_since is not None:
+                    self._idle_s += time.monotonic() - self._idle_since
+                self._idle_since = None
+
+    def take_uncharged(self, now: float) -> float:
+        with self._lock:
+            idle = self._idle_s
+            if self._idle_since is not None:
+                idle += max(0.0, now - self._idle_since)
+                self._idle_since = now
+            self._idle_s = 0.0
+            return idle
 
     def take_metrics(self) -> list[dict[str, Any]]:
         with self._lock:

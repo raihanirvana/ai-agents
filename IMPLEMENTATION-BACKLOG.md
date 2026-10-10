@@ -87,6 +87,10 @@ Lanjutan: restore cache install memakai hardlink + hash sekali per proses;
 receipt install berbasis metadata; penantian QA plan dipindah ke run_checks;
 error aturan amendment TL diperbaiki di putaran repair job yang sama. Token nyata
 belum diukur (butuh demo provider nyata). Detail: bagian H audit.
+Review 2e5e8ac: revisi coverage gap yang melempar error tetap menghasilkan
+diagnosis turunan; dugaan bug aplikasi yang ditolak validator tampil dan dipin
+di keputusan user; tunggu QA plan tidak dihitung active_s. Benchmark hardlink:
+install cache hit 22,7/19,1 dtk → 3,7/4,4 dtk. Detail: bagian I audit.
 
 
 ### Salinan dependency sandbox dan pemulihan kontrak UI — 11 Oktober 2026

@@ -22,6 +22,35 @@ def waiver_for(s, candidate, verification_id=None):
     return s.scalar(query.order_by(QaWaiver.created_at.desc()).limit(1))
 
 
+def latest_diagnosis(s, verification_id):
+    """Current diagnosis: a supervisor-derived one supersedes the model output it replaces."""
+    derived = func.json_extract(Artifact.meta, '$.supervisor_derived').is_not(None)
+    return s.scalar(select(Artifact).where(func.json_extract(Artifact.meta, '$.producer') == 'qa-diagnosis',
+        func.json_extract(Artifact.meta, '$.verification_id') == verification_id)
+        .order_by(derived.desc(), Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+
+
+def _diagnosis_summary(s, store, candidate, v, row, diagnosis):
+    """What the user must see before owning criteria, including a withheld application claim."""
+    summary = {'fault': diagnosis.fault, 'summary': diagnosis.summary,
+               'supervisor_derived': row.meta.get('supervisor_derived'), 'withheld_application': None}
+    origin_id = row.meta.get('derived_from')
+    if not origin_id:
+        return summary, []
+    from app.pipeline.contracts import QaDiagnosis
+    origin = evidence.artifact(s, store, candidate.project_id, origin_id, 'report')
+    if (origin.meta.get('producer') != 'qa-diagnosis' or origin.meta.get('verification_id') != v.id
+            or origin.meta.get('target_digest') != candidate.target_digest or origin.meta.get('fake') is not False):
+        raise Invalid('Withheld diagnosis must belong to this real verification target')
+    model = QaDiagnosis.model_validate(evidence.document(s, store, origin_id))
+    summary['withheld_application'] = {'artifact_id': origin_id, 'fault': model.fault, 'summary': model.summary,
+        'validator_issues': list(row.meta.get('application_repair_issues') or [])[:12],
+        'findings': [{key: value for key, value in f.model_dump().items() if key in
+                      ('test_id', 'fault', 'criterion_id', 'expected', 'observed', 'reason', 'source_path')}
+                     for f in model.findings]}
+    return summary, [origin_id]
+
+
 def qualify(s, store, candidate, verification_id, diagnosis_id, *, historical=False):
     from app.pipeline.contracts import QaPlan, QaDiagnosis, validate_report
     v = s.get(Verification, verification_id)
@@ -86,12 +115,11 @@ def qualify(s, store, candidate, verification_id, diagnosis_id, *, historical=Fa
             or diagnosis_row.meta.get('target_digest') != candidate.target_digest or diagnosis_row.meta.get('fake') is not False):
         raise Invalid('Diagnosis must belong to this real verification target')
     if not historical:
-        latest = s.scalar(select(Artifact.id).where(
-            func.json_extract(Artifact.meta, '$.producer') == 'qa-diagnosis',
-            func.json_extract(Artifact.meta, '$.verification_id') == v.id).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
-        if latest != diagnosis_id:
+        latest = latest_diagnosis(s, v.id)
+        if latest is None or latest.id != diagnosis_id:
             raise Conflict('QA diagnosis changed; reload before deciding')
     diagnosis = QaDiagnosis.model_validate(evidence.document(s, store, diagnosis_id))
+    shown, origin_ids = _diagnosis_summary(s, store, candidate, v, diagnosis_row, diagnosis)
     failed = ({test['id'] for test in report['tests'] if test['status'] == 'failed'} if v.status == 'failed'
               else set(gaps))
     if (diagnosis.fault not in ('test', 'unknown') or {f.test_id for f in diagnosis.findings} != failed
@@ -108,8 +136,10 @@ def qualify(s, store, candidate, verification_id, diagnosis_id, *, historical=Fa
                 raise Invalid('Smoke and unclassified tests cannot be waived')
             manual.update(test.uac)
     return {'verification': v, 'proof': proof, 'manual_uac_ids': sorted(manual), 'excluded_test_ids': sorted(failed),
-            'evidence_ids': list(dict.fromkeys([*v.evidence_artifact_ids, diagnosis_id])),
-            'criteria': [u for u in criteria.uac if u['id'] in manual]}
+            'evidence_ids': list(dict.fromkeys([*v.evidence_artifact_ids, *origin_ids, diagnosis_id])),
+            'criteria': [u for u in criteria.uac if u['id'] in manual], 'diagnosis': shown,
+            # Decisions recorded before withheld model diagnoses were pinned (2e5e8ac).
+            'legacy_evidence_ids': list(dict.fromkeys([*v.evidence_artifact_ids, diagnosis_id]))}
 
 
 def validate_persisted(s, store, candidate, verification_id):
@@ -122,7 +152,8 @@ def validate_persisted(s, store, candidate, verification_id):
         raise Invalid('Pinned QA decision evidence is malformed or unavailable') from exc
     if (w.project_id != candidate.project_id or w.ticket_id != candidate.ticket_id or
             w.scope_version != candidate.scope_version or w.manual_uac_ids != qualified['manual_uac_ids'] or
-            w.excluded_test_ids != qualified['excluded_test_ids'] or w.evidence_artifact_ids != qualified['evidence_ids']):
+            w.excluded_test_ids != qualified['excluded_test_ids'] or
+            w.evidence_artifact_ids not in (qualified['evidence_ids'], qualified['legacy_evidence_ids'])):
         raise Invalid('QA user decision differs from its pinned evidence')
     for aid in w.evidence_artifact_ids:
         evidence.artifact(s, store, candidate.project_id, aid)
@@ -138,8 +169,7 @@ def available(s, store, ticket):
         Verification.target_digest == c.target_digest).order_by(Verification.created_at.desc(), Verification.id.desc()).limit(1))
     if not v or v.status not in ('failed', 'incomplete'):
         return None
-    a = s.scalar(select(Artifact).where(func.json_extract(Artifact.meta, '$.producer') == 'qa-diagnosis',
-        func.json_extract(Artifact.meta, '$.verification_id') == v.id).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+    a = latest_diagnosis(s, v.id)
     if a is None:
         active = s.scalar(select(Job.id).where(Job.ticket_id == ticket.id, Job.scope_version == c.scope_version,
             Job.stage == 'qa', Job.status.in_(('queued', 'running', 'waiting_input', 'waiting_quota'))).limit(1))
@@ -151,4 +181,5 @@ def available(s, store, ticket):
         return {'eligible': False, 'reason': str(exc)}
     return {'eligible': True, 'candidate_id': c.id, 'verification_id': v.id,
             'target_artifact_id': c.target_artifact_id, 'target_digest': c.target_digest,
-            'diagnosis_artifact_id': a.id, 'evidence_ids': q['evidence_ids'], 'criteria': q['criteria']}
+            'diagnosis_artifact_id': a.id, 'evidence_ids': q['evidence_ids'], 'criteria': q['criteria'],
+            'diagnosis': q['diagnosis']}

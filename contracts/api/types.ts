@@ -91,10 +91,16 @@ export interface Candidate {
   verifications: Verification[];
 }
 export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; preview: Preview | null; releases: Release[]; cursor: number }
+export interface QaDecisionDiagnosis {
+  fault: string; summary: string; supervisor_derived?: string | null;
+  withheld_application?: { artifact_id: string; fault: string; summary: string; validator_issues: string[];
+    findings: { test_id: string; fault: string; criterion_id?: string; expected: string; observed: string;
+      reason: string; source_path?: string }[] } | null;
+}
 export interface TicketDetail {
   qa_resolution?: { eligible: boolean; reason?: string; candidate_id?: string; verification_id?: string;
     target_artifact_id?: string; target_digest?: string; diagnosis_artifact_id?: string;
-    evidence_ids?: string[]; criteria?: Criterion[] } | null;
+    evidence_ids?: string[]; criteria?: Criterion[]; diagnosis?: QaDecisionDiagnosis } | null;
   verification_plan?: { profile: "lightweight"; scope_version: number;
     status: "not_planned" | "planned" | "legacy"; test_count: number | null;
     criteria: (Criterion & { test_ids: string[] })[] };

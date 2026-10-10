@@ -379,23 +379,27 @@ class PipelineRuntime:
         import time
         timeout_s = self.QA_PLAN_WAIT_S if timeout_s is None else timeout_s
         started, announced, dead = time.monotonic(), False, 0
+        from contextlib import nullcontext
+        # Supervisor-owned wait: heartbeats continue, active_s is not charged.
+        idle = getattr(ctx, 'uncharged_wait', nullcontext)
         try:
-            while True:
-                ctx._check()
-                ctx.queue.verify(ctx.lease)
-                try:
-                    return self.workspace.suite(identity)
-                except ValueError:
-                    pass
-                dead = dead + 1 if self._qa_plan_state(identity) == 'dead' else 0
-                if dead >= self.QA_PLAN_DEAD_POLLS:
-                    raise InvalidOutput(['QA planning has no validated suite or recoverable planning job.'])
-                if time.monotonic() - started >= timeout_s:
-                    return None
-                if not announced:
-                    ctx.log('Menunggu rencana QA sebelum submit; tidak ada panggilan model tambahan.')
-                    announced = True
-                ctx.cancelled.wait(2)
+            with idle():
+                while True:
+                    ctx._check()
+                    ctx.queue.verify(ctx.lease)
+                    try:
+                        return self.workspace.suite(identity)
+                    except ValueError:
+                        pass
+                    dead = dead + 1 if self._qa_plan_state(identity) == 'dead' else 0
+                    if dead >= self.QA_PLAN_DEAD_POLLS:
+                        raise InvalidOutput(['QA planning has no validated suite or recoverable planning job.'])
+                    if time.monotonic() - started >= timeout_s:
+                        return None
+                    if not announced:
+                        ctx.log('Menunggu rencana QA sebelum submit; tidak ada panggilan model tambahan.')
+                        announced = True
+                    ctx.cancelled.wait(2)
         finally:
             if announced:
                 from app.workers.telemetry import record_phase
@@ -912,14 +916,8 @@ class PipelineRuntime:
                 break
         undecided = ([t['id'] for t in failed] if verification_status == 'failed' else list(coverage_gaps))
         if coverage_gaps:
-            outcome = self._revise_suite(ctx, identity, candidate, target, suite,
-                proof, verification_id, attachments, criteria, source)
-            if outcome.status == 'failed':
-                self._unknown_diagnosis(ctx, identity, candidate, verification_id, undecided,
-                    'Supervisor: the suite could not be revised automatically for this coverage gap '
-                    '(feature/bug assertions also pass on the accepted base). '
-                    + (outcome.error or '')[:600], 'coverage_gap_unresolved')
-            return outcome
+            return self._revise_coverage_gap(ctx, identity, candidate, target, suite, proof,
+                verification_id, attachments, criteria, source, undecided)
         diagnosis_task = {
             'name': 'qa_diagnosis', 'candidate_id': candidate.id, 'verification_id': verification_id,
             'verification_policy': policy_context(), 'approved_criteria': criteria,
@@ -984,7 +982,7 @@ class PipelineRuntime:
                 # The rejected attribution is retained; the decision surface sees it as unknown.
                 derived = self._unknown_diagnosis(ctx, identity, candidate, verification_id, undecided,
                     'Supervisor: application attribution was withheld (' + '; '.join(issues)[:900] + ').',
-                    'application_attribution_withheld', derived_from=diagnosis.id)
+                    'application_attribution_withheld', derived_from=diagnosis.id, issues=issues)
                 return Outcome('failed', {'verification_id': verification_id, 'evidence_artifact_ids': attachments,
                     'qa_status': 'failed', 'failure_kind': 'test_contract', 'diagnosis_fault': 'unknown',
                     'diagnosis_artifact_id': derived, 'model_diagnosis_artifact_id': diagnosis.id,
@@ -1003,8 +1001,28 @@ class PipelineRuntime:
             error='QA diagnosis: ' + output.summary + '. A corrected suite/runner and fresh evidence are required; '
                   'application repair was not requested.')
 
+    def _revise_coverage_gap(self, ctx, identity, candidate, target, suite, proof,
+                             verification_id, attachments, criteria, source, undecided):
+        """Unresolvable coverage gaps still reach a user decision, whatever way revision ends."""
+        unresolved = ('Supervisor: the suite could not be revised automatically for this coverage gap '
+                      '(feature/bug assertions also pass on the accepted base). ')
+        try:
+            outcome = self._revise_suite(ctx, identity, candidate, target, suite,
+                proof, verification_id, attachments, criteria, source)
+        except (InvalidOutput, ValueError, ModelError) as exc:
+            # Non-retryable failures get a derived diagnosis first; the original
+            # error is re-raised so the job outcome is unchanged.
+            if not getattr(exc, 'retryable', False):
+                self._unknown_diagnosis(ctx, identity, candidate, verification_id, undecided,
+                    unresolved + self.redactor.redact(str(exc))[:600], 'coverage_gap_unresolved')
+            raise
+        if outcome.status == 'failed' and not outcome.retryable:
+            self._unknown_diagnosis(ctx, identity, candidate, verification_id, undecided,
+                unresolved + (outcome.error or '')[:600], 'coverage_gap_unresolved')
+        return outcome
+
     def _unknown_diagnosis(self, ctx, identity, candidate, verification_id, test_ids, summary, reason,
-                           *, derived_from=None):
+                           *, derived_from=None, issues=None):
         """Supervisor-derived 'unknown' diagnosis, so a stuck QA reaches a user decision.
 
         It asserts nothing about the application, cannot pass QA and authorizes no
@@ -1019,14 +1037,18 @@ class PipelineRuntime:
                 return previous.attachment_ids[-1]
             if not test_ids:
                 return None
+            if len(test_ids) > 24:  # QaPlan caps tests at 24; never truncate the decision set silently.
+                raise ValueError('derived diagnosis cannot cover more than 24 tests')
             document = QaDiagnosis(kind='qa_diagnosis', fault='unknown', summary=summary[:1500], findings=[
                 {'test_id': test_id, 'fault': 'unknown', 'expected': 'Unresolved by automated QA',
                  'observed': 'See authoritative runner evidence', 'reason': summary[:1000]}
-                for test_id in test_ids[:24]]).model_dump()
+                for test_id in test_ids]).model_dump()
             row = self.store.put_json(s, project_id=identity['project_id'], kind='report', name='qa-diagnosis.json',
                 document=self.redactor.redact_value(document, source=True), meta={'producer': 'qa-diagnosis',
                     'verification_id': verification_id, 'target_digest': candidate.target_digest, 'fake': self.fake,
-                    'supervisor_derived': reason, **({'derived_from': derived_from} if derived_from else {})})
+                    'supervisor_derived': reason, **({'derived_from': derived_from} if derived_from else {}),
+                    **({'application_repair_issues': [self.redactor.redact(i)[:500] for i in issues[:12]]}
+                       if issues else {})})
             self.workspace._post(s, identity, key, summary, [row.id], 'qa_diagnosis', candidate_id=candidate.id,
                 verification_id=verification_id, fault='unknown', supervisor_derived=reason)
             return row.id

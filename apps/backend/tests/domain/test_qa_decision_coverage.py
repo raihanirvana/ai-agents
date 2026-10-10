@@ -132,3 +132,34 @@ def test_missing_diagnosis_without_active_qa_is_not_an_endless_wait(world):
     with world.db.read() as s:
         offer = available(s, world.store, world.ticket(t.id))
     assert offer['eligible'] is False and 'jalankan ulang QA' in offer['reason']
+
+
+def test_withheld_application_claim_is_shown_and_pinned_with_the_decision(world):
+    from .test_qa_manual_resolution import inconclusive
+    t, c, v, args = inconclusive(world, fault='application')
+    with world.db.write() as s:
+        model_id = args['diagnosis_artifact_id']
+        derived = world.store.put_json(s, project_id=t.project_id, kind='report', name='qa-diagnosis.json',
+            document={'kind': 'qa_diagnosis', 'fault': 'unknown', 'summary': 'Supervisor: attribution withheld',
+                      'findings': [{'test_id': 'feature-add', 'fault': 'unknown', 'expected': 'Unresolved by automated QA',
+                                    'observed': 'See authoritative runner evidence', 'reason': 'withheld'}]},
+            meta={'producer': 'qa-diagnosis', 'verification_id': v.id, 'target_digest': args['target_digest'],
+                  'fake': False, 'supervisor_derived': 'application_attribution_withheld', 'derived_from': model_id,
+                  'application_repair_issues': ['feature-add: source_excerpt not found in shipped source']})
+        # A model diagnosis written later never displaces the supervisor-derived decision basis.
+        world.store.put_json(s, project_id=t.project_id, kind='report', name='late.json',
+            document={'kind': 'qa_diagnosis', 'fault': 'application', 'summary': 'late', 'findings': [
+                {'test_id': 'feature-add', 'fault': 'application', 'expected': 'x', 'observed': 'y', 'reason': 'z'}]},
+            meta={'producer': 'qa-diagnosis', 'verification_id': v.id, 'target_digest': args['target_digest'], 'fake': False})
+    with world.db.read() as s:
+        offer = available(s, world.store, world.ticket(t.id))
+    assert offer['eligible'] is True and offer['diagnosis_artifact_id'] == derived.id
+    shown = offer['diagnosis']['withheld_application']
+    assert shown['artifact_id'] == model_id and shown['fault'] == 'application'
+    assert shown['validator_issues'] == ['feature-add: source_excerpt not found in shipped source']
+    assert shown['findings'][0]['observed'] == 'Ambiguous locator'
+    assert model_id in offer['evidence_ids']
+    decided = decide(world, t, {**args, 'diagnosis_artifact_id': derived.id, 'evidence_ids': offer['evidence_ids']})
+    assert decided.phase == 'uat'
+    with world.db.read() as s:
+        assert model_id in s.scalar(select(QaWaiver)).evidence_artifact_ids

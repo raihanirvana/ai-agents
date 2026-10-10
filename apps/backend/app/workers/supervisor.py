@@ -58,7 +58,8 @@ class _Handle:
         with self.lock:
             now = time.monotonic()
             delta, self.last_charge = now - self.last_charge, now
-            return delta
+            # Supervisor-owned waits (e.g. QA planning) are not the attempt's active work.
+            return max(0.0, delta - self.ctx.take_uncharged(now))
 
 
 class Supervisor:

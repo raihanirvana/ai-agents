@@ -307,3 +307,35 @@ Belum dikerjakan: pengukuran token nyata (butuh demo dengan provider nyata;
 bandingkan dengan audit Mini Perpustakaan 19,5 juta token); belum ada benchmark
 waktu restore cache sebelum/sesudah. Instruksi role tidak ditambah pada putaran
 ini (pesan `next` di output tool yang menjelaskan qa_plan/submit).
+
+## I. Review 2e5e8ac: jalur keputusan QA dan biaya tunggu
+
+Status IN_PROGRESS / NOT_REVIEWED; belum commit/push/restart. Bukan independent review.
+
+| Temuan | Perubahan | Bukti |
+| --- | --- | --- |
+| 1. Coverage gap macet jika revisi melempar exception | `_revise_coverage_gap` membungkus revisi: InvalidOutput/ValueError/ModelError non-retryable membuat diagnosis turunan dulu, lalu exception dilempar ulang. Outcome gagal yang retryable tidak membuat diagnosis (retry dulu). | `tests/pipeline/test_qa_decision_paths.py` (6) |
+| 2. User tidak melihat dugaan bug aplikasi | Diagnosis turunan menyimpan `application_repair_issues`. `qualify`/`available` mengembalikan ringkasan diagnosis dan klaim aplikasi yang ditolak (temuan, alasan validator); diagnosis model (`derived_from`) divalidasi dan ikut `evidence_ids` serta dipin di keputusan. Panel QaResolution menampilkan ringkasan dan peringatan. Keputusan lama tanpa diagnosis model tetap valid (legacy evidence set). | `test_withheld_application_claim_is_shown_and_pinned_with_the_decision`; `tsc --noEmit` web lulus |
+| 3. Tunggu QA plan membakar active_s | `RunContext.uncharged_wait`: heartbeat tetap memperpanjang lease, tetapi waktu tunggu dikurangkan dari charge active_s. Slot execution tetap dipegang. | `test_supervisor_owned_wait_is_not_charged_as_active_time` |
+| 4. Batas 24 finding | `QaPlan` membatasi 24 test sehingga set keputusan ≤ 24; pemotongan diam-diam diganti error eksplisit. | — |
+| 5. Urutan created_at | `latest_diagnosis` mengutamakan artifact `supervisor_derived`, lalu created_at/id. | test (2) dengan diagnosis model yang dibuat lebih akhir |
+| 6. Masih terbuka | test.cjs release, submit cache dingin > 1020 dtk, peak memory. | — |
+
+Benchmark restore hardlink (`python -m app.pipeline.benchmark --rounds 2`, tanpa
+provider; hasil `efficiency-benchmark-hardlink-2026-10-11.json`, pembanding
+`efficiency-benchmark-2026-10-11.json`, mesin dan fixture sama):
+
+| Sampel | install (cache hit) | test | build | total |
+| --- | --- | --- | --- | --- |
+| cold, sebelum | 22,7 dtk | 1,8 | 11,1 | 162,8 dtk |
+| cold, hardlink | 3,7 dtk | 1,8 | 10,7 | 155,6 dtk |
+| warm, sebelum | 19,1 dtk | 1,7 | 11,6 | 36,4 dtk |
+| warm, hardlink | 4,4 dtk | 1,6 | 11,0 | 19,1 dtk |
+
+Peak memory proses benchmark: cold 945 MB, warm 183 MB (bukan peak per container).
+Sisa 3,7–4,4 dtk adalah validasi lockfile/scan/fingerprint dan pembuatan hardlink.
+
+Verifikasi: tests/agents, tests/domain, tests/workers, tests/pipeline: 614 passed,
+1 failed (`test_processes::test_dead_worker_recovery...`) saat benchmark Docker
+berjalan bersamaan; diulang sendiri: passed. Test baru putaran ini 35 passed.
+Token nyata tetap belum diukur (butuh demo provider nyata + `app.pipeline.metrics`).
