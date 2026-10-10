@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -259,6 +260,7 @@ def main():
     plan = json.loads(Path('/plan.json').read_text())
     records, artifacts, smoke, artifact_bytes = [], [], False, 0
     origin = urlsplit(url)
+    diagnostics_enabled = os.environ.get('AIAGENT_DIAGNOSTICS', 'on-failure') != 'none'
     with sync_playwright() as p:
         browser = p.chromium.launch(args=['--no-sandbox', '--disable-dev-shm-usage'])
         for test in plan['tests']:
@@ -267,7 +269,10 @@ def main():
             context.route('**/*', lambda r: r.continue_() if
                 (urlsplit(r.request.url).scheme, urlsplit(r.request.url).netloc) ==
                 (origin.scheme, origin.netloc) else r.abort())
-            context.tracing.start(screenshots=True, snapshots=True)
+            # Lightweight action trace; expensive DOM/screenshots are not
+            # captured for every successful test. Baseline runs disable it.
+            if diagnostics_enabled:
+                context.tracing.start(screenshots=False, snapshots=False)
             page = context.new_page()
             page.set_default_timeout(3000)
             record = {'id': test['id'], 'uac': test['uac'], 'status': 'failed'}
@@ -326,17 +331,23 @@ def main():
                 # Binary diagnostics travel on runner stdout; there is no shared writable mount.
                 trace = Path('/tmp') / (test['id'].replace(':', '_') + '.zip')
                 diagnostics = []
-                try:
-                    diagnostics.append(('screenshot', page.screenshot(timeout=3000)))
-                except Exception:
-                    record.setdefault('diagnostic_errors', []).append('screenshot unavailable')
-                try:
-                    context.tracing.stop(path=str(trace))
-                    with trace.open('rb') as handle:
-                        raw = handle.read(1024 * 1024 + 1)
-                    diagnostics.append(('trace', raw))
-                except Exception:
-                    record.setdefault('diagnostic_errors', []).append('trace unavailable')
+                if diagnostics_enabled and record['status'] != 'passed':
+                    try:
+                        diagnostics.append(('screenshot', page.screenshot(timeout=3000)))
+                    except Exception:
+                        record.setdefault('diagnostic_errors', []).append('screenshot unavailable')
+                    try:
+                        context.tracing.stop(path=str(trace))
+                        with trace.open('rb') as handle:
+                            raw = handle.read(1024 * 1024 + 1)
+                        diagnostics.append(('trace', raw))
+                    except Exception:
+                        record.setdefault('diagnostic_errors', []).append('trace unavailable')
+                elif diagnostics_enabled:
+                    try:
+                        context.tracing.stop()  # Discard; no zip/screenshot/base64 for passes.
+                    except Exception:
+                        record.setdefault('diagnostic_errors', []).append('trace disposal unavailable')
                 for kind, raw in diagnostics:
                     if len(raw) <= 1024 * 1024 and artifact_bytes + len(raw) <= 4 * 1024 * 1024:
                         artifact_bytes += len(raw)

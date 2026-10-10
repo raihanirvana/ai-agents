@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import time
@@ -57,6 +58,8 @@ class CommandResult:
     truncated: bool
     network: str
     container: str
+    cache_key: str | None = None
+    cache_origin: dict | None = None
 
 
 def redact(data: bytes, secrets: Sequence[str]) -> bytes:
@@ -133,7 +136,7 @@ class DockerSandbox:
             args += ["--mount", f"type=bind,source={source},target=/source,readonly",
                      "--tmpfs", f"/work:rw,nosuid,nodev,size={limits.work_mb}m,mode=1777"]
         else:
-            # Long-lived start/smoke processes never export source changes.
+            # Explicit readonly source mode; normal commands/start use tmpfs.
             args += ["--mount", f"type=bind,source={source},target=/work,readonly"]
         args += ["--entrypoint", "/bin/sh"]
         for key, value in sorted(env.items()):
@@ -166,6 +169,29 @@ class DockerSandbox:
             # A project npmrc can override cache, proxies and install behaviour.
             if (kwargs["source"] / ".npmrc").is_symlink() or (kwargs["source"] / ".npmrc").exists():
                 raise SandboxError("project .npmrc is unsupported by the offline installer")
+            installed = key = None
+            if self.dependency_cache is not None and os.environ.get('PIPELINE_INSTALL_CACHE', '1') != '0':
+                from .installation_cache import InstallationCache
+                from .dependencies import registry_tarballs
+                from .fsutil import read_file_beneath
+                # Validate registry/integrity restrictions even on snapshot hits.
+                registry_tarballs(json.loads(read_file_beneath(kwargs['source'], 'package-lock.json',
+                    max_bytes=kwargs['limits'].max_snapshot_bytes)))
+                installed = InstallationCache(self.dependency_cache.parent / '.dependency-snapshots', kwargs['limits'])
+                image = self.image_id(kwargs['image'])
+                key = installed.key(kwargs['source'], image, kwargs['env'], kwargs['limits'])
+                def check():
+                    if cancelled() or time.monotonic() >= deadline:
+                        raise SandboxError('installation snapshot interrupted')
+                receipt = installed.restore(key, kwargs['source'], check)
+                if receipt is not None:
+                    stats = {'phase': 'installation-snapshot', 'cache_hit': True, 'key': key,
+                             'bytes': receipt['bytes']}
+                    if self.dependency_progress:
+                        self.dependency_progress(stats)
+                    return CommandResult(requested_argv, 0, False, False, False,
+                        round(time.monotonic()-started, 3), json.dumps(stats).encode(), b'', False,
+                        'egress', '', cache_key=key, cache_origin=receipt['origin'])
             with tempfile.TemporaryDirectory(prefix="aiagent-npm-") as temporary:
                 cache = Path(temporary)
                 cache.chmod(0o755)
@@ -175,11 +201,26 @@ class DockerSandbox:
                 if remaining <= 0 or cancelled():
                     raise SandboxError("dependency acquisition cancelled or timed out")
                 offline = {**kwargs, "network": "none", "dependency_cache": cache, "timeout_s": remaining}
+                if installed is not None:
+                    offline['image'] = image  # Execute the exact image used by the snapshot key.
                 offline["argv"] = ["sh", "-c",
                     'if [ -f /dependencies/00000.tgz ]; then '
                     'npm cache add /dependencies/*.tgz --offline --ignore-scripts --no-audit --no-fund || exit $?; fi; '
                     'exec npm ci --offline --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org']
                 result = self._run(**offline)
+                if (installed is not None and result.exit_code == 0 and not
+                        (result.timed_out or result.cancelled or result.oom_killed or result.truncated)):
+                    # This is before any project build/test command; never cache
+                    # node_modules from a developer-controlled later workspace.
+                    try:
+                        installed.publish(key, kwargs['source'], {
+                            'argv': list(requested_argv), 'image_id': image, 'exit_code': 0,
+                            'stdout_sha256': sha256_bytes(result.stdout),
+                            'stderr_sha256': sha256_bytes(result.stderr)}, check)
+                    except (WorkspaceError, OSError, ValueError):
+                        if self.dependency_progress:
+                            self.dependency_progress({'phase': 'installation-snapshot', 'cache_hit': False,
+                                                      'stored': False})
                 return replace(result, argv=requested_argv, network="egress", duration_s=round(time.monotonic()-started, 3),
                                stdout=(json.dumps({'dependency_acquisition': stats}) + '\n').encode() + result.stdout)
         except (WorkspaceError, OSError, ValueError, tarfile.TarError) as exc:

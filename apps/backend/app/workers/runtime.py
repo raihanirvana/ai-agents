@@ -8,6 +8,7 @@ can stop them. The real Hermes adapter is wired in DEV-010; tests use a labelled
 from __future__ import annotations
 
 import os
+import json
 import signal
 import socket
 import sys
@@ -76,11 +77,17 @@ class RunContext:
         return Actor(self.lease.owner, self.job["runtime_ref"]["role"], self.job["project_id"],
                      job_id=self.lease.job_id, generation=self.lease.generation)
 
-    def log(self, line: str) -> None:
+    def log(self, line: str, *, metric=None) -> None:
         line = f"{time.strftime('%H:%M:%S')} {line}"
-        self.queue.log_line(self.lease.job_id, self.lease.generation, line)
+        if metric is None:
+            self.queue.log_line(self.lease.job_id, self.lease.generation, line)
+        else:
+            self.queue.log_line(self.lease.job_id, self.lease.generation, line, metric=metric)
         with self._lock:
             self._log.append(line)
+
+    def record_phase(self, metric) -> None:
+        self.log('phase.metric ' + json.dumps(metric), metric=metric)
 
     def log_bytes(self) -> bytes:
         with self._lock:
@@ -96,12 +103,15 @@ class RunContext:
         call returns (result, usage); usage None or missing keys are recorded as unknown.
         """
         self._check()
-        self.limiter.acquire(self.lane)
+        from .telemetry import measure
+        with measure(self, 'provider_slot_wait'):
+            self.limiter.acquire(self.lane)
         unknown = {"output_tokens": None, "total_tokens": None, "cost_usd": None}
         try:
             self.queue.reserve(self.lease, "model")
             try:
-                result, usage = call(self.job["limits"].get("output_tokens"))
+                with measure(self, 'model'):
+                    result, usage = call(self.job["limits"].get("output_tokens"))
             except BaseException as exc:
                 # The request was already counted; whatever it consumed is unknown, never zero.
                 self.queue.finalize_usage(self.lease.job_id, self.lease.generation,
@@ -125,7 +135,9 @@ class RunContext:
         self._check()
         self.queue.reserve(self.lease, "tool")
         self.log(f"tool {name}")
-        return call()
+        from .telemetry import measure
+        with measure(self, 'tool'):
+            return call()
 
     def request_input(self, question: str, checkpoint: dict[str, Any], key: str) -> None:
         request_id = self.queue.request_input(self.lease, question=question, checkpoint=checkpoint, request_key=key)

@@ -90,7 +90,7 @@ def _archive_logs(directory, resource, *, db, store, redactor):
                                             Message.idempotency_key == key)):
             return
         attachments = []
-        for name in ('transport.log', 'conversation-result.json'):
+        for name in ('transport.log', 'conversation-result.json', 'conversation-segments.jsonl'):
             try:
                 data = read_file_beneath(directory, name, max_bytes=MAX_LOG_BYTES)
             except FileNotFoundError:

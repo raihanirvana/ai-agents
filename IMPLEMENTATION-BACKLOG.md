@@ -49,6 +49,54 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ## Daftar tiket
 
+### Developer checks, konteks QA dan telemetry — 10 Oktober 2026
+
+Status: IN_PROGRESS. Review: NOT_REVIEWED.
+Scope: kerjakan rekomendasi performa yang belum tersedia: tool run_checks
+install/test/build, repo map awal, ringkasan state pada rollover konteks provider,
+prompt QA generik yang ringkas, diagnosis QA di lane ringan, telemetry per fase.
+Rencana/file: pipeline/{checks,repo_map,transcript,runtime,relay,scheduler,harness,
+workspace}; agents/{tools,qa/developer instructions}; workers/{runtime,queue,
+telemetry}; dokumentasi audit/handoff. Pertahankan cache, redaksi source, lease,
+approval dan bukti kandidat dari batch sebelumnya. Worker tetap dimatikan.
+Tidak menambah/menjalankan tes tanpa permintaan pengguna; catat pemeriksaan
+statis dan sisa verifikasi perilaku/benchmark secara terpisah.
+Hasil: run_checks dengan receipt/tree validation, fail-fast dan pinned report;
+repo map opsional yang dapat dipangkas; checkpoint/turn rollover Hermes tanpa
+reset budget; QA instructions 16.188 → 5.240 byte; diagnosis QA lane ringan;
+durasi/aggregate per fase dan CLI metrics read-only, termasuk scope/UAT wait.
+File tambahan hasil: pipeline/{files,execution_cache,hermes,metrics}.py,
+runtime_spike/hermes_worker.py dan dokumentasi keputusan.
+Verifikasi aktual: kompilasi source 23 file Python perubahan (termasuk batch
+cache sebelumnya) lulus; git diff --check bersih; proses worker/Hermes tidak ada.
+Tes/regresi/benchmark/provider tidak dijalankan dan checkout Hermes tidak diubah.
+Handoff/pemetaan rekomendasi dan skenario tersisa:
+[audit lanjutan](docs/audits/developer-checks-qa-context-telemetry-2026-10-10.md).
+Sisa: verifikasi perilaku cache/checks/lane/telemetry, kompatibilitas rollover
+pinned Hermes (terutama batch tools paralel), dan benchmark workload cold/warm
+yang sama. Belum ada review independen; status belum DONE.
+
+### Performa baseline, instalasi, konteks dan runner — 10 Oktober 2026
+
+Status: IN_PROGRESS. Review: NOT_REVIEWED.
+Scope: reuse baseline build/browser dengan pin identitas dan provenance;
+snapshot hasil installer terpercaya; lane ringan TL; proyeksi transcript
+berbatas dan stabil per blok; diagnostik browser hanya pada kegagalan;
+batch query reap worker. Perubahan polling SQL sebelumnya dipertahankan.
+File hasil: pipeline/{execution_cache,workspace,runtime,transcript,hermes,
+scheduler,wiring,harness}; workspace/{sandbox,installation_cache,supervisor};
+workers/{queue,supervisor}; contracts/verification/acceptance.py; .env.example
+dan docs/decisions/{agents,pipeline,workers,qa-browser-dsl}.
+Worker tetap mati. Tidak mengubah approval, model, budget, atau state demo.
+Verifikasi aktual: kompilasi source 14 file Python yang berubah lulus;
+`git diff --check` bersih. Tes tidak ditambah/dijalankan karena pengguna belum
+meminta tes pada assignment ini. Proses worker/Hermes tidak ditemukan.
+Handoff, pemetaan temuan, invalidasi/cache provenance, batas dan skenario
+verifikasi: [audit performa](docs/audits/performance-caches-context-2026-10-10.md).
+Sisa: regresi perilaku cache/lane/transcript/runner dan benchmark cold/warm demo;
+belum ada angka penghematan atau review independen. Status belum DONE.
+
+
 ### Recovery dependency, disk sandbox dan polling — 10 Oktober 2026
 
 Status: IN_PROGRESS. Review: NOT_REVIEWED.

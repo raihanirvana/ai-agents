@@ -306,19 +306,21 @@ class Supervisor:
     def _reap_finished(self) -> None:
         # Keep proof only while a failed cleanup still owns resources. This is
         # local thread-completion proof, never an assertion about another worker.
+        finished = {job_id: handle for job_id, handle in list(self._handles.items())
+                    if not handle.thread.is_alive() and not (
+                        handle.stop_thread is not None and handle.stop_thread.is_alive())}
+        wanted = set(self._finished_attempts) | set(finished)
+        if not wanted:
+            return  # No per-handle DB reads while all runtime threads are alive.
         with self.db.read() as s:
-            pending = {job_id for job_id in self._finished_attempts
-                       if (job := s.get(Job, job_id)) is not None and job.runtime_ref.get('cleanup')}
+            from sqlalchemy import func
+            pending = set(s.scalars(select(Job.id).where(Job.id.in_(wanted),
+                func.json_type(Job.runtime_ref, '$.cleanup') == 'object')))
         self._finished_attempts = {k: v for k, v in self._finished_attempts.items() if k in pending}
-        for job_id, handle in list(self._handles.items()):
-            if not handle.thread.is_alive():
-                if handle.stop_thread is not None and handle.stop_thread.is_alive():
-                    continue
-                with self.db.read() as s:
-                    job = s.get(Job, job_id)
-                    if job is not None and job.runtime_ref.get('cleanup'):
-                        self._finished_attempts[job_id] = handle.lease.generation
-                self._handles.pop(job_id)
+        for job_id, handle in finished.items():
+            if job_id in pending:
+                self._finished_attempts[job_id] = handle.lease.generation
+            self._handles.pop(job_id)
 
     def _reconcile(self, snapshot: dict) -> bool:
         cleanup = snapshot['runtime_ref'].get('cleanup', {})

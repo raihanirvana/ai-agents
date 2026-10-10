@@ -2,6 +2,8 @@
 import threading
 import uuid
 import math
+import time
+from app.workers.telemetry import measure, record_phase
 from app.persistence.models import Job
 from app.runtime_spike.journal import AdmissionError
 from app.workers.queue import BudgetExhausted, StaleLease, QuotaWait
@@ -15,6 +17,7 @@ class ProductAdmission:
     def __init__(self, ctx, redactor):
         self.ctx, self.redactor = ctx, redactor
         self.pending, self.error = {}, None
+        self.started = {}
         self.provider_failure = None
         self.relay_failure = None
         self.lock = threading.RLock()
@@ -32,7 +35,8 @@ class ProductAdmission:
             if generation != self.ctx.lease.generation or scope != self.ctx.lease.job_id:
                 raise StaleLease('relay identity mismatch')
             if kind == 'model':
-                self.ctx.limiter.acquire(self.ctx.lane)
+                with measure(self.ctx, 'provider_slot_wait'):
+                    self.ctx.limiter.acquire(self.ctx.lane)
                 acquired = True
             rid = uuid.uuid4().hex
             exhausted = None
@@ -49,6 +53,7 @@ class ProductAdmission:
                 raise exhausted
             with self.lock:
                 self.pending[rid] = kind
+                self.started[rid] = time.monotonic()
             return rid
         except (BudgetExhausted, StaleLease, QuotaWait) as exc:
             self.error = exc
@@ -63,6 +68,7 @@ class ProductAdmission:
     def finish(self, rid, result):
         with self.lock:
             kind = self.pending.pop(rid, None)
+            began = self.started.pop(rid, None)
             if kind == 'model':
                 self.provider_failure = ({'http_status': result.get('http_status'), 'status': result.get('status'),
                     'detail': self.redactor.redact(str(result.get('detail') or ''))[:1000]}
@@ -121,6 +127,9 @@ class ProductAdmission:
         finally:
             if kind == 'model':
                 self.ctx.limiter.release(self.ctx.lane)
+            if began is not None:
+                record_phase(self.ctx, kind, time.monotonic()-began,
+                    status='passed' if result.get('status') in ('complete', 'completed', 'succeeded') else 'failed')
 
     def event(self, scope, generation, kind, payload):
         if kind == 'relay.rejected':

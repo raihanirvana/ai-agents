@@ -53,7 +53,7 @@ class DockerHarness:
     def identity(self):
         return {'runner_code_digest': code_digest(), 'runner_image_id': self.sandbox.image_id(self.image)}
 
-    def run(self, ctx, site, target_digest, suite, node_image, *, expected_runner):
+    def run(self, ctx, site, target_digest, suite, node_image, *, expected_runner, diagnostics=True):
         identity = self.identity()
         if identity != expected_runner:
             raise ValueError('runner configuration changed: a new target is required')
@@ -88,6 +88,7 @@ class DockerHarness:
             docker('start', target_name)
             ctx.queue.verify(ctx.lease)
             docker('create', '--name', runner_name, '--network', 'container:' + target_name, *common, *label_args,
+                '-e', 'AIAGENT_DIAGNOSTICS=' + ('on-failure' if diagnostics else 'none'),
                 '--mount', f'type=bind,src={SUITE_DIR},dst=/suite,readonly',
                 '--mount', f'type=bind,src={plan_path},dst=/plan.json,readonly',
                 identity['runner_image_id'], invocation, target_digest, suite.digest, 'http://127.0.0.1:4173/')
@@ -121,9 +122,13 @@ class DockerHarness:
             report = {k: v for k, v in report.items() if k != 'artifacts'}
         else:
             report = None
+        duration = time.monotonic() - started
+        from app.workers.telemetry import record_phase
+        record_phase(ctx, 'browser' if diagnostics else 'baseline_browser', duration,
+                     status='passed' if result['status'] == 'passed' else 'failed')
         return {**result, 'invocation_id': invocation, 'target_digest': target_digest, 'suite_digest': suite.digest,
             'runner': identity, 'report': report, 'exit_code': exit_code, 'error': error,
-            'infrastructure_failure': result['status'] == 'incomplete', 'duration_s': time.monotonic() - started,
+            'infrastructure_failure': result['status'] == 'incomplete', 'duration_s': duration,
             'commands': [{'argv': ['isolated-browser-runner', invocation], 'exit_code': exit_code}],
             'stdout_sha256': hashlib.sha256(stdout).hexdigest(), 'stderr_sha256': hashlib.sha256(stderr).hexdigest(),
             'stderr': stderr.decode(errors='replace')[:4000], 'diagnostics': diagnostics}

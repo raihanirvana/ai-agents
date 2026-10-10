@@ -1,5 +1,22 @@
 # SOUL, context, model client, dan pesan antar-agent — DEV-007
 
+## Proyeksi transcript per blok — 10 Oktober 2026
+
+Source/check tool exchange yang lengkap dipadatkan dalam blok tetap berukuran
+delapan. Simpan 24 exchange tersegel sebagai receipt; observasi lebih lama
+menjadi digest sejarah dan source read aktif dibatasi 64k karakter. Keputusan,
+scope/feedback user dan tool exchange pending tetap dipertahankan. Transcript
+Hermes dapat melanjutkan turn dengan checkpoint state setelah ambang tool/ukuran
+tercapai; original turn diagnostics diarsipkan dalam byte bound yang sudah ada.
+Attempt/lease/budget tetap sama; model dapat membaca ulang source melalui tools.
+Prompt QA generik menjadi sekitar 5 KB. Task tidak mengulang panduan tools;
+repo map awal dan run_checks mengurangi read/command round trip. Detail dan
+verifikasi yang belum dijalankan:
+[audit lanjutan](../audits/developer-checks-qa-context-telemetry-2026-10-10.md).
+Ini membatasi pertumbuhan observasi dalam request provider, tanpa menjamin
+prompt cache provider atau mengatasi seluruh biaya call model. Handoff dan
+batas verifikasi: [audit performa](../audits/performance-caches-context-2026-10-10.md).
+
 ## Source dan redaksi — 10 Oktober 2026
 
 Source read/write/edit/diff, task pipeline berisi source, dan source_excerpt

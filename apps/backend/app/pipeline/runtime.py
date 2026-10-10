@@ -12,7 +12,7 @@ from app.domain import Actor, Attempt, DomainError
 from app.persistence.models import Candidate, Job, Ticket, TicketVersion, Artifact, Verification, Approval
 from app.workers.runtime import Outcome
 from app.persistence.transactions import bind_service
-from .contracts import QaPlan, QaDiagnosis, QaCoverageRepair, QaSetupRepair, QaOptionRepair, QaSelectorRepair, Review, CandidateSubmission, tool_schema, browser_capabilities
+from .contracts import QaPlan, QaDiagnosis, QaCoverageRepair, QaSetupRepair, QaOptionRepair, QaSelectorRepair, Review, CandidateSubmission, tool_schema
 from .qa_policy import policy_context, preflight
 from .relay import reconcile_accounting
 from .hermes import RelayContextError
@@ -159,32 +159,12 @@ class PipelineRuntime:
         planning_builder = ContextBuilder(builder.db, builder.store, builder.agents, builder.redactor,
             limits=replace(builder.limits, total_tokens=max(32768, builder.limits.total_tokens)))
         snapshot = planning_builder.build(identity, task={
-            'name': 'qa_plan', 'instruction': 'Create mandatory browser assertions from approved UAC and the technical plan. '
-            'Use CSS selectors. Every automated UAC must be covered. feature/bug cases must fail on the base when applicable; '
-            'regression cases may pass on both. Existing prerequisite flows are fixture setup, never a substitute '
-            'for the new feature under test. Define new feature controls from the technical plan '
-            'and explicitly assert each UAC outcome, including totals, mutations, rejected inputs and persistence. '
-            'Use propose_tests with one QaPlan object. Do not edit source or claim pass.',
-            'keyboard_guidance': 'fill changes field text and never simulates a key. To test Enter, fill the input '
-                'then use a separate step {"action":"press","selector":"input selector","value":"Enter"}. '
-                'Do not append newline or the literal characters \\n to simulate Enter.',
-            'persistence_guidance': 'To test state restoration, create/change state, assert it, use '
-                '{"action":"reload"}, then assert the restored state on the same page/context. '
-                'Adding an item and asserting it before reload does not test persistence. '
-                'reload takes no selector or value. Every test starts with a fresh browser context.',
-            'source_files': source_files,
-            'baseline_ui_source': baseline_ui,
-            'existing_control_guidance': 'Reuse selectors declared in the supplied accepted baseline UI source for '
-                'existing prerequisite flows. Never invent IDs for controls already implemented by another ticket. '
-                'For generated IDs prefer an existing class scoped to the fixture record. Use inspect_app for '
-                'files not shown or truncated here. Define new selectors only for the new feature.',
+            'name': 'qa_plan', 'instruction': 'Plan from approved UAC, technical plan and supplied source. '
+                'Submit one validated QaPlan through propose_tests; this task does not execute or pass QA.',
+            'source_files': source_files, 'baseline_ui_source': baseline_ui,
             'verification_policy': policy_context(),
-            'empty_source_guidance': ('The accepted base is empty; this is expected for a new project. '
-                'There is no DOM or other folder to inspect. Plan feature tests from approved UAC and technical plan, '
-                'and declare stable selectors/text as a contract for the developer. Do not request user input '
-                'only because files are absent. Do not invent new requirements or regression cases for absent features.'
-                if not source_files else None),
-            'baseline': {k: v for k, v in baseline.items() if k not in ('source', 'site')}},
+            'baseline': {k: baseline[k] for k in ('base_sha', 'applicable', 'status', 'reason',
+                'artifact_id', 'fingerprint_artifact_id', 'error', 'cache_hit') if k in baseline}},
             answer=ctx.answer, lease=ctx.lease, queue=ctx.queue, source_safe=True)
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
@@ -261,32 +241,32 @@ class PipelineRuntime:
                             'A passing run_command test alone does not prove baseline coverage at submission.')
         source_files = sup.list_files(started.ref, started.credential)
         bootstrap = bootstrap_contract() if self.workspace.bootstrap_available(identity) else None
-        snapshot = self.structured.builder.build(identity, task={'name': 'implement', 'runner_manifest': manifest.to_dict(),
-            'repair_feedback': repair,
-            'browser_capabilities': browser_capabilities(),
-            'source_files': source_files, 'reference_bootstrap': bootstrap,
-            'empty_source_guidance': ('The source snapshot is empty by design. Create the application and Node tests '
-                'for this approved scope here. There is no existing application in another directory; '
-                'never search host paths or /work. write_file creates directories automatically.' if not source_files else None),
-            'qa_suite': suite.model_dump(), 'instructions': 'Implement the approved scope. Read/patch files with relative paths. '
-            'read_file is paged and never writes. write_file creates/replaces entire files; edit_file replaces one exact match. '
-            'read_files reads up to six pages in one call (combined limit 24000 characters). '
-            'Use read_handle from a read for edit_file or edit_file_batch to bind the path and digest. '
-            'edit_file_batch applies up to ten sequential replacements in ONE file, all or nothing. '
-            'Use current expected_digest from read_file for edits/replacements; empty digest creates only missing files. '
-            'Follow next_offset with expected_digest to read more. Unchanged repeated pages return a reuse receipt, '
-            'not another content copy: use the earlier page and move to implementation/checks. If that page was '
-            'archived from active context, request refresh=true once. inspect_diff defaults to stat; pass path for file diff. '
-            'read_file path "." lists source files. run_command selects bootstrap/install/test/build. '
-            'For repository tests use node:test and node:assert/strict, with npm test running node --test. '
-            'Create real .test.js/.test.cjs files that exercise application code; echo success and empty tests fail the gate. '
-            'Do not remove or skip repository tests to make checks pass. Completion REQUIRES submit_candidate; a prose answer fails the job. '
-            'submit_candidate.message is a short Git message (max 2000); use handoff for run instructions/gaps (max 6000). '
-            'Report suspected missing-fill selector mistakes as test_concerns citing test_id, step_index, original selector, '
-            'source_path, exact source_excerpt and reason. QA checks them against immutable source and real browser evidence. '
-            'Use the locked dependencies and existing Node tests, not an uninstalled browser unit test library. '
-            'Unclear requirements: use request_decision for the lead. Only the trusted harness determines QA.'},
-            answer=ctx.answer, lease=ctx.lease, queue=ctx.queue, source_safe=True)
+        from .repo_map import repo_map
+        from .checks import DeveloperChecks
+        checks = DeveloperChecks(ctx, sup, started, self.workspace)
+        task = {'name': 'implement', 'runner_manifest': manifest.to_dict(),
+            'repair_feedback': repair, 'repo_map': repo_map(sup, started, source_files),
+            'reference_bootstrap': bootstrap, 'source_empty': not source_files,
+            'qa_suite': suite.model_dump(),
+            'instructions': 'Implement approved scope on the restored snapshot; follow the latest repair feedback. '
+                'Use the source index to locate relevant code, read before edits and prefer run_checks before '
+                'submit_candidate. Completion requires a broker candidate, not prose. Test concerns are advisory '
+                'and require exact shipped-source witnesses. The trusted harness alone determines QA.'}
+        while True:
+            try:
+                snapshot = self.structured.builder.build(identity, task=task,
+                    answer=ctx.answer, lease=ctx.lease, queue=ctx.queue, source_safe=True)
+                break
+            except ContextTooLarge:
+                # The navigation index may shrink; approved scope/feedback and
+                # the canonical suite must not be dropped to fit an optional map.
+                index = task['repo_map']
+                if not index['files']:
+                    raise
+                index['files'] = index['files'][:len(index['files']) // 2]
+                index['indexed_files'] = len(index['files'])
+                index['omitted_files'] = index['total_files'] - len(index['files'])
+                index['context_trimmed'] = True
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
         def read(c, i, a):
@@ -329,18 +309,27 @@ class PipelineRuntime:
             result.update(self.workspace.submit(ctx, sup, started, manifest, submission.message,
                 handoff=submission.handoff, test_concerns=[c.model_dump() for c in submission.test_concerns]))
             return {**result, 'submitted': True}
+        def run_checks(c, i, a):
+            if a:
+                raise ValueError('run_checks takes no arguments; commands and identity come from the supervisor')
+            from app.workers.telemetry import measure
+            with measure(ctx, 'checks') as metric:
+                response = checks.run()
+                metric['status'] = response['status']
+                return response
         def decision(c, i, a):
             if set(a) != {'question'}:
                 raise ValueError('request_decision requires question')
             checkpoint = self.workspace.save_checkpoint(ctx, sup, started)
             self.structured.threads.ask(ctx, 'technical-lead', a['question'],
                 key='pipeline-decision:' + i['root_job_id'] + ':' + checkpoint, checkpoint={'artifact_id': checkpoint})
-        facade._handlers.update({'read_file': read, 'patch_file': patch, 'run_command': command,
+        facade._handlers.update({'read_file': read, 'patch_file': patch, 'run_command': command, 'run_checks': run_checks,
             'inspect_diff': lambda c, i, a: {'diff': sup.inspect_diff(started.ref, started.credential)},
             'submit_candidate': submit, 'request_decision': decision})
         parameters = {'read_file': {'path': {'type': 'string'}}, 'patch_file': {'path': {'type': 'string'},
             'content': {'type': ['string', 'null'], 'description': 'Full new file contents; null deletes this file.'}},
-            'run_command': {'phase': {'type': 'string', 'enum': ['bootstrap', 'install', 'test', 'build']}}, 'inspect_diff': {},
+            'run_command': {'phase': {'type': 'string', 'enum': ['bootstrap', 'install', 'test', 'build']}},
+            'run_checks': {}, 'inspect_diff': {},
             'submit_candidate': tool_schema(CandidateSubmission)['properties'], 'request_decision': {'question': {'type': 'string'}}}
         parameters['submit_candidate']['test_concerns']['default'] = []
         if not self.fake:
@@ -531,7 +520,11 @@ class PipelineRuntime:
         if proof is None:
             proof = self.workspace.harness.run(ctx, site, candidate.target_digest, suite, target['node_image_id'], expected_runner=target['runner'])
         proof['required_checks'] = self.gate_admission(identity, candidate, gates)
-        baseline = self.workspace.base_build(ctx)
+        baseline = self.workspace.base_build(ctx, image_id=target['node_image_id'])
+        if baseline['base_sha'] != candidate.base_sha:
+            return self._reject(ctx, identity, candidate,
+                'Accepted base changed during QA; rebuild/review/QA/UAT on the current base are required.',
+                runner_changed=True)
         proof['baseline'] = {k: v for k, v in baseline.items() if k not in ('source', 'site')}
         if baseline['applicable']:
             if baseline['status'] == 'built':
@@ -540,8 +533,8 @@ class PipelineRuntime:
                 base_target = digest_of({'base_sha': candidate.base_sha,
                     'build_digest': fsutil.sha256_tree(baseline['site'], fsutil.scan_tree(baseline['site'])),
                     'runner': target['runner'], 'config_digest': target['config_digest'], 'suite_digest': suite.digest})
-                base_proof = self.workspace.harness.run(ctx, baseline['site'], base_target, suite,
-                    target['node_image_id'], expected_runner=target['runner'])
+                base_proof = self.workspace.execution_cache.baseline_browser(ctx, baseline['site'], base_target, suite,
+                    target['node_image_id'], target['runner'], fake=self.fake)
                 base_proof.pop('diagnostics', None)
                 proof['baseline']['execution'] = base_proof
                 statuses = {t['id']: t['status'] for t in (base_proof.get('report') or {}).get('tests', [])}
@@ -566,7 +559,11 @@ class PipelineRuntime:
             ctx.queue.verify_identity(s, identity)
             attachments = [target['gate_artifact_id']]
             attachments += proof.pop('preflight_evidence_artifact_ids', [])
-            attachments += [baseline[k] for k in ('artifact_id', 'fingerprint_artifact_id') if k in baseline]
+            attachments += [baseline[k] for k in ('artifact_id', 'fingerprint_artifact_id', 'cache_artifact_id')
+                            if baseline.get(k)]
+            browser_cache = proof.get('baseline', {}).get('execution', {}).get('cache_artifact_id')
+            if browser_cache:
+                attachments.append(browser_cache)
             attachments += baseline.get('fingerprint_artifact_ids', [])
             for item in proof.pop('diagnostics', []):
                 a = self.store.put_bytes(s, project_id=identity['project_id'], kind=item['kind'],
@@ -939,7 +936,8 @@ class PipelineRuntime:
                     'choose only an observed candidate_index for the SAME intended input using source, label, '
                     'original fixture and approved criteria. Never change input values/assertions/UAC or choose '
                     'another field merely to pass. If uncertain return empty bindings. A corrected suite/target '
-                    'still requires complete fresh baseline and candidate execution; this is not QA approval.'
+                    'still requires complete baseline evidence for that suite/runner and fresh candidate execution; '
+                    'this is not QA approval.'
             }, QaSelectorRepair, context_limits=replace(self.structured.builder.limits, total_tokens=32768))
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, identity)
@@ -1073,13 +1071,14 @@ class PipelineRuntime:
                     'previous_target_artifact_id': previous.id, 'repair_verification_id': verification_id},
                 meta={**previous.meta, 'qa_repair_job_id': identity['job_id']})
             # Reviewed source/build/config stay pinned. A changed suite or trusted
-            # runner gets a new target and full baseline/candidate execution.
+            # runner gets a new target and complete baseline evidence plus fresh
+            # candidate execution. Only exact baseline inputs can reuse evidence.
             workflow.attach_target(Actor('service:builder', 'builder', t.project_id), t.id, t.revision,
                 candidate.id, build_artifact_id=current.build_artifact_id,
                 target_artifact_id=new_target.id, target_digest=new_target.checksum)
             self.workspace._post(s, identity, 'qa-selector-repair:' + identity['job_id'],
-                'QA corrected a test contract (' + repair_kind + '). New suite/target require fresh baseline and '
-                'candidate execution; source/build unchanged.', [*attachments, suite_row.id], 'qa_plan',
+                'QA corrected a test contract (' + repair_kind + '). New suite/target require complete baseline '
+                'evidence and fresh candidate execution; source/build unchanged.', [*attachments, suite_row.id], 'qa_plan',
                 candidate_id=candidate.id, suite_digest=repaired.digest,
                 previous_target_artifact_id=previous.id, target_artifact_id=new_target.id,
                 verification_plan=readiness, repair_kind=repair_kind)

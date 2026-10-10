@@ -21,7 +21,8 @@ def build_pipeline(structured, store, workflow, queue, *, env=None):
     harness.identity()  # fail early if the pinned runner image has not been built
     driver = HermesDriver(env.get('HERMES_PYTHON', ''), root / '.hermes', structured.client, store=store)
     driver.validate_install()
-    workspace = ProductWorkspace(structured.db, store, workflow, root, harness, structured.redactor)
+    workspace = ProductWorkspace(structured.db, store, workflow, root, harness, structured.redactor,
+                                 cache_enabled=env.get('PIPELINE_EXECUTION_CACHE', '1') != '0')
     runtime = PipelineRuntime(structured, workspace, driver)
     return runtime, PipelineScheduler(structured.db, queue, workflow, runtime=runtime.name)
 

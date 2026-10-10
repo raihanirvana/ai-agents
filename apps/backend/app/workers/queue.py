@@ -29,6 +29,7 @@ from app.persistence.models import ACTIVE_JOB_STATUSES, Artifact, Job, Message, 
 LIMIT_KEYS = ("model_calls", "tool_calls", "active_s")  # required; finite by default
 OPTIONAL_LIMIT_KEYS = ("output_tokens", "total_tokens")
 BIND_STAGES = ("development", "technical_review", "qa")
+LIGHT_STAGES = ("technical_plan", "technical_review")
 TERMINAL_STATUSES = ("stopped", "failed", "cancelled", "succeeded")
 
 
@@ -98,8 +99,9 @@ class JobQueue:
         self.startable = startable
 
     # -- helpers ------------------------------------------------------------------------
-    @staticmethod
-    def _event(s, job: Job, kind: str, actor: str, **payload) -> None:
+    def _event(self, s, job: Job, kind: str, actor: str, **payload) -> None:
+        from .telemetry import wait_transition
+        wait_transition(job, kind, self.clock())
         ref = job.runtime_ref or {}
         append_event(s, job.project_id, EventSpec(
             "job." + kind, actor, {**payload, "lane": job.lane, "stage": job.stage, "attempt": job.attempt,
@@ -140,7 +142,8 @@ class JobQueue:
 
     @staticmethod
     def _retry_ref(job):
-        ref = {k: v for k, v in job.runtime_ref.items() if k not in ("processes", "resources", "cleanup")}
+        ref = {k: v for k, v in job.runtime_ref.items() if k not in
+               ("processes", "resources", "cleanup", "telemetry", "telemetry_wait")}
         if job.waiting_request_id:
             ref["resume_request_id"] = job.waiting_request_id
         return ref
@@ -195,12 +198,15 @@ class JobQueue:
             job.result = {**(job.result or {}), "needs_human": True, "cleanup_error": error[:500]}
             self._event(s, job, "cleanup_failed", "system:supervisor", error=error[:500])
 
-    def log_line(self, job_id: str, generation: int, line: str) -> None:
+    def log_line(self, job_id: str, generation: int, line: str, *, metric=None) -> None:
         """Append-only durable log, also accepted after revocation; never a domain result."""
         with self.db.write() as s:
             job = s.get(Job, job_id)
             if job is None or not 1 <= generation <= job.lease_generation:
                 raise StaleLease("unknown job generation")
+            if metric is not None:
+                from .telemetry import accumulate
+                accumulate(job, metric, generation)
             append_message(s, project_id=job.project_id, thread_id=f"job:{job_id}:g{generation}",
                            ticket_id=job.ticket_id, sender="system:supervisor", body=line,
                            meta={"runtime_log": True, "generation": generation})
@@ -300,14 +306,30 @@ class JobQueue:
             raise ValueError("MVP execution capacity must be exactly one")
         with self.db.write() as s:
             now = self.clock()
-            running = s.scalar(select(func.count()).select_from(Job).where(Job.lane == lane, or_(
-                Job.status == "running", func.json_extract(Job.runtime_ref, "$.cleanup").is_not(None))))
+            light = or_(Job.stage.in_(LIGHT_STAGES),
+                (Job.stage == 'qa') & (func.coalesce(func.json_extract(Job.runtime_ref, '$.payload.task'), '') == 'diagnose'))
+            def occupied(*, lightweight=False):
+                # Separate indexed paths: avoid an OR that scans all historical
+                # JSON payloads just to count running/quarantined lane occupants.
+                leased = select(Job.id).where(Job.lane == lane, Job.status == 'running')
+                cleanup = select(Job.id).where(Job.lane == lane,
+                    text("json_type(runtime_ref, '$.cleanup') = 'object'"))
+                if lightweight:
+                    leased = leased.where(light)
+                    cleanup = cleanup.where(light)
+                return s.scalar(select(func.count()).select_from(leased.union(cleanup).subquery()))
+            running = occupied()
             if running >= capacity:
                 return None
-            queued = s.scalars(select(Job).where(
+            pending = select(Job).where(
                 Job.status == "queued", Job.lane == lane,
                 func.json_extract(Job.runtime_ref, "$.runtime").in_(runtimes),
-                or_(Job.available_at.is_(None), Job.available_at <= now)).order_by(Job.created_at, Job.id).limit(100))
+                or_(Job.available_at.is_(None), Job.available_at <= now))
+            if lane == 'interactive' and occupied(lightweight=True) >= max(1, capacity-1):
+                # Leave a chat slot when capacity permits. Filter in SQL before
+                # LIMIT so a backlog of TL jobs cannot hide a PO reply.
+                pending = pending.where(~light)
+            queued = s.scalars(pending.order_by(Job.created_at, Job.id).limit(100))
             for job in list(queued):
                 if self._cleanup(job):
                     continue

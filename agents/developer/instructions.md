@@ -36,7 +36,9 @@ This file defines the task contract; the structured PO/lead runtime does not run
    The reference catalog has no Vitest/Jest. Use Node's built-in node:test and node:assert/strict;
    npm test must execute actual .test.js/.test.cjs files with node --test. Test imported application logic,
    not a duplicate implementation inside the test. An echo success script or zero tests is incomplete.
-   Inspect repository_gate returned by run_command phase test before submitting the candidate.
+   Inspect repository_gate returned by run_checks before submitting the candidate.
+   Use the supplied repo_map to find relevant entry points/symbols; it is a navigation hint,
+   not file content or permission to overwrite a digest. Read only the relevant current source.
    read_file returns a digest and a page; follow next_offset with expected_digest.
    Prefer read_files for up to six relevant pages in one call (combined limits <=24000 characters).
    Reads return read_handle bound to path/digest in this attempt. Use that handle with edit_file,
@@ -56,7 +58,11 @@ This file defines the task contract; the structured PO/lead runtime does not run
    Preserve existing repository tests and their assertions. Use the installed repository test framework; do not
    replace unit tests with browser tests or import a package that is not in the locked dependencies. QA's independent
    browser harness owns acceptance tests. A missing mandatory baseline test is a failure, even if your new test passes.
-4. Run the project's install/test/build through the run tool, inspect the diff, and fix failures.
+4. Prefer run_checks with no arguments: the supervisor installs when package/lock/environment or
+   the installation tree changed, runs real repository tests, then builds. It stops at the first
+   failure and returns status, failed test IDs and a bounded error excerpt; full command evidence
+   remains available. Fix that cause before running the batch again. Individual run_command phases
+   remain available for bootstrap or focused diagnosis. Inspect the diff after checks.
 5. Submit exactly one candidate once the repository checks pass. message is the short Git message
    (<=2000 characters); handoff holds run instructions/gaps (<=6000). Do not put the whole handoff
    in message. For a suspected missing fill selector, include test_concerns with kind test_contract,

@@ -85,6 +85,11 @@ class HermesDriver:
             redactor=self.client.redactor, finalizers=finalizers)
         home = directory / 'home'
         home.mkdir(mode=0o700)
+        projection_path = directory / 'context_projection.py'
+        if role == 'developer':
+            # Pure projection module, without product DB/provider imports. The
+            # isolated child uses the same policy to resume a bounded turn.
+            projection_path.write_text(Path(__file__).with_name('transcript.py').read_text())
         (home / 'config.yaml').write_text(json.dumps({'agent': {'api_max_retries': 1, 'auto_recovery_cycles': 0},
             'tools': {'tool_search': {'enabled': 'off'}}, 'memory': {'memory_enabled': False, 'user_profile_enabled': False},
             'compression': {'enabled': False, 'context_length': 262144}}))
@@ -113,11 +118,17 @@ class HermesDriver:
                 worker_config = {'relay_url': relay.url, 'relay_token': relay.token, 'model': config.model,
                     'tool_names': list(tools), 'tool_parameters': parameters, 'tool_prefix': 'pipeline_',
                     'toolset': 'product_pipeline', 'max_iterations': ctx.job['limits']['model_calls'] or sys.maxsize,
+                    'tool_timeouts': {'run_checks': 1020, 'submit_candidate': 1020},
+                    'context_projection': str(projection_path) if role == 'developer' else None,
+                    'context_rollover_tools': 40, 'context_rollover_bytes': 512 * 1024,
                     'completion_tool': 'propose_tests' if role == 'qa' else 'submit_candidate',
                     'output_tokens': self.client.output_limit(role, ctx.job['limits'].get('output_tokens')),
                     'session_id': ctx.tag, 'system': snapshot.system + '\nUse only pipeline tools. Paths are relative to the project source snapshot, never the private runtime cwd. Historical completed tool exchanges may be projected to digest summaries; '
-                    'these are old observations, not file contents. Current scope, feedback, user decisions and recent exchanges are preserved. '
-                    'Read current source if an archived detail is needed.',
+                    'completed source/check history is bounded and sealed in fixed blocks. Digest summaries are observations, not file contents. '
+                    'A provider segment checkpoint retains file digest observations and last checks when old blocks retire; '
+                    'it continues the same job/scope/budget. Earlier checks do not cover later mutations. '
+                    'User/system decisions, scope, feedback and pending exchanges remain intact. '
+                    'Read a bounded current source range if archived detail is needed.',
                     'prompt': snapshot.user}
                 path = directory / 'worker.json'
                 path.write_text(json.dumps(worker_config))

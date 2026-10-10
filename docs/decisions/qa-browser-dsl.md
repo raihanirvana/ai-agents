@@ -194,3 +194,12 @@ source dapat menghasilkan application diagnosis saat opsi nyata hilang. Guard
 mengharuskan literal value pada kutipan source untuk membedakan kasus tersebut
 dari ID record yang ditebak. Mode selection, UAC dan bukti source tetap wajib;
 hasil model bukan jaminan semantik, dan kontrak yang ambigu tetap di QA.
+
+## Diagnostik runner — 10 Oktober 2026
+
+Runner tetap mengeluarkan report setiap test. Kandidat menyimpan screenshot dan
+zip action trace hanya untuk test gagal; test lulus membuang trace tanpa export.
+Trace tidak merekam snapshot DOM atau screenshot per langkah. Eksekusi baseline
+mematikan trace/screenshot karena kegagalan fitur pada base memang diharapkan.
+Laporan baseline input identik dapat dipakai kembali dengan provenance asal;
+QA kandidat tetap dieksekusi baru. Detail: [audit performa](../audits/performance-caches-context-2026-10-10.md).

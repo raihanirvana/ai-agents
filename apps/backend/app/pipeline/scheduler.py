@@ -120,5 +120,7 @@ class PipelineScheduler:
         caps = ({k: v for k, v in pool[-1].limits.items() if k != "budget_key"} if pool else
                 {**project_limits(p, self.limits), **p.workflow['pipeline'].get('budget_limits', {})})
         return dict(project_id=t.project_id, ticket_id=t.id, expected_scope=t.current_version,
-                    lane="execution", role=role, stage=stage, runtime=self.runtime, idempotency_key=key, limits=caps,
+                    lane="interactive" if stage in ('technical_plan', 'technical_review') or
+                        payload.get('task') == 'diagnose' else "execution",
+                    role=role, stage=stage, runtime=self.runtime, idempotency_key=key, limits=caps,
                     budget_pool=BUDGET_POOL, payload=payload, actor="scheduler:pipeline")

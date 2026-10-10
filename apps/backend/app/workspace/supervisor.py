@@ -301,7 +301,10 @@ class WorkspaceSupervisor:
             "duration_s": result.duration_s, "truncated": result.truncated, "image": manifest.image,
             "image_id": image_id, "manifest_digest": manifest.digest,
             "container_network": "none",
-            "dependency_acquisition": "verified-npm-tarballs" if result.network == "egress" else "none",
+            "dependency_acquisition": ('verified-install-snapshot' if result.cache_key else
+                                       'verified-npm-tarballs' if result.network == "egress" else "none"),
+            "execution_kind": "cache_reuse" if result.cache_key else "executed",
+            "cache_key": result.cache_key, "cache_origin": result.cache_origin,
             "limits": {"memory_mb": spec.limits.memory_mb, "cpus": spec.limits.cpus, "pids": spec.limits.pids,
                        "work_mb": spec.limits.work_mb, "tmpfs_mb": spec.limits.tmpfs_mb,
                        "max_snapshot_bytes": spec.limits.max_snapshot_bytes,

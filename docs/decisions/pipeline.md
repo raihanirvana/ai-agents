@@ -437,6 +437,16 @@ Aktivitas menampilkan suite_repaired, contract error, infrastructure, provider
 dan QA gagal. Setelah retry request dan retry job habis, outage provider tetap
 needs_human; belum ada state baru waiting_provider/circuit breaker.
 
+## Checks, rotasi konteks dan pengukuran — 10 Oktober 2026
+
+Developer memiliki run_checks untuk install bila perlu, test dan build dengan
+report ringkas. Submit tetap memverifikasi export source independen. Repo map
+awal memandu read; pergantian turn Hermes memakai checkpoint state tanpa reset
+scope/lease/budget. QA prompt generik diringkas dan diagnosis memakai lane ringan;
+browser/build tetap execution. Telemetry/CLI memisahkan fase/wait/usage serta
+menandai job lama tanpa data. Implementasi belum diverifikasi pada run nyata:
+[audit lanjutan](../audits/developer-checks-qa-context-telemetry-2026-10-10.md).
+
 ## Demo policy dan dependency prefetch
 
 DEMO_UNLIMITED_BUDGETS=1 adalah opt-in konfigurasi lokal; .env.example default 0.
@@ -455,8 +465,11 @@ tarball SHA512 tervalidasi ke cache supervisor, tidak menjalankan npm/kode targe
 Failure warming dicatat sebagai cache_status unavailable; install aktual tetap
 bertanggung jawab atas dependency dan evidence. Directory punya resource owner,
 cleanup/recovery durable dan cancel/deadline. Existing/custom repo tidak diprefetch.
-Prefetch dan install yang bersamaan masih dapat mengunduh cache miss yang sama;
-belum ada cache node_modules/environment mutable ataupun cache hasil QA.
+Prefetch dan install yang bersamaan masih dapat mengunduh cache miss yang sama.
+Sejak 10 Oktober, snapshot privat hasil fixed installer dan artefak baseline
+dapat digunakan kembali untuk input identik; hasil QA kandidat tetap dieksekusi.
+Detail invalidasi, provenance dan batas verifikasi:
+[audit performa](../audits/performance-caches-context-2026-10-10.md).
 
 ## Handoff dan batas verifikasi
 

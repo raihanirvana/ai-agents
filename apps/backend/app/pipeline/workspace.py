@@ -65,6 +65,16 @@ class FencedWorkspace(WorkspaceSupervisor):
         except Exception:
             return True
 
+    def _record_command(self, *args, **kwargs):
+        record = super()._record_command(*args, **kwargs)
+        from app.workers.telemetry import record_phase
+        phase = record['label'].rsplit('-', 1)[-1]
+        if phase in ('install', 'build', 'test'):
+            record_phase(self.ctx, phase, record['duration_s'],
+                status='passed' if record['exit_code'] == 0 else 'failed',
+                cache_hit=record['execution_kind'] == 'cache_reuse')
+        return record
+
 
 def rebase_onto(broker, candidate, base, dest):
     """Export the new base and re-apply the candidate's own diff (all or nothing). False means a conflict: the
@@ -113,9 +123,11 @@ def unpack_tree(files, root):
 
 
 class ProductWorkspace:
-    def __init__(self, db, store, workflow, root, harness, redactor):
+    def __init__(self, db, store, workflow, root, harness, redactor, *, cache_enabled=True):
         self.db, self.store, self.workflow = db, store, workflow
         self.root, self.harness, self.redactor = Path(root).resolve(), harness, redactor
+        from .execution_cache import ExecutionCache
+        self.execution_cache = ExecutionCache(self, enabled=cache_enabled)
 
     def configuration(self, identity):
         with self.db.read() as s:
@@ -383,11 +395,11 @@ class ProductWorkspace:
             records.append(record)
         return records
 
-    def run_gate(self, ctx, sup, started, manifest, source):
+    def run_gate(self, ctx, sup, started, manifest, source, *, image_id=None):
         spec, _, local = sup._require_active(started.ref)
         command = manifest.commands['test']
         seq, generation = sup._reserve_command(local, spec, ctx.lease.generation)
-        image = sup.sandbox.image_id(manifest.image)
+        image = image_id or sup.sandbox.image_id(manifest.image)
         result = sup.sandbox.run(name=sup.sandbox.container_name(spec.project_id, spec.run_id, generation),
             image=image, source=source, argv=list(command.argv), network=command.network, limits=spec.limits,
             env=manifest.env, labels=sup._labels(spec, generation), timeout_s=command.timeout_s,
@@ -399,7 +411,74 @@ class ProductWorkspace:
             'infrastructure_failure': result.timed_out or result.cancelled or result.oom_killed or result.truncated,
             'exit_code': result.exit_code, 'command': report}
 
-    def base_build(self, ctx):
+    def base_build(self, ctx, *, image_id=None):
+        from app.workers.telemetry import measure
+        with measure(ctx, 'baseline_build') as metric:
+            result = self._cached_base_build(ctx, image_id=image_id)
+            if result.get('applicable') and result.get('status') != 'built':
+                metric['status'] = 'failed'
+            return result
+
+    def _cached_base_build(self, ctx, *, image_id=None):
+        """Reuse exact immutable baseline bytes/checks; no candidate QA/approval is reused."""
+        from .execution_cache import execution_policy
+        identity = ctx.queue.verify(ctx.lease)
+        manifest, base = self.configuration(identity)
+        image = image_id or self.harness.sandbox.image_id(manifest.image)
+        key = digest_of({'base_sha': base, 'manifest': manifest.to_dict(), 'image_id': image,
+                         'runner': self.harness.identity(),
+                         'policy': execution_policy(), 'fake': identity['fake']})
+        saved = self.execution_cache.read(ctx, 'baseline-build', key)
+        if saved:
+            from app.persistence.artifacts import ArtifactError
+            from app.workspace.errors import WorkspaceError
+            try:
+                artifact_id, document = saved
+                value = document['value']
+                result = value['result']
+                gate = result.get('gate', {})
+                if (result.get('base_sha') == base and result.get('status') == 'built'
+                        and gate.get('status') == 'passed' and gate.get('infrastructure_failure') is False):
+                    # The origin report must still be available, not just cached bytes.
+                    with self.db.read() as s:
+                        self.store.read_bytes(s, result['artifact_id'])
+                    sup, started, current_manifest = self.start(ctx)
+                    if started.spec.base_sha != base or current_manifest.digest != manifest.digest:
+                        raise ValueError('base or manifest changed during baseline cache restore')
+                    site = sup.run_dir(started.ref) / 'baseline-cache' / 'site'
+                    unpack_tree(value['site_files'], site)
+                    if fsutil.sha256_tree(site, fsutil.scan_tree(site)) != value['build_digest']:
+                        raise ValueError('cached baseline bytes do not match build digest')
+                    with self.db.write() as s:
+                        ctx.queue.verify_identity(s, identity)
+                        self._post(s, identity, 'baseline-cache:' + identity['job_id'] + ':' + str(identity['generation']),
+                            'Reused immutable accepted-base build and repository checks; original execution retained.',
+                            [artifact_id, result['artifact_id']], 'baseline_evidence', base_sha=base,
+                            baseline_artifact_id=result['artifact_id'], cache_hit=True, cache_origin=document['origin'])
+                    return {**result, 'site': site, 'cache_hit': True, 'cache_artifact_id': artifact_id,
+                            'cache_origin': document['origin']}
+            except (ArtifactError, WorkspaceError, ValueError, KeyError, TypeError, AttributeError, OSError):
+                ctx.log('execution.cache baseline-build invalid/unavailable; rebuilding')
+        result = self._base_build_uncached(ctx, image_id=image)
+        current_manifest, current_base = self.configuration(identity)
+        gate = result.get('gate', {})
+        if (self.execution_cache.enabled and result.get('status') == 'built' and gate.get('status') == 'passed'
+                and gate.get('infrastructure_failure') is False and current_base == base == result['base_sha']
+                and current_manifest.digest == manifest.digest and not identity['fake']):
+            from app.workspace.errors import WorkspaceError
+            try:
+                files = pack_tree(result['site'])
+            except (WorkspaceError, ValueError):
+                ctx.log('execution.cache baseline-build not stored: unsupported output tree')
+            else:
+                cached = self.execution_cache.write(ctx, 'baseline-build', key, {
+                    'result': {k: v for k, v in result.items() if k not in ('source', 'site')},
+                    'site_files': files,
+                    'build_digest': fsutil.sha256_tree(result['site'], fsutil.scan_tree(result['site']))})
+                result['cache_artifact_id'] = cached
+        return {**result, 'cache_hit': False}
+
+    def _base_build_uncached(self, ctx, *, image_id=None):
         """Run the same pinned commands on accepted base, in a fresh sandbox without target report access."""
         identity = ctx.queue.verify(ctx.lease)
         sup, started, manifest = self.start(ctx)
@@ -411,7 +490,7 @@ class ProductWorkspace:
             return {'applicable': False, 'reason': 'initial empty technical base', 'base_sha': started.spec.base_sha}
         sup._chmod_for_sandbox(source)
         spec, _, local = sup._require_active(started.ref)
-        image = sup.sandbox.image_id(manifest.image)
+        image = image_id or sup.sandbox.image_id(manifest.image)
         result = {'applicable': True, 'base_sha': started.spec.base_sha, 'status': 'incomplete', 'source': source}
         for phase in ('install', 'build'):
             cmd = manifest.commands[phase]
@@ -426,7 +505,7 @@ class ProductWorkspace:
                 break
         else:
             result.update(status='built', site=source / manifest.build_output,
-                          gate=self.run_gate(ctx, sup, started, manifest, source))
+                          gate=self.run_gate(ctx, sup, started, manifest, source, image_id=image))
         with self.db.write() as s:
             identity = ctx.queue.identity(s, ctx.lease)
             records = self.command_reports(s, identity, local.dir / 'evidence')

@@ -1,5 +1,23 @@
 # Worker, lane, dan recovery — DEV-004
 
+## Lane ringan dan polling — 10 Oktober 2026
+
+Job pipeline baru `technical_plan`/`technical_review` menggunakan lane interactive
+karena tidak mengeksekusi build/browser target. Dengan capacity default dua,
+claim membatasi TL ke satu slot supaya chat PO tetap memiliki capacity.
+Pekerjaan berat tetap memakai satu slot execution. Job lama tidak dipindahkan.
+Cleanup yang belum selesai tetap dihitung sebagai penghuni lane. QA dengan
+payload task diagnose juga memakai lane ringan tanpa mengubah stage/domain
+binding QA. Background TL/diagnosis berbagi satu slot default; chat tetap
+memiliki satu slot. Telemetry phase/wait dicatat lewat log dan transition,
+tanpa polling metric baru; retry tidak menyalin aggregate parent.
+CLI read-only dan batasnya: [audit lanjutan](../audits/developer-checks-qa-context-telemetry-2026-10-10.md).
+
+Reap thread selesai memeriksa ledger cleanup lewat satu query batch; thread yang
+masih aktif tidak memicu read per handle. Claim memakai UNION running/cleanup
+agar query dapat menggunakan index. Detail dan verifikasi yang belum dilakukan:
+[audit performa](../audits/performance-caches-context-2026-10-10.md).
+
 Tanggal: 5 Oktober 2026. Pelaksana: Claude (Opus 5.5). Status implementasi: DONE.
 Review independen implementasi awal oleh Codex: **NEEDS_FIX**, 5 Oktober 2026.
 Temuan sudah diperbaiki oleh Codex dan diverifikasi dengan regresi; diff fix belum mendapat
