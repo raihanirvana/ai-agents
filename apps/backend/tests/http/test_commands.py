@@ -50,17 +50,18 @@ def test_concurrent_retry_and_competing_revisions(api):
 def test_chat_is_atomic_labelled_redacted_and_retryable(api, monkeypatch):
     p = api.project()
     path, body = f"/projects/{p.id}/messages", {"expected_revision": p.revision, "body": f"Build {SECRET}"}
+    initial_jobs = count(api, Job)  # project creation now enqueues runner setup
     original = JobQueue.enqueue
     monkeypatch.setattr(JobQueue, "enqueue", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError(SECRET)))
     r = api.cmd(path, body, "chat")
     assert r.status_code == 500 and SECRET not in r.text
-    assert count(api, Message) == 0 and count(api, Job) == 0
+    assert count(api, Message) == 0 and count(api, Job) == initial_jobs
     monkeypatch.setattr(JobQueue, "enqueue", original)
     first = api.cmd(path, body, "chat")
     assert first.status_code == 200, first.text
     assert SECRET not in first.text
     assert api.cmd(path, body, "chat").json() == first.json()
-    assert count(api, Message) == 1 and count(api, Job) == 1
+    assert count(api, Message) == 1 and count(api, Job) == initial_jobs + 1
     j = api.client.get(f"/runs/{first.json()['job_id']}").json()["run"]
     assert j["runtime"] == "structured:fake" and j["fake"] is True
     with api.db.read() as s:

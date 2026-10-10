@@ -58,10 +58,11 @@ def test_command_timeout_stops_the_container(real_sup, manifest):
 def test_cancel_while_tool_is_active_kills_container_and_archives(real_sup, manifest):
     run = start(real_sup, manifest)
     box = {}
-    thread = threading.Thread(target=lambda: box.update(result=sh(real_sup, run, "echo started; sleep 120")))
+    thread = threading.Thread(target=lambda: box.update(result=sh(real_sup, run, "echo started; touch /tmp/command-started; sleep 120")))
     thread.start()
     for _ in range(100):
-        if real_sup.sandbox.owned(run_id=run.ref.run_id, include_stopped=False):
+        rows = real_sup.sandbox.owned(run_id=run.ref.run_id, include_stopped=False)
+        if rows and real_sup.sandbox._docker('exec', rows[0]['name'], 'test', '-f', '/tmp/command-started', check=False).returncode == 0:
             break
         time.sleep(0.1)
     else:
@@ -111,10 +112,13 @@ echo marker > /work/note.txt
 
 def test_planted_symlink_fifo_and_git_dir_from_real_container_are_rejected(real_sup, manifest):
     run = start(real_sup, manifest)
-    sh(real_sup, run, "ln -s /etc/passwd evil; mkfifo pipe; mkdir -p .git/hooks; echo 'touch /tmp/pwned' > .git/hooks/pre-commit")
+    source = real_sup.src_dir(run.ref)
+    (source / 'safe.txt').write_text('original')
+    rejected = sh(real_sup, run, "ln -s /etc/passwd evil; mkfifo pipe; mkdir -p .git/hooks; echo 'touch /tmp/pwned' > .git/hooks/pre-commit")
     before = real_sup.broker("demo").refs()
-    with pytest.raises(PathViolation):
-        real_sup.submit_candidate(run.ref, run.credential, "evil")
+    assert rejected.exit_code != 0
+    assert (source / 'safe.txt').read_text() == 'original'
+    assert not any((source / name).exists() or (source / name).is_symlink() for name in ('evil', 'pipe', '.git'))
     assert real_sup.broker("demo").refs() == before
     assert not os.path.exists("/tmp/pwned")
 

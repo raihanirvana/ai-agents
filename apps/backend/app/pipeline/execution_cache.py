@@ -66,11 +66,13 @@ class ExecutionCache:
                 'execution_cache', cache_kind=kind, cache_key=key, cache_hit=False)
             return row.id
 
-    def baseline_browser(self, ctx, site, target_digest, suite, node_image, runner, *, fake=False):
+    def baseline_browser(self, ctx, site, target_digest, suite, node_image, runner, *, fake=False,
+                         legacy_locators=False):
         started = time.monotonic()
         key = digest_of({'target_digest': target_digest, 'suite_digest': suite.digest,
                          'node_image': node_image, 'runner': runner, 'fake': fake,
-                         'policy': execution_policy(), 'schema': 1})
+                         'policy': execution_policy(), 'schema': 1,
+                         **({'locator_semantics': 'legacy_engine'} if legacy_locators else {})})
         saved = self.read(ctx, 'baseline-browser', key)
         if saved:
             artifact_id, document = saved
@@ -93,7 +95,8 @@ class ExecutionCache:
                 pass
             ctx.log('execution.cache baseline-browser invalid/unavailable; executing')
         proof = self.workspace.harness.run(ctx, site, target_digest, suite, node_image,
-                                          expected_runner=runner, diagnostics=False)
+                                          expected_runner=runner, diagnostics=False,
+                                          legacy_locators=legacy_locators)
         proof.pop('diagnostics', None)
         if not fake and proof['status'] in ('passed', 'failed') and proof['infrastructure_failure'] is False:
             artifact_id = self.write(ctx, 'baseline-browser', key, proof)

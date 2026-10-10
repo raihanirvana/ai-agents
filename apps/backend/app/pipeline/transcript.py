@@ -64,7 +64,7 @@ def receipt(name, result, text):
     if name == 'run_checks':
         summary['artifact_id'] = result.get('artifact_id')
         summary['phases'] = [{k: phase[k] for k in ('phase', 'status', 'exit_code',
-            'repository_gate', 'cache_hit', 'error_excerpt') if k in phase}
+            'repository_gate', 'cache_hit', 'error_excerpt', 'missing_testids') if k in phase}
             for phase in result.get('phases', []) if isinstance(phase, dict)]
     if result.get('error') or result.get('exit_code', 0) != 0:
         # Keep explicit failure facts; compression never turns a failure into success.

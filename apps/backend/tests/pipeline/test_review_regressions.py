@@ -47,7 +47,7 @@ def test_a_lead_reply_to_a_pipeline_question_spends_the_pipeline_budget(world):
     t = world.approve(world.new())
     scheduler, queue = configure(world)
     job_id = scheduler.tick()[0]
-    lease = queue.claim("worker", "execution", capacity=1, runtimes=("pipeline",))
+    lease = queue.claim("worker", "interactive", capacity=2, runtimes=("pipeline",))
     identity = queue.verify(lease)
     reply_id = Threads(world.db, queue)._enqueue_reply("message-1", {**identity, "fake": False}, "technical-lead", "long")
     with world.db.read() as s:
@@ -63,7 +63,7 @@ def test_pipeline_budget_extension_preserves_spending_and_does_not_extend_chat(w
     scheduler.limits = {**DEFAULT_LIMITS, "model_calls": 1}
     job_id = scheduler.tick()[0]
     chat = chat_revise(queue, t, "api-chat:independent-extension")
-    lease = queue.claim("worker", "execution", capacity=1, runtimes=("pipeline",))
+    lease = queue.claim("worker", "interactive", capacity=2, runtimes=("pipeline",))
     queue.reserve(lease, "model")
     with pytest.raises(BudgetExhausted):
         queue.reserve(lease, "model")
@@ -75,7 +75,7 @@ def test_pipeline_budget_extension_preserves_spending_and_does_not_extend_chat(w
         assert retry.runtime_ref["budget_pool"] == "pipeline"
         assert queue.budget_usage(s, retry)["model_calls"] == 1
         assert s.get(Job, chat.id).limits["model_calls"] == CHAT_LIMITS["model_calls"]
-    resumed = queue.claim("worker", "execution", capacity=1, runtimes=("pipeline",))
+    resumed = queue.claim("worker", "interactive", capacity=2, runtimes=("pipeline",))
     assert resumed.job_id == retry_id
     queue.reserve(resumed, "model")
     with pytest.raises(BudgetExhausted):

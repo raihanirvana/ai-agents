@@ -208,6 +208,8 @@ class Supervisor:
             # Cooperative completion does not excuse lingering children.
             try:
                 self.queue.finalize_usage(lease.job_id, lease.generation, {"active_s": handle.charge_delta()})
+                if not ctx.flush_metrics():
+                    ctx.log("phase metrics unavailable: final flush failed")
                 clean = ctx.stop_resources()
                 with handle.lock:
                     stop_thread = handle.stop_thread
@@ -296,8 +298,14 @@ class Supervisor:
             if not handle.thread.is_alive() or handle.end_state:
                 continue
             delta = handle.charge_delta()
-            status = self.queue.heartbeat(handle.lease, delta)
+            metrics = handle.ctx.take_metrics()
+            try:
+                status = self.queue.heartbeat(handle.lease, delta, metrics=metrics)
+            except BaseException:
+                handle.ctx.restore_metrics(metrics)
+                raise
             if status == "revoked":
+                handle.ctx.restore_metrics(metrics)  # flushed when the run ends
                 self.queue.finalize_usage(handle.lease.job_id, handle.lease.generation, {"active_s": delta})
             if status != "ok":  # revoked (cancel/scope change/recovery) or budget exhausted
                 handle.ctx.log(f"supervisor stopping run: {status}")

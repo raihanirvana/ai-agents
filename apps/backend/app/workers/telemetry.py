@@ -10,20 +10,50 @@ PHASES = frozenset({'model', 'tool', 'provider_slot_wait', 'install', 'test', 'b
     'queue_wait', 'user_wait', 'provider_quota_wait'})
 
 
-def accumulate(job, metric, generation):
+def validate(metric):
     phase, seconds = metric.get('phase'), metric.get('duration_s')
     if (phase not in PHASES or type(seconds) not in (int, float) or
             not math.isfinite(seconds) or seconds < 0):
         raise ValueError('phase telemetry requires a known phase and finite nonnegative duration')
+    count = metric.get('_samples', 1)
+    if type(count) is not int or count < 1:
+        raise ValueError('metric sample count must be a positive integer')
+    for name in ('_failures', '_cache_hits'):
+        value = metric.get(name, 0)
+        if type(value) is not int or not 0 <= value <= count:
+            raise ValueError('metric sample totals must be bounded by sample count')
+    maximum = metric.get('_max_s', seconds)
+    if type(maximum) not in (int, float) or not math.isfinite(maximum) or not 0 <= maximum <= seconds:
+        raise ValueError('metric maximum must be finite and bounded by total duration')
+    return phase, seconds
+
+
+def compact(metrics):
+    """Bound failed-flush memory to one aggregate per phase, without losing samples."""
+    result = {}
+    for metric in metrics:
+        phase, seconds = validate(metric)
+        row = result.setdefault(phase, {'phase': phase, 'duration_s': 0.0, '_samples': 0,
+            '_failures': 0, '_cache_hits': 0, '_max_s': 0.0})
+        row['duration_s'] += seconds
+        row['_samples'] += metric.get('_samples', 1)
+        row['_failures'] += metric.get('_failures', int(metric.get('status') == 'failed'))
+        row['_cache_hits'] += metric.get('_cache_hits', int(metric.get('cache_hit') is True))
+        row['_max_s'] = max(row['_max_s'], metric.get('_max_s', seconds))
+    return list(result.values())
+
+
+def accumulate(job, metric, generation):
+    phase, seconds = validate(metric)
     ref = dict(job.runtime_ref or {})
     telemetry = dict(ref.get('telemetry', {}))
     phases = dict(telemetry.get('phases', {}))
     previous = phases.get(phase, {})
-    phases[phase] = {'count': previous.get('count', 0) + 1,
+    phases[phase] = {'count': previous.get('count', 0) + metric.get('_samples', 1),
         'total_s': round(previous.get('total_s', 0) + seconds, 6),
-        'max_s': max(previous.get('max_s', 0), round(seconds, 6)),
-        'failed': previous.get('failed', 0) + int(metric.get('status') == 'failed'),
-        'cache_hits': previous.get('cache_hits', 0) + int(metric.get('cache_hit') is True),
+        'max_s': max(previous.get('max_s', 0), round(metric.get('_max_s', seconds), 6)),
+        'failed': previous.get('failed', 0) + metric.get('_failures', int(metric.get('status') == 'failed')),
+        'cache_hits': previous.get('cache_hits', 0) + metric.get('_cache_hits', int(metric.get('cache_hit') is True)),
         'last_generation': generation}
     job.runtime_ref = {**ref, 'telemetry': {**telemetry, 'schema': 1, 'phases': phases}}
 

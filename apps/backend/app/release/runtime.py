@@ -99,9 +99,9 @@ class ReleaseRuntime:
         except Exception as exc:  # noqa: BLE001
             raise ReleaseBlocked(f"runner manifest is invalid: {exc}") from exc
 
-    def combined_suite(self, entries):
+    def combined_suite(self, entries, *, include_locator_semantics=False):
         """The regression of a release is the union of the QA suites that accepted each included ticket."""
-        tests, required = [], set()
+        tests, required, legacy_ids = [], set(), []
         with self.db.read() as s:
             for entry in entries:
                 candidate = s.get(Candidate, entry["candidate_id"])
@@ -115,6 +115,8 @@ class ReleaseRuntime:
                     name = f"t{entry['number']}-{test.id}"
                     if len(name) > 64:
                         name = f"t{entry['number']}-{digest_of(test.id)[:20]}"
+                    if not target.get('ui_contract'):
+                        legacy_ids.append(name)
                     tests.append(BrowserTest(id=name, purpose=test.purpose, steps=test.steps,
                                              uac=[f"{entry['ticket_id']}:{u}" for u in test.uac]))
         required = {f"{e['ticket_id']}:{u['id']}" for e in entries for u in e["uac"] if u.get("mode", "automated") == "automated"}
@@ -123,7 +125,7 @@ class ReleaseRuntime:
         if len({t.id for t in tests}) != len(tests):
             raise ReleaseBlocked("regression test IDs collide between tickets")
         suite = QaPlan.model_construct(kind="qa_plan", summary=f"Release regression of {len(entries)} accepted tickets", tests=tests)
-        return suite, required
+        return (suite, required, sorted(legacy_ids)) if include_locator_semantics else (suite, required)
 
     def verify_commit(self, ctx, identity, *, commit_sha, entries, manifest, accepted_tip, extra_target=None, label="release",
                       regression_entries=None):
@@ -135,7 +137,7 @@ class ReleaseRuntime:
         harness = DockerHarness(sup.sandbox, timeout_s=self.harness_timeout_s)
         helper = ProductWorkspace(self.db, self.store, self.workflow, self.root, harness, self.redactor)
         regression_entries = entries if regression_entries is None else regression_entries
-        suite, required = self.combined_suite(regression_entries)
+        suite, required, legacy_ids = self.combined_suite(regression_entries, include_locator_semantics=True)
         run_id = "run-" + uuid.uuid4().hex[:12]
         ref = RunRef(identity["project_id"], run_id)
         descriptor = {"kind": "pipeline_workspace", "project_id": ref.project_id, "run_id": run_id,
@@ -171,6 +173,7 @@ class ReleaseRuntime:
                 "build_artifact_id": build.id, "build_digest": built["build_digest"], "scope_digest": scope_digest,
                 "regression_scope": regression_entries, "regression_scope_digest": self.workflow.scope_digest(regression_entries),
                 "suite_artifact_id": suite_art.id, "suite_digest": suite.digest, "gate_artifact_id": gate_doc.id,
+                "legacy_test_ids": legacy_ids,
                 "toolchain_digest": digest_of(built["toolchain"]), "config_digest": digest_of(manifest.effective_config()),
                 "fixture_digest": digest_of(manifest.fixture), "migration_digest": digest_of(manifest.migrations),
                 "runner": runner, "execution_manifest": manifest.to_dict(), "node_image_id": built["toolchain"]["image_id"],
@@ -181,7 +184,7 @@ class ReleaseRuntime:
                     "technical_review_evidence_ids": document.get("technical_review_evidence_ids", [])})
             logs = [r[k] for r in commands for k in ("stdout_file_artifact_id", "stderr_file_artifact_id")]
         proof = ctx.tool_call("combined_regression", lambda: harness.run(ctx, site, target.checksum, suite,
-            built["toolchain"]["image_id"], expected_runner=runner))
+            built["toolchain"]["image_id"], expected_runner=runner, legacy_test_ids=legacy_ids))
         covered = set(proof["coverage"])
         missing = sorted(required - covered)
         passed = proof["status"] == "passed" and gate["status"] == "passed" and not gate.get("infrastructure_failure") and not missing

@@ -116,7 +116,7 @@ def test_preflight_reuses_pinned_proof_and_cannot_shortcut_normal_checks(agent_e
         outcome, reused = runtime._concern_preflight(ctx, identity, candidate, target, current, [], tmp_path)
         assert outcome is None and reused['status'] == proof['status']
         assert reused['preflight_evidence_artifact_ids']
-    assert calls == {'browser': 1, 'model': 1 if mode == 'abstain' else 0}
+    assert calls == {'browser': 1, 'model': 0}  # preflight observes; diagnosis owns all revisions
     with env.db.read() as s:
         assert s.scalar(select(Verification)) is None
     candidate.target_digest = 'e' * 64
@@ -162,14 +162,24 @@ def run_stage(env, runtime, scheduler, ticket):
         env.queue.finish_cleanup(ctx.lease.job_id, ctx.lease.generation)
 
 
-def test_real_browser_qualified_handoff_repins_before_baseline_and_never_passes_fake_qa(agent_env, tmp_path, monkeypatch):
+def test_real_browser_qualified_handoff_uses_generic_revision_and_never_passes_fake_qa(agent_env, tmp_path, monkeypatch):
     env = agent_env
     env.queue.lease_s = 150
     runtime, _, scheduler = setup(env, tmp_path, ConcernDriver())
     env.script(plan(), {'kind': 'review', 'accept': True, 'summary': 'UI serves scope',
                        'test_concerns': [concern()]},
-               {'kind': 'qa_selector_repair', 'summary': 'Use observed borrower control',
-                'bindings': [{'test_id': 'loan', 'candidate_index': 0, 'reason': 'Same borrower input in DOM and source'}]})
+               {'kind': 'qa_diagnosis', 'fault': 'test', 'summary': 'Selector differs from shipped control',
+                'findings': [{'test_id': 'loan', 'fault': 'test', 'expected': 'Borrower input',
+                    'observed': 'The borrower-input control exists instead of the guessed ID',
+                    'reason': 'Source and DOM identify the same borrower control'}]},
+               {'kind': 'qa_suite_revision', 'summary': 'Use observed borrower control',
+                'tests': [{**suite().tests[0].model_dump(), 'steps': [
+                    {**suite().tests[0].steps[0].model_dump(), 'selector': '.borrower-input'},
+                    *[step.model_dump() for step in suite().tests[0].steps[1:]]]}],
+                'mappings': [{'test_id': 'loan', 'origin_indexes': [0, 1, 2]}],
+                'witnesses': [{'test_id': 'loan', 'original_step': 0, 'new_step': 0,
+                    'source_path': 'src/app.js', 'source_excerpt': SOURCE['src/app.js'],
+                    'reason': 'Same borrower input in source and observed DOM'}]})
     ticket = env.approved_ticket()
     for _ in range(4):
         assert run_stage(env, runtime, scheduler, ticket).status == 'succeeded'
@@ -179,30 +189,32 @@ def test_real_browser_qualified_handoff_repins_before_baseline_and_never_passes_
         handoff = next(m for m in s.scalars(select(Message)) if m.meta.get('intent') == 'candidate_handoff')
         assert handoff.body == 'Open the app and borrow a book.'
         assert handoff.meta['test_concerns'][0]['source_excerpt'] == SOURCE['src/app.js']
-    # The early correction must happen before any expensive baseline build.
-    original_base = runtime.workspace.base_build
-    def forbidden_base(*_):
-        raise AssertionError('baseline must wait for the corrected suite')
-    monkeypatch.setattr(runtime.workspace, 'base_build', forbidden_base)
+    # Advisory preflight is evidence only. Completed verification precedes diagnosis.
+    calls_before = len(env.provider.requests)
     outcome = run_stage(env, runtime, scheduler, ticket)
     assert outcome.status == 'succeeded', outcome.error
-    assert outcome.result['repair_kind'] == 'concern_observed_fill_selector'
+    assert outcome.result['diagnosis_required'] is True
+    assert len(env.provider.requests) == calls_before
+    outcome = run_stage(env, runtime, scheduler, ticket)
+    assert outcome.status == 'succeeded', outcome.error
+    assert outcome.result['repair_kind'] == 'suite_revision'
     with env.db.read() as s:
         current = s.scalar(select(Candidate))
         assert current.target_digest != old_digest and current.commit_sha == old.commit_sha
         assert current.status == 'review_approved'
-        assert s.scalar(select(Verification)) is None  # preflight never counts as QA pass
+        assert s.scalar(select(Verification)).status != 'passed'
         target = json.loads(env.store.read_bytes(s, current.target_artifact_id))
         corrected = json.loads(env.store.read_bytes(s, target['suite_artifact_id']))
         expected = suite().model_dump()
         expected['tests'][0]['steps'][0]['selector'] = '.borrower-input'
-        assert corrected == expected
+        assert corrected['tests'] == expected['tests']
     assert env.world.ticket(ticket.id).workflow['repair_cycles'] == 0
-    monkeypatch.setattr(runtime.workspace, 'base_build', original_base)
     outcome = run_stage(env, runtime, scheduler, ticket)
     assert outcome.status == 'failed'  # explicit fake provider still cannot advance UAT
     with env.db.read() as s:
-        verification = s.scalar(select(Verification))
+        verifications = list(s.scalars(select(Verification)))
+        assert len(verifications) == 2
+        verification = next(v for v in verifications if v.target_digest == current.target_digest)
         assert verification.counts['passed'] == 1 and verification.results['fake_provider'] is True
         assert verification.status == 'incomplete'
     assert env.world.ticket(ticket.id).phase == 'qa'

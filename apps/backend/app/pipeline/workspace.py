@@ -289,12 +289,19 @@ class ProductWorkspace:
                 'job_id': identity['job_id'], 'generation': identity['generation'], 'fake': identity['fake'], **metadata}))
         return message
 
+    @staticmethod
+    def latest_intent(s, identity, intent, **meta):
+        """Newest conversation message of one intent for this exact scope, filtered in SQL."""
+        from app.persistence.messages import not_runtime_log
+        query = select(Message).where(Message.ticket_id == identity['ticket_id'], not_runtime_log(),
+            func.json_extract(Message.meta, '$.intent') == intent,
+            func.json_extract(Message.meta, '$.scope_version') == identity['scope_version'],
+            *(func.json_extract(Message.meta, '$.' + key) == value for key, value in meta.items()))
+        return s.scalar(query.order_by(Message.seq.desc()).limit(1))
+
     def suite(self, identity):
         with self.db.read() as s:
-            rows = list(s.scalars(select(Message).where(Message.ticket_id == identity['ticket_id'])
-                                  .order_by(Message.seq.desc())))
-            row = next((m for m in rows if m.meta.get('intent') == 'qa_plan' and
-                        m.meta.get('scope_version') == identity['scope_version']), None)
+            row = self.latest_intent(s, identity, 'qa_plan')
             if not row:
                 raise ValueError('no persisted QA suite for current scope')
             suite = QaPlan.model_validate(json.loads(self.store.read_bytes(s, row.attachment_ids[-1])))
@@ -306,10 +313,7 @@ class ProductWorkspace:
         """Latest plan for the exact approved scope; never borrow from another ticket/version."""
         from app.agents.ui_contract import UiContract
         with self.db.read() as s:
-            rows = s.scalars(select(Message).where(Message.ticket_id == identity['ticket_id'])
-                             .order_by(Message.seq.desc()))
-            row = next((m for m in rows if m.meta.get('intent') == 'technical_plan' and
-                        m.meta.get('scope_version') == identity['scope_version']), None)
+            row = self.latest_intent(s, identity, 'technical_plan')
             value = (row.meta.get('plan') or {}).get('ui_contract') if row else None
             return UiContract.model_validate(value) if value is not None else None
 
@@ -362,9 +366,7 @@ class ProductWorkspace:
             source = sup.run_dir(started.ref) / 'verify' / built['build_id'] / 'src'
             gate = self.run_gate(ctx, sup, started, manifest, source)
             with self.db.read() as s:
-                baseline = next((m for m in s.scalars(select(Message).where(Message.ticket_id == identity['ticket_id'])
-                    .order_by(Message.seq.desc())) if m.meta.get('intent') == 'baseline_evidence' and
-                    m.meta.get('scope_version') == identity['scope_version'] and m.meta.get('base_sha') == record['base_sha']), None)
+                baseline = self.latest_intent(s, identity, 'baseline_evidence', base_sha=record['base_sha'])
                 if baseline:
                     base_report = json.loads(self.store.read_bytes(s, baseline.meta['baseline_artifact_id']))
                     required = set((base_report.get('gate') or {}).get('executed_test_ids', []))
@@ -461,6 +463,13 @@ class ProductWorkspace:
                 metric['status'] = 'failed'
             return result
 
+    @staticmethod
+    def _cacheable_gate(gate):
+        """Deterministic outcomes only. A failing existing base is cached as evidence;
+        waiver eligibility is still decided by the caller on every use."""
+        return (gate.get('status') in ('passed', 'failed') and gate.get('infrastructure_failure') is False
+                and isinstance(gate.get('counts'), dict))
+
     def _cached_base_build(self, ctx, *, image_id=None):
         """Reuse exact immutable baseline bytes/checks; no candidate QA/approval is reused."""
         from .execution_cache import execution_policy
@@ -480,7 +489,7 @@ class ProductWorkspace:
                 result = value['result']
                 gate = result.get('gate', {})
                 if (result.get('base_sha') == base and result.get('status') == 'built'
-                        and gate.get('status') == 'passed' and gate.get('infrastructure_failure') is False):
+                        and self._cacheable_gate(gate)):
                     # The origin report must still be available, not just cached bytes.
                     with self.db.read() as s:
                         self.store.read_bytes(s, result['artifact_id'])
@@ -504,8 +513,8 @@ class ProductWorkspace:
         result = self._base_build_uncached(ctx, image_id=image)
         current_manifest, current_base = self.configuration(identity)
         gate = result.get('gate', {})
-        if (self.execution_cache.enabled and result.get('status') == 'built' and gate.get('status') == 'passed'
-                and gate.get('infrastructure_failure') is False and current_base == base == result['base_sha']
+        if (self.execution_cache.enabled and result.get('status') == 'built' and self._cacheable_gate(gate)
+                and current_base == base == result['base_sha']
                 and current_manifest.digest == manifest.digest and not identity['fake']):
             from app.workspace.errors import WorkspaceError
             try:

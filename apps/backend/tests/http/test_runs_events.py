@@ -38,10 +38,13 @@ def test_sse_replay_cursor_snapshot_and_no_duplicate_effects(api):
 
 def test_replay_window_and_more_than_one_page(api):
     p = api.project()
+    path = f"/projects/{p.id}/events?follow=false"
+    before = len(frames(api.client.get(path).text))
     with api.db.write() as s:
         for i in range(205): append_event(s, p.id, EventSpec("test", "system:test", {"i": i}))
-    path = f"/projects/{p.id}/events?follow=false"
-    assert len(frames(api.client.get(path).text)) == 206
+    replay = frames(api.client.get(path).text)
+    assert len(replay) == before + 205
+    assert [row['payload']['i'] for row in replay if row['type'] == 'test'] == list(range(205))
     api.api.settings = replace(api.api.settings, replay_events=3)
     r = api.client.get(path)
     assert "snapshot_required" in r.text and frames(r.text)[0]["reason"] == "cursor_expired"

@@ -211,6 +211,16 @@ class JobQueue:
                            ticket_id=job.ticket_id, sender="system:supervisor", body=line,
                            meta={"runtime_log": True, "generation": generation})
 
+    def record_metrics(self, job_id: str, generation: int, metrics) -> None:
+        """Batch of observational phase metrics; accepted after revocation like logs."""
+        from .telemetry import accumulate
+        with self.db.write() as s:
+            job = s.get(Job, job_id)
+            if job is None or not 1 <= generation <= job.lease_generation:
+                raise StaleLease("unknown job generation")
+            for metric in metrics:
+                accumulate(job, metric, generation)
+
     def log_bytes(self, job_id: str, generation: int) -> bytes:
         with self.db.read() as s:
             lines = s.scalars(select(Message).where(Message.thread_id == f"job:{job_id}:g{generation}")
@@ -368,8 +378,11 @@ class JobQueue:
             self._event(s, job, "released", lease.owner, reason=reason)
 
     # -- running attempt ---------------------------------------------------------------------
-    def heartbeat(self, lease: Lease, active_delta_s: float) -> str:
-        """Extend the lease and charge active time. Returns 'ok', 'revoked' or 'budget_exhausted'."""
+    def heartbeat(self, lease: Lease, active_delta_s: float, *, metrics=()) -> str:
+        """Extend the lease and charge active time. Returns 'ok', 'revoked' or 'budget_exhausted'.
+
+        Buffered phase metrics ride in the same transaction. A revoked lease
+        does not apply them; the caller flushes them through record_metrics."""
         if not math.isfinite(active_delta_s) or active_delta_s < 0:
             raise ValueError("active time cannot be negative")
         with self.db.write() as s:
@@ -377,6 +390,10 @@ class JobQueue:
                 job = self._fenced(s, lease)
             except StaleLease:
                 return "revoked"
+            if metrics:
+                from .telemetry import accumulate
+                for metric in metrics:
+                    accumulate(job, metric, lease.generation)
             record_usage(s, job.id, {"active_s": active_delta_s})
             if job.limits['active_s'] is not None and self.budget_usage(s, job).get("active_s", 0) >= job.limits["active_s"]:
                 self._stop_for_budget(s, job, "active_s", lease.owner)

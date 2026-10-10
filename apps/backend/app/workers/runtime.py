@@ -61,6 +61,7 @@ class RunContext:
         self.processes: list[tuple[int, str]] = []
         self._stoppers: list = []  # e.g. WorkspaceSupervisor.stop_run for this attempt's containers
         self._log: list[str] = []
+        self._metrics: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._stop_lock = threading.Lock()
         self._stopped = False
@@ -86,8 +87,43 @@ class RunContext:
         with self._lock:
             self._log.append(line)
 
+    # Phase metrics are observational. They are buffered in memory and merged
+    # into the heartbeat transaction (or flushed at the end of the run), so a
+    # model/tool call does not cost one more SQLite write lock per metric.
+    MAX_BUFFERED_METRICS = 256
+
     def record_phase(self, metric) -> None:
-        self.log('phase.metric ' + json.dumps(metric), metric=metric)
+        from .telemetry import validate
+        validate(metric)  # Reject here: a bad metric must never break a heartbeat.
+        with self._lock:
+            self._metrics.append(dict(metric))
+            full = len(self._metrics) >= self.MAX_BUFFERED_METRICS
+        if full:  # Contexts driven without a supervisor heartbeat stay bounded.
+            self.flush_metrics()
+
+    def take_metrics(self) -> list[dict[str, Any]]:
+        with self._lock:
+            metrics, self._metrics = self._metrics, []
+        return metrics
+
+    def restore_metrics(self, metrics: list[dict[str, Any]]) -> None:
+        from .telemetry import compact
+        with self._lock:
+            self._metrics[:0] = metrics
+            if len(self._metrics) >= self.MAX_BUFFERED_METRICS:
+                self._metrics = compact(self._metrics)
+
+    def flush_metrics(self) -> bool:
+        """Persist buffered metrics in one transaction; failure keeps them for the next flush."""
+        metrics = self.take_metrics()
+        if not metrics:
+            return True
+        try:
+            self.queue.record_metrics(self.lease.job_id, self.lease.generation, metrics)
+            return True
+        except Exception:
+            self.restore_metrics(metrics)
+            return False
 
     def log_bytes(self) -> bytes:
         with self._lock:

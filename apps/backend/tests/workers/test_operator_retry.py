@@ -25,7 +25,7 @@ def test_operator_retry_is_idempotent_preserves_root_budget_and_rejects_old_leas
         env.queue.complete(lease, {})
     fresh = claim(env, owner='new-worker')
     assert fresh.job_id == rid
-    with pytest.raises(QueueError, match='already has a retry'):
+    with pytest.raises(QueueError, match='sudah mempunyai attempt lanjutan'):
         env.queue.retry_failed(j.id, user='user:operator', authorization_id='another')
 
 
@@ -36,7 +36,7 @@ def test_agents_and_exhausted_budgets_cannot_use_operator_retry(env):
     with env.db.write() as s:
         old = s.get(Job, j.id)
         old.usage = {'model_calls': old.limits['model_calls']}
-    with pytest.raises(QueueError, match='exhausted budget'):
+    with pytest.raises(QueueError, match='Budget habis'):
         env.queue.retry_failed(j.id, user='user:operator', authorization_id='x')
 
 

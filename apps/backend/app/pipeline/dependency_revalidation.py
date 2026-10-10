@@ -89,8 +89,10 @@ def _run(runtime, ctx, identity):
     target_digest = digest_of({'base_sha': base, 'execution_manifest': manifest.to_dict(),
         'build_digest': fsutil.sha256_tree(baseline['site'], fsutil.scan_tree(baseline['site'])),
         'runner': runner, 'suite_digest': suite.digest, 'dependency': payload})
+    from .harness import legacy_locators
     proof = runtime.workspace.harness.run(ctx, baseline['site'], target_digest, suite,
-        runtime.workspace.harness.sandbox.image_id(manifest.image), expected_runner=runner)
+        runtime.workspace.harness.sandbox.image_id(manifest.image), expected_runner=runner,
+        legacy_locators=legacy_locators(target))
     proof.pop('diagnostics', None)
     receipt = {**proof, 'fake_provider': False, 'uac_changed': False,
         'revalidation_id': payload['revalidation_id'], 'ticket_id': identity['ticket_id'],

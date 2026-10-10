@@ -41,6 +41,11 @@ def remove_owned(sandbox, name, owner):
         time.sleep(0.2)
 
 
+def legacy_locators(target):
+    """Suites pinned before UI contracts keep Playwright engine selector semantics."""
+    return not target.get('ui_contract')
+
+
 def code_digest():
     return digest_of({name: hashlib.sha256((SUITE_DIR / name).read_bytes()).hexdigest()
                       for name in ('acceptance.py', 'static-server.cjs', 'Dockerfile')})
@@ -53,7 +58,11 @@ class DockerHarness:
     def identity(self):
         return {'runner_code_digest': code_digest(), 'runner_image_id': self.sandbox.image_id(self.image)}
 
-    def run(self, ctx, site, target_digest, suite, node_image, *, expected_runner, diagnostics=True):
+    def run(self, ctx, site, target_digest, suite, node_image, *, expected_runner, diagnostics=True,
+            legacy_locators=False, legacy_test_ids=()):
+        legacy_test_ids = sorted(set(legacy_test_ids))
+        if not set(legacy_test_ids) <= {test.id for test in suite.tests}:
+            raise ValueError('legacy locator test IDs must belong to the pinned suite')
         diagnostics_enabled = diagnostics
         identity = self.identity()
         if identity != expected_runner:
@@ -71,7 +80,12 @@ class DockerHarness:
         ctx.add_stopper(cleanup, resource=resource)
         # Plan is supervisor-owned; only the runner receives it, readonly.
         plan_path = Path(site).parent / (invocation + '-plan.json')
-        plan_path.write_text(suite.model_dump_json(), encoding='utf-8')
+        plan = suite.model_dump_json()
+        if legacy_locators:  # Runner input only; the suite and its digest are unchanged.
+            plan = json.dumps({**json.loads(plan), 'locator_semantics': 'legacy_engine'})
+        if legacy_test_ids:
+            plan = json.dumps({**json.loads(plan), 'legacy_test_ids': legacy_test_ids})
+        plan_path.write_text(plan, encoding='utf-8')
         plan_path.chmod(0o444)
         docker = self.sandbox._docker
         common = ['--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',

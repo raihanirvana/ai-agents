@@ -70,7 +70,7 @@ class ReleaseEnv(IntegrationEnv):
             return self.store.put_json(s, project_id=self.pid, kind="report", name="qa-suite.json", meta={"producer": "qa-plan"},
                 document={"kind": "qa_plan", "summary": "ticket suite", "tests": tests}).id
 
-    def accept_ticket(self, title, files, tests, *, manual=()):
+    def accept_ticket(self, title, files, tests, *, manual=(), ui_contract=None):
         """A real commit on the accepted tip -> verified candidate (contract QA) -> user UAT -> integrator fast-forward."""
         w = self.world
         sha = self.commit(files)
@@ -82,7 +82,8 @@ class ReleaseEnv(IntegrationEnv):
         commit, receipt, base = w.commit_receipt(t, ref, sha=sha)
         c = w.w.submit_candidate(dev, t.id, t.revision, ref, commit_artifact_id=commit.id, commit_receipt_id=receipt.id,
                                  base_sha=base, submission_key=f"release-test-{next(SEQ)}")
-        target = w.target(w.ticket(t.id), c, suite_artifact_id=self.suite(tests))
+        target = w.target(w.ticket(t.id), c, suite_artifact_id=self.suite(tests),
+                          **({"ui_contract": ui_contract} if ui_contract is not None else {}))
         lead, ref = w.job(t, "technical-lead")
         w.w.approve_review(lead, t.id, w.ticket(t.id).revision, ref, c.id)
         _, qa = w.job(t, "qa")

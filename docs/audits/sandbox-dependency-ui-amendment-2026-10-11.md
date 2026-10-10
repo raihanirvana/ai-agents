@@ -140,3 +140,88 @@ Referensi primer yang diperiksa:
 [Docker cp](https://docs.docker.com/reference/cli/docker/container/cp/),
 [tmpfs](https://docs.docker.com/engine/storage/tmpfs/),
 [bind mount readonly](https://docs.docker.com/engine/storage/bind-mounts/).
+
+## D. Tindak lanjut review efisiensi (temuan d–h) — 11 Oktober 2026
+
+Status IN_PROGRESS / NOT_REVIEWED. Dikerjakan implementer setelah commit 4c1bd7c;
+belum commit/push, worker tidak di-restart. Bukan independent review.
+
+| Temuan | Perubahan | Bukti |
+| --- | --- | --- |
+| d. Cek UI baru setelah commit + build penuh | `run_checks` menambah phase `ui_contract`: static inventory pada `build_output` workspace Developer sendiri, di bawah lock operasi yang sama dengan build. Output hilang/symlink → failed. Advisory: submit tetap memeriksa build kandidat independen; `qa_pass` selalu false. Ringkasan transcript menyimpan `missing_testids`; instruksi Developer diperbarui. | `test_run_checks_reports_missing_testids_on_own_build_before_submit`, `..._fails_closed_without_output_and_skips_without_contract` |
+| e. Telemetry memperbesar write DB | Metric phase divalidasi lalu dibuffer di `RunContext` (maks 256, flush sinkron jika penuh), digabung ke transaksi heartbeat; heartbeat revoked mengembalikan buffer; flush akhir sebelum archive. Tidak ada lagi pesan `phase.metric` per call. Relay menggabungkan `model.response`/`provider.error` ke satu baris `relay`, dan `tool.metric`/`context.size`/`relay.rejected`/`provider.retry` ke baris audit event yang sama. | `tests/workers/test_telemetry_buffer.py` (5) |
+| e. Query pesan tanpa filter SQL | `ProductWorkspace.latest_intent` (intent + scope_version + meta, `not_runtime_log()`, `LIMIT 1`) untuk `suite()`, `ui_contract()`, baseline submit. `_concern_preflight` memfilter intent handoff/review + candidate_id di SQL, tidak lagi jendela 200 pesan termasuk log. | `test_latest_intent_filters_in_sql_and_ignores_runtime_logs` (300 log runtime) |
+| f. Receipt install reused | Sudah tertutup oleh A (scratch tmpfs tidak diekspor). Dikeraskan: digest receipt mengecualikan `.cache/.vite/.vite-temp` yang selalu ditutup tmpfs. | `test_install_receipt_digest_ignores_tmpfs_masked_scratch` |
+| g. Cache baseline hanya base lulus | Gate `failed` lengkap (counts ada, `infrastructure_failure` false) ikut dicache; incomplete/infra failure tidak. Keputusan waiver tetap oleh pemanggil setiap kali; revalidasi dependency tetap mewajibkan passed. | `test_baseline_cache_admits_only_deterministic_gate_outcomes` (6 kasus) |
+| h. `locate()` mengubah semantik selector lama | Target tanpa `ui_contract` (suite sebelum 6714cc3) menjalankan runner dengan `locator_semantics: legacy_engine` di plan runner: selector selain `testid=`/`label=` memakai engine Playwright seperti sebelumnya. Digest suite tidak berubah; key cache baseline-browser memuat mode. | `test_legacy_suite_keeps_playwright_engine_role_semantics`, `test_harness_marks_only_targets_without_ui_contract_as_legacy` |
+
+Perubahan `acceptance.py` mengubah `runner_code_digest`, sehingga tiket aktif
+melewati `runner_contract_upgrade` sekali lagi (target baru, QA/UAT baru).
+
+Verifikasi awal Claude (sebelum tindak lanjut di bawah; dari apps/backend, PATH Git modern seperti di atas):
+- Test baru: 17 passed.
+- `tests/workers tests/pipeline tests/agents`: 431 passed, 7 failed. Ketujuh
+  kegagalan identik pada worktree HEAD 4c1bd7c bersih (pesan retry berbahasa
+  Indonesia vs regex Inggris, `base_build(image_id=)` pada stub test, lease None
+  di dua test budget scheduler, `ContextTooLarge` role lead, preflight abstain);
+  bukan regresi perubahan ini dan belum diperbaiki.
+- `tests/http` tidak dapat dimuat: venv tidak memiliki `httpx2` untuk
+  starlette.testclient (masalah environment, tidak diubah).
+
+Keterbatasan: telemetry di runtime_ref kini tertinggal hingga satu interval
+heartbeat (default 5 detik); metric dari crash proses sebelum flush hilang
+(observasional, bukan evidence). Cache baseline gagal mengunci fingerprint
+kegagalan flaky sampai input berubah. Keterbatasan release gabungan pada review awal diperbaiki di bagian E. Cek UI di run_checks
+adalah presence statis, bukan bukti perilaku browser.
+
+## E. Tindak lanjut handoff dan review Codex
+
+- Release gabungan mem-pin `legacy_test_ids` pada target. Runner memilih semantik
+  per test: suite lama tetap melalui engine Playwright; suite dengan UI contract
+  tetap exact. Digest suite tidak diubah dan tidak ada downgrade global.
+- Buffer telemetry dipadatkan menjadi agregat per fase jika flush DB terus gagal.
+  Jumlah sampel, durasi, maksimum, kegagalan dan cache hit tetap dipertahankan;
+  pengujian menggunakan 1.024 metric selama DB tidak tersedia, lalu flush berhasil.
+- Pembacaan file melalui dir-fd memakai `O_NONBLOCK` dan memeriksa regular file
+  setelah open. Snapshot scan yang sudah basi tidak bisa menggantung pada FIFO
+  yang menggantikan file. Ada regresi terpisah untuk digest dan copy.
+- Tes retry mengikuti pesan Indonesia, tes budget memakai lane ringan yang benar,
+  batas context dihitung dari konteks wajib, dan preflight concern mengikuti
+  diagnosis + revisi suite generik. Bukti fake tetap tidak dapat membuka UAT.
+- Tes HTTP memperhitungkan job/event runner setup otomatis. Dependency dev
+  `httpx2==2.13.1` (beserta httpcore2/truststore) dipasang dan dipin sesuai TestClient
+  Starlette yang sudah dipin; `httpx` lama tetap tersedia untuk integrasi lain.
+- Tes sandbox menunggu command benar-benar mulai sebelum cancel, dan memeriksa
+  penolakan symlink/FIFO/.git saat import, sebelum perubahan mencapai host.
+
+Ini review implementer, bukan independent review. Tidak ada worker demo dinyalakan.
+
+### Hasil verifikasi akhir handoff
+
+Semua perintah memakai venv backend dan Git modern pada PATH seperti bagian awal.
+
+| Perintah dari `apps/backend` | Hasil |
+| --- | --- |
+| `pytest tests/workers tests/pipeline tests/agents tests/http -q --tb=short` (ulang setelah patch) | **527 passed**, 590,03 s; dua warning refleksi expression index SQLite |
+| `pytest tests/workspace tests/release tests/recovery tests/onboarding -v --tb=short --durations=15` (dimulai sebelum pembaruan fixture sandbox) | **191 passed, 2 failed**, 1.157,30 s; dua fixture sandbox lama sudah diperbaiki dan diulang pada baris berikut |
+| `pytest tests/workspace/test_sandbox_docker.py -q --tb=short` (kode/fixture terbaru) | **13 passed**, 43,99 s |
+| `pytest tests/release tests/workspace/test_fsutil.py tests/workspace/test_supervisor_logic.py tests/workspace/test_bounded_dependency_export.py -q --tb=short` | **81 passed, 2 failed**, 444,72 s; detail intermiten di bawah |
+| `pytest tests/release/test_review_regressions.py -k 'sync_approval_requires or discard_during_sync' -q --tb=short` | **2 passed**, 46,12 s; pengulangan dua kegagalan release |
+| `pytest tests/release/test_release_flow.py -k mixed_release -q --tb=short` | **2 passed**, 30,37 s; juga lulus pada grup release di atas |
+| `pytest tests/pipeline/test_review_followups_2026_10_11.py tests/workers/test_telemetry_buffer.py -q --tb=short` | **20 passed**, 1,15 s; termasuk regresi FIFO dan buffer saat DB gagal |
+
+Syntax 26 file Python berubah/baru diperiksa melalui `ast.parse`;
+`git diff --check` bersih. Angka di tabel saling tumpang tindih, bukan total unik.
+Sembilan kegagalan ekspektasi tes lama pada putaran inti awal kini ditutup oleh
+putaran ulang 527 passed. Tes HTTP memakai httpx2, tanpa warning deprecation httpx.
+
+**Keterbatasan yang belum terisolasi:** pada putaran release bersamaan dengan grup
+Docker lain, dua freeze menghasilkan gate incomplete: stderr `Could not find
+\'test.cjs\'`, sementara file ada pada tree commit, dan laporan browser passed.
+Release tetap failed sehingga tidak dapat disetujui/sync. Kedua tes lulus saat
+rerun terpisah, dan keduanya juga lulus pada putaran infra pertama. Tidak ada
+waiver atau retry otomatis yang ditambahkan untuk menyembunyikan masalah ini.
+Penyebab hilangnya file di command sandbox belum terbukti; perlu workload berulang
+serta inventory source sebelum/ sesudah seed/export untuk isolasi, bukan klaim
+bahwa seluruh grup selalu hijau. Worker/backend/frontend demo tetap mati;
+container pengujian dibersihkan.

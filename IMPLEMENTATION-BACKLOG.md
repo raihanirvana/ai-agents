@@ -73,6 +73,18 @@ Compile/source dan git diff --check diperiksa. Handoff: docs/audits/
 sandbox-dependency-ui-amendment-2026-10-11.md. Sisa: benchmark workload demo,
 peak memory install besar, recovery SIGKILL/publication dan independent review;
 belum DONE. Tidak commit/push atau restart worker.
+Tindak lanjut review efisiensi d–h (setelah 4c1bd7c): run_checks memeriksa
+testid kontrak UI pada build workspace sendiri; metric telemetry dibuffer ke
+heartbeat dan log relay digabung; lookup intent difilter di SQL tanpa log
+runtime; digest receipt install mengabaikan scratch tmpfs; baseline gagal yang
+deterministik ikut dicache; suite tanpa kontrak UI memakai semantik selector
+engine Playwright lama. Verifikasi awal Claude: 17 test baru lulus; 7 kegagalan lama identik di HEAD.
+Handoff Codex menutup ekspektasi tes lama: 527 tes inti lulus, 13 sandbox lulus,
+20 regresi follow-up lulus. Release gabungan mempertahankan locator per test;
+buffer telemetry tetap bounded saat DB gagal; FIFO pada scan basi ditolak.
+Dua kegagalan gate release intermiten lulus saat rerun, tetapi akar penyebab
+file test hilang di sandbox belum terisolasi. Detail perintah, hasil grup Docker
+dan keterbatasan di bagian D–E audit yang sama. Review tetap NOT_REVIEWED.
 
 ### Kontrak UI dan revisi suite QA generik — 10 Oktober 2026
 

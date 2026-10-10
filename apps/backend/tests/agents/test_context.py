@@ -155,11 +155,14 @@ def test_role_scope_and_task_are_never_dropped_and_too_large_is_an_error(agent_e
     env.builder.limits = ContextLimits(total_tokens=300)  # far below the SOUL + instructions
     with pytest.raises(ContextTooLarge, match="limit 300"):
         build(env, lead(env, ticket))
-    env.builder.limits = ContextLimits(total_tokens=2500, messages_tokens=100000)
+    ctx = lead(env, ticket)
+    env.builder.limits = ContextLimits(total_tokens=8000)
+    budget = build(env, ctx).estimated_tokens + 1000
+    env.builder.limits = ContextLimits(total_tokens=budget, messages_tokens=100000)
     for n in range(40):
         say(env, ticket.id, "y" * 400)
-    snap = build(env, lead(env, ticket))
-    assert "## Scope" in snap.user and snap.estimated_tokens <= 2500 and "## Task" in snap.user
+    snap = build(env, ctx)
+    assert "## Scope" in snap.user and snap.estimated_tokens <= budget and "## Task" in snap.user
 
 
 def test_a_valid_summary_stands_in_for_trimmed_messages_without_a_gap(agent_env):

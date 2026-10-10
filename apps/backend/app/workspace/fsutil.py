@@ -162,7 +162,7 @@ def open_beneath(root: Path, rel: str, flags: int, *, mode: int = 0o666, create_
     parts = validate_relpath(rel).parts
     parent = _open_parent(Path(root), parts, create=create_dirs, mode=0o777)
     try:
-        return os.open(parts[-1], flags | os.O_NOFOLLOW | os.O_CLOEXEC, mode, dir_fd=parent)
+        return os.open(parts[-1], flags | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, mode, dir_fd=parent)
     finally:
         os.close(parent)
 
@@ -281,6 +281,8 @@ def copy_entries(src_root: Path, entries: list[TreeEntry], dest_root: Path, *, s
                 perm = (0o777 if entry.executable else 0o666) if sandbox_visible else (0o755 if entry.executable else 0o644)
                 sfd = open_beneath(src_root, entry.rel, os.O_RDONLY)
                 try:
+                    if not stat.S_ISREG(os.fstat(sfd).st_mode):
+                        raise PathViolation(f'file changed into a special file: {entry.rel}')
                     dfd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, perm, dir_fd=parent)
                     try:
                         os.fchmod(dfd, perm)
@@ -306,6 +308,8 @@ def sha256_tree(root: Path, entries: list[TreeEntry]) -> str:
         if entry.kind == "file":
             fd = open_beneath(root, entry.rel, os.O_RDONLY)
             try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise PathViolation(f'file changed into a special file: {entry.rel}')
                 inner = hashlib.sha256()
                 while chunk := os.read(fd, _CHUNK):
                     inner.update(chunk)

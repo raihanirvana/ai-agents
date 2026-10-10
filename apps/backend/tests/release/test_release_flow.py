@@ -221,3 +221,27 @@ def test_a_crash_before_the_draft_is_published_leaves_no_release_and_the_retry_p
     with env.db.read() as s:
         assert len(list(s.scalars(select(Release)))) == 1
     assert env.release().status == "draft"
+
+@pytest.mark.parametrize('exact_name, expected_status', [('Save now', 'succeeded'), ('Save', 'failed')])
+def test_mixed_release_preserves_legacy_matching_without_downgrading_exact_contract(env, exact_name, expected_status):
+    html = page('<button data-testid="save">Save now</button>')
+    old, _ = env.accept_ticket('Legacy', {'index.html': html, 'test.cjs': TEST_JS},
+                              [browser_test('legacy', ['UAC-1'], 'role=button[name*="save"i]')])
+    new, _ = env.accept_ticket('Contract', {'contract.txt': 'Exact locator contract'},
+                              [browser_test('exact', ['UAC-1'], f'role=button[name="{exact_name}"]')],
+                              ui_contract={'revision': 1, 'controls': [
+                                  {'testid': 'save', 'role': 'button', 'name': exact_name, 'purpose': 'Save'}]})
+    outcome = env.run_job(env.request('freeze'))
+    assert outcome.status == 'succeeded', outcome
+    release = env.release()
+    with env.db.read() as s:
+        acceptance_id = next(i for i in release.evidence_artifact_ids
+                             if (s.get(Artifact, i).path or '').endswith('/release-acceptance.json'))
+    acceptance = doc(env, acceptance_id)
+    assert release.status == ('draft' if expected_status == 'succeeded' else 'failed'), json.dumps(acceptance.get('report'))
+    target = doc(env, release.target_artifact_id)
+    assert target['legacy_test_ids'] == [f't{old.number}-legacy']
+    receipt = next(d for d in (doc(env, i) for i in release.evidence_artifact_ids)
+                   if isinstance(d, dict) and d.get('kind') == 'release_verification')
+    assert receipt['counts']['passed'] == (2 if expected_status == 'succeeded' else 1), receipt
+    assert f't{new.number}-exact' not in target['legacy_test_ids']

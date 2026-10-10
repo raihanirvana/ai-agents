@@ -118,12 +118,14 @@ class ProductAdmission:
                         self.error = self.ctx.provider_quota(min(3600, max(1, delay)),
                             'provider HTTP 429' + (': ' + detail if detail else ' rate limit'))
             # Durable logging uses its own transaction, after accounting commits.
+            # One line per finished call: response identity rides on the relay line.
+            line = f'relay {kind}: {result.get("status")} usage={result.get("usage")}'
             if response is not None:
-                self.ctx.log(f'model.response requested={response["requested_model"]} actual={response["model"]}')
+                line += f' model.response requested={response["requested_model"]} actual={response["model"]}'
             if kind == 'model' and result.get('status') in ('provider_error', 'transport_failure'):
-                self.ctx.log(self.redactor.redact(f'provider.error http_status={result.get("http_status")} '
-                    f'detail={str(result.get("detail") or "transport or upstream error")[:1000]}'))
-            self.ctx.log(self.redactor.redact(f'relay {kind}: {result.get("status")} usage={result.get("usage")}'))
+                line += (f' provider.error http_status={result.get("http_status")} '
+                         f'detail={str(result.get("detail") or "transport or upstream error")[:1000]}')
+            self.ctx.log(self.redactor.redact(line))
         finally:
             if kind == 'model':
                 self.ctx.limiter.release(self.ctx.lane)
@@ -134,16 +136,19 @@ class ProductAdmission:
     def event(self, scope, generation, kind, payload):
         if kind == 'relay.rejected':
             self.relay_failure = dict(payload)
-        if kind in ('relay.rejected', 'context.size'):
-            self.ctx.log(kind + ' ' + str(payload))
         # Persist hashes/audit metadata, never tool content or provider secrets.
-        self.ctx.log(self.redactor.redact(f'{kind}: {digest_of(payload)}'))
+        # Details for the same event share one audit line, not extra writes.
+        line = f'{kind}: {digest_of(payload)}'
+        if kind in ('relay.rejected', 'context.size'):
+            line += ' ' + str(payload)
+        if kind == 'provider.retry':
+            line += ' ' + str({k: payload.get(k) for k in ('attempt', 'http_status', 'delay_s')})
+        suffix = ''
         if kind in ('tool.started', 'tool.completed'):
             name = payload.get('name')
             if isinstance(name, str) and name.replace('_', '').isalnum():
-                self.ctx.log(f'tool.metric name={name} event={kind}')
-        if kind == 'provider.retry':
-            self.ctx.log('provider.retry ' + str({k: payload.get(k) for k in ('attempt', 'http_status', 'delay_s')}))
+                suffix = f' tool.metric name={name}'
+        self.ctx.log(self.redactor.redact(line) + suffix)
 
     def close(self):
         for rid in list(self.pending):

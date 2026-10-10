@@ -4,7 +4,8 @@ Ship the TL plan's ui_contract: stable literal data-testid on every declared
 control/result, native semantic roles, and associated visible labels/accessible
 names. Keep the contract consistent with the approved scope. The supervisor checks
 literal testid presence in the immutable HTML/JS build before publishing a candidate.
-If submit_candidate returns submitted=false with missing_testids, repair those
+run_checks reports the same static inventory as phase ui_contract on your own build output,
+so fix its missing_testids before submit_candidate. If submit_candidate returns submitted=false with missing_testids, repair those
 controls and rebuild/resubmit in this same job; do not declare completion or ask
 the user to choose selectors. Static presence is not proof of working browser behaviour.
 
@@ -67,7 +68,7 @@ This file defines the task contract; the structured PO/lead runtime does not run
    replace unit tests with browser tests or import a package that is not in the locked dependencies. QA's independent
    browser harness owns acceptance tests. A missing mandatory baseline test is a failure, even if your new test passes.
 4. Prefer run_checks with no arguments: the supervisor installs when package/lock/environment or
-   the installation tree changed, runs real repository tests, then builds. It stops at the first
+   the installation tree changed, runs real repository tests, builds, then checks ui_contract testids. It stops at the first
    failure and returns status, failed test IDs and a bounded error excerpt; full command evidence
    remains available. Fix that cause before running the batch again. Individual run_command phases
    remain available for bootstrap or focused diagnosis. Inspect the diff after checks.

@@ -15,6 +15,10 @@ from playwright.sync_api import sync_playwright, expect
 
 MAX_DOWNLOAD_BYTES = 1024 * 1024
 MAX_ARIA_BYTES = 16 * 1024
+# Suites pinned without a UI contract were written for Playwright's selector
+# engine, including its explicit selector flags. The supervisor sets this per
+# plan so a runner upgrade cannot change what an approved selector matches.
+LEGACY_LOCATORS = False
 
 
 def locate(page, selector):
@@ -23,6 +27,8 @@ def locate(page, selector):
     Historical CSS/Playwright selectors remain executable on pinned legacy suites.
     New plans are separately limited to the supervisor's UI contract vocabulary.
     """
+    if LEGACY_LOCATORS and not selector.startswith(('testid=', 'label="')):
+        return page.locator(selector)  # Engine semantics of the pinned legacy suite.
     if not selector.startswith(('testid=', 'role=', 'label="', 'text="')):
         return page.locator(selector)  # Preserve historical CSS/engine parsing exactly.
     # Split only outside quoted JSON strings, so a label containing >> stays literal.
@@ -375,12 +381,16 @@ def run_step(page, step, base_url, last_download):
 def main():
     invocation, target, digest, url = sys.argv[1:]
     plan = json.loads(Path('/plan.json').read_text())
+    global LEGACY_LOCATORS
+    legacy_all = plan.get('locator_semantics') == 'legacy_engine'
+    legacy_ids = set(plan.get('legacy_test_ids', []))
     records, artifacts, smoke, artifact_bytes = [], [], False, 0
     origin = urlsplit(url)
     diagnostics_enabled = os.environ.get('AIAGENT_DIAGNOSTICS', 'on-failure') != 'none'
     with sync_playwright() as p:
         browser = p.chromium.launch(args=['--no-sandbox', '--disable-dev-shm-usage'])
         for test in plan['tests']:
+            LEGACY_LOCATORS = legacy_all or test['id'] in legacy_ids
             started = time.monotonic()
             context = browser.new_context(service_workers='block', accept_downloads=True)
             context.route('**/*', lambda r: r.continue_() if

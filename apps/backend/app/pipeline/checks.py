@@ -48,9 +48,39 @@ class DeveloperChecks:
         tree = source / 'node_modules'
         if not tree.exists() and not tree.is_symlink():
             return None
-        from app.workspace.bounded_io import DEPENDENCY_LIMITS
-        entries = fsutil.scan_tree(tree, limits=DEPENDENCY_LIMITS)
+        from app.workspace.bounded_io import DEPENDENCY_LIMITS, DEPENDENCY_SCRATCH
+        # Scratch mountpoints are masked by tmpfs in every sandbox command, so
+        # their contents never affect execution and must not void the receipt.
+        entries = fsutil.scan_tree(tree, exclude=DEPENDENCY_SCRATCH, limits=DEPENDENCY_LIMITS)
         return fsutil.sha256_tree(tree, entries)
+
+    def _ui_inventory(self, manifest, source):
+        """Early static testid feedback on this workspace's own build output.
+
+        Advisory only: submission still checks the independent candidate build,
+        and neither result is browser acceptance or QA evidence."""
+        ui_contract = self.workspace.ui_contract(self.ctx.queue.verify(self.ctx.lease))
+        if ui_contract is None:
+            return None
+        from .ui_inventory import check_build
+        from app.workspace.errors import WorkspaceError
+        started = time.monotonic()
+        site = source / manifest.build_output
+        try:
+            if site.is_symlink() or not site.is_dir():
+                raise ValueError(f'build output {manifest.build_output}/ is missing after build')
+            check = check_build(site, ui_contract)
+        except (WorkspaceError, OSError, ValueError) as exc:
+            check = {'status': 'incomplete', 'missing_testids': [], 'reason': str(exc)[:400]}
+        row = {'phase': 'ui_contract', 'status': 'passed' if check['status'] == 'passed' else 'failed',
+               'duration_s': round(time.monotonic() - started, 3),
+               'missing_testids': check.get('missing_testids', [])[:60], 'qa_pass': False}
+        if check.get('reason'):
+            row['reason'] = check['reason']
+        if row['status'] != 'passed':
+            row['next'] = ('Add literal data-testid attributes to the shipped controls in missing_testids, '
+                           'then run_checks again. Do not change the contract or UAC.')
+        return row
 
     def _phase(self, phase):
         spec, manifest, store = self.sup.authorize(self.started.ref, self.started.credential, 'run_phase')
@@ -112,7 +142,12 @@ class DeveloperChecks:
                     rows.append(row)
                     if row['status'] != 'passed':
                         break  # Do not spend time building after a failed/incomplete gate.
-            report = {'status': 'passed' if len(rows) == 3 and all(
+                if len(rows) == 3 and rows[-1]['status'] == 'passed':
+                    # Same lock: the inventory reads exactly the output this build produced.
+                    ui_row = self._ui_inventory(manifest, source)
+                    if ui_row is not None:
+                        rows.append(ui_row)
+            report = {'status': 'passed' if len(rows) >= 3 and all(
                 r['status'] in ('passed', 'reused') for r in rows) else 'failed', 'phases': rows,
                 'installation_identity': inputs,
                 'candidate_gate_authority': False}

@@ -4,6 +4,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 from sqlalchemy import select
+from .harness import legacy_locators
 from app.agents.tools import ToolFacade
 from app.agents.context import ContextRefused, ContextTooLarge
 from app.agents.models import ModelError
@@ -611,7 +612,8 @@ class PipelineRuntime:
         if early is not None:
             return early
         if proof is None:
-            proof = self.workspace.harness.run(ctx, site, candidate.target_digest, suite, target['node_image_id'], expected_runner=target['runner'])
+            proof = self.workspace.harness.run(ctx, site, candidate.target_digest, suite, target['node_image_id'],
+                expected_runner=target['runner'], legacy_locators=legacy_locators(target))
         proof['required_checks'] = self.gate_admission(identity, candidate, gates)
         baseline = self.workspace.base_build(ctx, image_id=target['node_image_id'])
         if baseline['base_sha'] != candidate.base_sha:
@@ -627,7 +629,8 @@ class PipelineRuntime:
                     'build_digest': fsutil.sha256_tree(baseline['site'], fsutil.scan_tree(baseline['site'])),
                     'runner': target['runner'], 'config_digest': target['config_digest'], 'suite_digest': suite.digest})
                 base_proof = self.workspace.execution_cache.baseline_browser(ctx, baseline['site'], base_target, suite,
-                    target['node_image_id'], target['runner'], fake=self.fake)
+                    target['node_image_id'], target['runner'], fake=self.fake,
+                    legacy_locators=legacy_locators(target))
                 base_proof.pop('diagnostics', None)
                 proof['baseline']['execution'] = base_proof
                 statuses = {t['id']: t['status'] for t in (base_proof.get('report') or {}).get('tests', [])}
@@ -857,9 +860,15 @@ class PipelineRuntime:
         count = target.get('suite_repair_count', 0)
         if type(count) is not int or not 0 <= count < MAX_SUITE_REPAIRS:
             return None, None
+        from sqlalchemy import func
+        from app.persistence.messages import not_runtime_log
         with self.db.read() as s:
-            messages = list(s.scalars(select(Message).where(Message.ticket_id == candidate.ticket_id)
-                                      .order_by(Message.seq.desc()).limit(200)))
+            # Filter in SQL: runtime logs must never push a handoff out of a recent-message window.
+            messages = list(s.scalars(select(Message).where(Message.ticket_id == candidate.ticket_id,
+                not_runtime_log(),
+                func.json_extract(Message.meta, '$.intent').in_(('candidate_handoff', 'technical_review')),
+                func.json_extract(Message.meta, '$.candidate_id') == candidate.id)
+                .order_by(Message.seq.desc()).limit(32)))
         broker = FencedWorkspace(self.workspace.root, ctx).broker(candidate.project_id)
         concerns, source, ignored = qualify_concerns(pinned_concerns(messages, candidate, suite),
                                                      suite, broker, candidate.commit_sha)
@@ -884,7 +893,7 @@ class PipelineRuntime:
             # Execute the entire original candidate suite once. If no correction
             # is justified, this same proof proceeds into normal baseline checks.
             proof = self.workspace.harness.run(ctx, site, candidate.target_digest, suite,
-                target['node_image_id'], expected_runner=target['runner'])
+                target['node_image_id'], expected_runner=target['runner'], legacy_locators=legacy_locators(target))
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, identity)
                 attachments = []
