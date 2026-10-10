@@ -16,6 +16,7 @@ import subprocess
 import time
 import tempfile
 import tarfile
+import shutil
 from dataclasses import replace
 import uuid
 from dataclasses import dataclass
@@ -39,6 +40,13 @@ _SEED_SOURCE = (
     "{recursive:true,verbatimSymlinks:true,"
     "filter:p=>(!skip || (p!==skip && !p.startsWith(skip+'/'))) && "
     "(!process.argv[2] || (p!=='/source/node_modules' && !p.startsWith('/source/node_modules/')))}); "
+    "if(fs.existsSync('/seed-inventory.json')) { "
+    "const crypto=require('node:crypto'); for(const e of JSON.parse(fs.readFileSync('/seed-inventory.json','utf8'))) { "
+    "const p=path.join('/work',e.path); const st=fs.lstatSync(p); "
+    "if(e.kind==='file' && (!st.isFile() || crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')!==e.sha256)) "
+    "throw Error('seed inventory mismatch: '+e.path); "
+    "if(e.kind==='dir' && !st.isDirectory()) throw Error('seed directory mismatch: '+e.path); "
+    "if(e.kind==='symlink' && (!st.isSymbolicLink() || fs.readlinkSync(p)!==e.target)) throw Error('seed link mismatch: '+e.path); }} "
     "if(process.argv[2]==='readonly') fs.symlinkSync('/installed/node_modules','/work/node_modules');"
 )
 
@@ -63,6 +71,9 @@ class CommandResult:
     container: str
     cache_key: str | None = None
     cache_origin: dict | None = None
+    peak_memory_bytes: int | None = None
+    seed_inventory_digest: str | None = None
+    memory_observation: str | None = None
 
 
 def redact(data: bytes, secrets: Sequence[str]) -> bytes:
@@ -120,7 +131,8 @@ class DockerSandbox:
                limits: ResourceLimits, env: dict[str, str], labels: dict[str, str],
                artifact: Path | None = None, build_output: str = "dist",
                dependency_cache: Path | None = None, writable_work: bool = False,
-               readonly_dependencies: Path | None = None, install_phase: bool = False) -> None:
+               readonly_dependencies: Path | None = None, install_phase: bool = False,
+               seed_inventory: Path | None = None) -> None:
         if network != "none":
             raise SandboxError("target containers must use network none")
         limits.validate()
@@ -149,6 +161,8 @@ class DockerSandbox:
             args += ["-e", f"{key}={value}"]
         for key, value in sorted(labels.items()):
             args += ["--label", f"{key}={value}"]
+        if seed_inventory is not None:
+            args += ["--mount", f"type=bind,source={seed_inventory},target=/seed-inventory.json,readonly"]
         if dependency_cache is not None:
             args += ["--mount", f"type=bind,source={dependency_cache},target=/dependencies,readonly"]
         if readonly_dependencies is not None:
@@ -255,6 +269,8 @@ class DockerSandbox:
         timed_out = cancelled = False
         stdout = stderr = b''
         truncated, exit_code, oom = False, None, False
+        seed_root, inventory_digest, peak = None, None, None
+        memory, memory_method = None, None
         try:
             from . import fsutil
             from .bounded_io import DEPENDENCY_LIMITS, prepare_dependency_scratch
@@ -264,11 +280,14 @@ class DockerSandbox:
                 fsutil.scan_tree(dependencies, limits=DEPENDENCY_LIMITS)
                 prepare_dependency_scratch(dependencies)
                 readonly_dependencies = dependencies.resolve()
+            from .command_seed import prepare
+            seed_root, immutable_source, inventory = prepare(source, limits)
+            inventory_digest = sha256_bytes(inventory.read_bytes())
             idle = seeded_command(['sh', '-c', 'touch /tmp/supervisor-ready && exec sleep 2147483647'],
                                   readonly_dependencies=readonly_dependencies is not None, install_phase=install_phase)
-            self.create(name=name, image=image, source=source, argv=idle, network=network,
+            self.create(name=name, image=image, source=immutable_source, argv=idle, network=network,
                         limits=limits, env=env, labels=labels, dependency_cache=dependency_cache, writable_work=True,
-                        readonly_dependencies=readonly_dependencies, install_phase=install_phase)
+                        readonly_dependencies=readonly_dependencies, install_phase=install_phase, seed_inventory=inventory)
             self._docker("start", name, timeout=max(0.1, deadline-time.monotonic()))
             while True:
                 cancelled, timed_out = is_cancelled(), time.monotonic() >= deadline
@@ -287,11 +306,20 @@ class DockerSandbox:
                     break
                 time.sleep(0.1)
             if not (cancelled or timed_out):
+                if os.environ.get('SANDBOX_MEASURE_MEMORY') == '1':
+                    from .memory_observation import MemoryObservation
+                    memory = MemoryObservation(self, name).start()
                 exit_code, stdout, stderr, timed_out, cancelled, truncated = stream_command(
                     [self.docker, 'exec', '--workdir', '/work', name, *argv], deadline=deadline,
                     cancelled=is_cancelled, cap=limits.max_log_bytes)
                 state = self._state(name)
                 oom = bool(state.get('OOMKilled'))
+                peak = self.peak_memory(name) if state.get('Running') else None
+                memory_method = 'cgroup_peak' if peak is not None else None
+                if memory is not None:
+                    sampled = memory.stop()
+                    if peak is None and sampled is not None:
+                        peak, memory_method = sampled, 'sampled_cgroup_current_lower_bound'
                 if not (timed_out or cancelled or oom) and state.get('Running'):
                     import_work(self.docker, name, source, limits, deadline=deadline, cancelled=is_cancelled,
                                 preserve_dependencies=readonly_dependencies is not None, install_phase=install_phase)
@@ -302,10 +330,29 @@ class DockerSandbox:
             stderr = (stderr + b'\n' + str(exc).encode())[:limits.max_log_bytes]
             timed_out, cancelled = time.monotonic() >= deadline, is_cancelled()
         finally:
-            self._docker('rm', '-f', name, check=False)
+            if memory is not None:
+                sampled = memory.stop()
+                if peak is None and sampled is not None:
+                    peak, memory_method = sampled, 'sampled_cgroup_current_lower_bound'
+            removed = self._docker('rm', '-f', name, check=False)
+            # Keep the mount alive if Docker cannot prove container removal.
+            if seed_root is not None and removed.returncode == 0:
+                shutil.rmtree(seed_root)
         return CommandResult(tuple(argv), None if timed_out or cancelled else exit_code,
             timed_out, cancelled, oom, round(time.monotonic()-started, 3),
-            redact(stdout, secrets), redact(stderr, secrets), truncated, network, name)
+            redact(stdout, secrets), redact(stderr, secrets), truncated, network, name,
+            peak_memory_bytes=peak, seed_inventory_digest=inventory_digest, memory_observation=memory_method)
+
+    def peak_memory(self, name):
+        """Observation only; missing cgroup support never changes gate eligibility."""
+        try:
+            result = self._docker("exec", name, "sh", "-c",
+                "cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes",
+                timeout=5, check=False)
+            value = int(result.stdout.strip())
+            return value if result.returncode == 0 and value >= 0 else None
+        except (SandboxError, ValueError):
+            return None
 
     def start_detached(self, *, name: str, image: str, source: Path, argv: Sequence[str],
                        limits: ResourceLimits, env: dict[str, str], labels: dict[str, str],

@@ -39,6 +39,9 @@ _PINNING = _quoted(PINNING_CANDIDATE_STATUSES)
 
 # Built from module constants only (no user input), so string assembly is safe here.
 _SELECTS = [
+    "SELECT target_artifact_id AS artifact_id, 'qa_waiver' AS owner_kind, id AS owner_id FROM qa_waivers",
+    "SELECT diagnosis_artifact_id, 'qa_waiver', id FROM qa_waivers",
+    "SELECT j.value, 'qa_waiver', w.id FROM qa_waivers w, json_each(w.evidence_artifact_ids) j",
     "SELECT target_artifact_id AS artifact_id, 'approval' AS owner_kind, id AS owner_id FROM approvals",
     "SELECT j.value, 'approval', a.id FROM approvals a, json_each(a.evidence_artifact_ids) j",
     *(f"SELECT {col}, 'release', id FROM releases" for col in

@@ -193,7 +193,12 @@ class PipelineRuntime:
     def _qa_plan(self, ctx, identity):
         ui_contract = self.workspace.ui_contract(identity)
         with self.db.read() as s:
-            saved = s.get(Job, identity['job_id']).runtime_ref.get('pipeline_qa_plan')
+            job_ref = s.get(Job, identity['job_id']).runtime_ref
+            saved = job_ref.get('pipeline_qa_plan')
+            saved_revision = job_ref.get('pipeline_qa_plan_revision',
+                job_ref.get('payload', {}).get('ui_contract_revision', 1))
+        if saved and saved_revision != (ui_contract.revision if ui_contract else 1):
+            return Outcome('failed', error='QA planning references an obsolete UI contract revision', retryable=False)
         if saved:
             return Outcome('succeeded', {'suite_artifact_id': saved, 'fake': self.fake,
                 'ui_contract_revision': ui_contract.revision if ui_contract else 1})
@@ -202,16 +207,26 @@ class PipelineRuntime:
         if requested:
             return Outcome('succeeded', {'contract_amendment': requested, 'fake': self.fake,
                 'ui_contract_revision': requested['revision']})
-        baseline = self.workspace.base_build(ctx)
-        sup, started, manifest = self.workspace.start(ctx)
-        source_files = sup.list_files(started.ref, started.credential)
-        baseline_ui, remaining = {}, 20000
+        manifest, base = self.workspace.configuration(identity)
+        from app.workspace import WorkspaceSupervisor
+        from app.workspace.errors import WorkspaceError
+        broker = WorkspaceSupervisor(self.workspace.root).broker(identity['project_id'])
+        source_files = broker._bare('ls-tree', '-r', '--name-only', base).decode().splitlines()
+        baseline_ui, remaining, unavailable = {}, 20000, []
         for path in source_files:
             if (not path.endswith(('.html', '.js', '.jsx', '.ts', '.tsx', '.mjs'))
                     or set(Path(path).parts).intersection(('tests', 'test', '__tests__', 'node_modules'))
                     or Path(path).stem.endswith(('.test', '.spec'))):
                 continue
-            content = self.redactor.redact_source(sup.read_file(started.ref, started.credential, path).decode(errors='replace'))
+            try:
+                raw = broker.read_committed_file(base, path, max_bytes=256 * 1024)
+            except (WorkspaceError, ValueError):
+                unavailable.append(path)
+                continue
+            if raw is None:
+                unavailable.append(path)
+                continue
+            content = self.redactor.redact_source(raw.decode(errors='replace'))
             baseline_ui[path] = content[:remaining]
             remaining -= len(baseline_ui[path])
             if remaining <= 0:
@@ -227,8 +242,8 @@ class PipelineRuntime:
             'ui_contract': ui_contract.model_dump() if ui_contract else None,
             'ui_locators': sorted(ui_contract.selectors()) if ui_contract else [],
             'verification_policy': policy_context(),
-            'baseline': {k: baseline[k] for k in ('base_sha', 'applicable', 'status', 'reason',
-                'artifact_id', 'fingerprint_artifact_id', 'error', 'cache_hit') if k in baseline}},
+            'baseline': {'base_sha': base, 'execution': 'deferred_until_submission'},
+            'baseline_ui_source_unavailable': unavailable},
             answer=ctx.answer, lease=ctx.lease, queue=ctx.queue, source_safe=True)
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
@@ -244,6 +259,11 @@ class PipelineRuntime:
                 ui_contract.check_suite(suite)
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, current)
+                latest = self.workspace.latest_intent(s, current, 'technical_plan')
+                current_revision = (((latest.meta.get('plan') or {}).get('ui_contract') or {}).get('revision', 1)
+                                    if latest else 1)
+                if current_revision != (ui_contract.revision if ui_contract else 1):
+                    raise ValueError('UI contract changed during QA planning; a fresh plan is required')
                 version = s.query(TicketVersion).filter_by(ticket_id=current['ticket_id'], version=current['scope_version']).one()
                 readiness = preflight(suite, version.uac, current['scope_version'], new_plan=True)
                 receipt = self.store.put_json(s, project_id=current['project_id'], kind='report', name='qa-preflight.json',
@@ -257,9 +277,11 @@ class PipelineRuntime:
                     document=suite.model_dump(), meta={'producer': 'qa-plan', 'fake': self.fake})
                 self.workspace._post(s, current, 'qa-plan:' + current['root_job_id'], suite.summary,
                     [snapshot.artifact_id, receipt.id, authored_row.id, artifact.id], 'qa_plan', suite_digest=suite.digest,
+                    ui_contract_revision=ui_contract.revision if ui_contract else 1,
                     verification_plan=readiness, preflight_artifact_id=receipt.id)
                 job = s.get(Job, current['job_id'])
-                job.runtime_ref = {**job.runtime_ref, 'pipeline_qa_plan': artifact.id}
+                job.runtime_ref = {**job.runtime_ref, 'pipeline_qa_plan': artifact.id,
+                                   'pipeline_qa_plan_revision': ui_contract.revision if ui_contract else 1}
                 result['suite_artifact_id'] = artifact.id
                 result['preflight_artifact_id'] = receipt.id
             return {'submitted': True, 'suite_digest': suite.digest}
@@ -286,8 +308,11 @@ class PipelineRuntime:
             if set(a) != {'path'}:
                 raise ValueError('inspect_app requires a relative path; use . to list source files')
             if a['path'] == '.':
-                return {'files': sup.list_files(started.ref, started.credential)}
-            return {'content': sup.read_file(started.ref, started.credential, a['path']).decode(errors='replace')}
+                return {'files': source_files}
+            raw = broker.read_committed_file(base, a['path'], max_bytes=256 * 1024)
+            if raw is None:
+                raise ValueError('file is unavailable in the pinned accepted base')
+            return {'content': raw.decode(errors='replace')}
         facade._handlers.update({'propose_tests': propose, 'inspect_app': inspect,
                                  'request_contract_amendment': request_amendment})
         parameters = {'request_contract_amendment': {'reason': {'type': 'string', 'minLength': 12, 'maxLength': 2000}},
@@ -304,10 +329,41 @@ class PipelineRuntime:
         # The relay reserves each invocation. _execute verifies role/arguments/lease without a second reservation.
         return {name: (lambda args, tool=name: facade._execute(ctx, tool, args)) for name in parameters}
 
+    def _await_qa_plan(self, ctx, identity):
+        """Wait without more model calls; heartbeat/cancellation remain active."""
+        import time
+        started, announced = time.monotonic(), False
+        try:
+            while True:
+                ctx._check()
+                ctx.queue.verify(ctx.lease)
+                try:
+                    return self.workspace.suite(identity)
+                except ValueError:
+                    with self.db.read() as session:
+                        jobs = list(session.scalars(select(Job).where(Job.ticket_id == identity['ticket_id'],
+                            Job.scope_version == identity['scope_version'], Job.stage.in_(('qa_plan', 'technical_plan')))))
+                        active = any(j.status in ('queued', 'running', 'waiting_input', 'waiting_quota') for j in jobs)
+                        latest = max(jobs, key=lambda j: (j.created_at, j.id)) if jobs else None
+                        if not active and (latest is None or latest.status in ('failed', 'stopped', 'cancelled') or
+                                           not latest.result.get('contract_amendment')):
+                            raise InvalidOutput(['QA planning has no validated suite or recoverable planning job.'])
+                    if not announced:
+                        ctx.log('Menunggu rencana QA sebelum submit; tidak ada panggilan model tambahan.')
+                        announced = True
+                    ctx.cancelled.wait(2)
+        finally:
+            if announced:
+                from app.workers.telemetry import record_phase
+                record_phase(ctx, 'qa_plan_wait', time.monotonic() - started)
+
     def _implement(self, ctx, identity):
         from .bootstrap import bootstrap_contract
         sup, started, manifest = self.workspace.start(ctx)
-        suite, suite_id = self.workspace.suite(identity)
+        try:
+            suite, _ = self.workspace.suite(identity)
+        except ValueError:
+            suite = None  # QA planning runs independently; required at submission.
         with self.db.read() as s:
             feedback = self.workspace.repair_feedback(s, identity)
             repair = ({'message_id': feedback.id, 'candidate_id': feedback.meta.get('candidate_id'),
@@ -337,7 +393,7 @@ class PipelineRuntime:
         task = {'name': 'implement', 'runner_manifest': manifest.to_dict(),
             'repair_feedback': repair, 'repo_map': repo_map(sup, started, source_files),
             'reference_bootstrap': bootstrap, 'source_empty': not source_files,
-            'qa_suite': suite.model_dump(),
+            'qa_suite': suite.model_dump() if suite else None,
             'ui_contract': (ui_contract.model_dump() if (ui_contract := self.workspace.ui_contract(identity)) else None),
             'instructions': 'Implement approved scope on the restored snapshot; follow the latest repair feedback. '
                 'Use the source index to locate relevant code, read before edits and prefer run_checks before '
@@ -397,6 +453,7 @@ class PipelineRuntime:
             submission = CandidateSubmission.model_validate(a)
             if result:
                 return {**result, 'submitted': True}
+            self._await_qa_plan(ctx, i)
             response = self.workspace.submit(ctx, sup, started, manifest, submission.message,
                 handoff=submission.handoff, test_concerns=[c.model_dump() for c in submission.test_concerns])
             if response.get('submitted') is False:

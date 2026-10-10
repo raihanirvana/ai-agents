@@ -43,7 +43,7 @@ def test_plan_then_qa_plan_then_developer_share_scope_budget(world):
         with world.db.read() as s:
             j = s.get(Job, job_id)
             assert j.stage == expected
-        lane = 'interactive' if expected == 'technical_plan' else 'execution'
+        lane = 'execution' if expected == 'development' else 'interactive'
         lease = queue.claim('worker', lane, capacity=2 if lane == 'interactive' else 1, runtimes=('pipeline',))
         queue.reserve(lease, 'model')
         queue.complete(lease, {'suite_artifact_id': 'suite-fixture'} if expected == 'qa_plan' else {})
@@ -96,4 +96,27 @@ def test_failed_amendment_does_not_spin_automatic_new_attempt(world):
     job_id = scheduler.tick()[0]
     lease = queue.claim('worker', 'interactive', capacity=2, runtimes=('pipeline',))
     queue.fail(lease, error='invalid contract amendment', retryable=False)
+    assert scheduler.tick() == []
+
+
+def test_qa_source_planning_and_developer_overlap_without_second_writer(world):
+    t = world.approve(world.new())
+    scheduler, queue = configure(world)
+    scheduler.tick()
+    lead = queue.claim('worker', 'interactive', capacity=2, runtimes=('pipeline',))
+    queue.complete(lead, {'ui_contract_revision': 1})
+    qa_id = scheduler.tick()[0]
+    qa = queue.claim('qa-worker', 'interactive', capacity=2, runtimes=('pipeline',))
+    queue.begin_run(qa, {})
+    dev_id = scheduler.tick()[0]
+    dev = queue.claim('dev-worker', 'execution', capacity=1, runtimes=('pipeline',))
+    assert qa is not None and dev is not None
+    assert scheduler.tick() == []
+    with world.db.read() as s:
+        assert s.get(Job, qa_id).stage == 'qa_plan'
+        assert s.get(Job, dev_id).stage == 'development'
+        assert s.get(Job, qa_id).limits['budget_key'] == s.get(Job, dev_id).limits['budget_key']
+    queue.complete(qa, {'suite_artifact_id': 'suite-fixture', 'ui_contract_revision': 1})
+    assert scheduler.tick() == []
+    queue.finish_cleanup(qa.job_id, qa.generation)
     assert scheduler.tick() == []

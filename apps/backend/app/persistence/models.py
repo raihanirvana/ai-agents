@@ -578,4 +578,35 @@ class Preview(Base):
     )
 
 
-SYSTEM_TABLES = ("local_sessions", "runtime_credentials", "api_commands", "previews")
+SYSTEM_TABLES = ("local_sessions", "runtime_credentials", "api_commands", "previews", "qa_waivers")
+
+
+class QaWaiver(Base):
+    """Immutable user ownership of inconclusive tests on one reviewed target.
+
+    The failed Verification remains failed. This is separate from UAT approval.
+    """
+    __tablename__ = 'qa_waivers'
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey('projects.id'), nullable=False)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey('tickets.id'), nullable=False)
+    scope_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    candidate_id: Mapped[str] = mapped_column(ForeignKey('candidates.id'), nullable=False)
+    verification_id: Mapped[str] = mapped_column(ForeignKey('verifications.id'), nullable=False, unique=True)
+    target_artifact_id: Mapped[str] = mapped_column(ForeignKey('artifacts.id'), nullable=False)
+    target_digest: Mapped[str] = mapped_column(String, nullable=False)
+    diagnosis_artifact_id: Mapped[str] = mapped_column(ForeignKey('artifacts.id'), nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    manual_uac_ids: Mapped[Any] = mapped_column(Json, nullable=False)
+    excluded_test_ids: Mapped[Any] = mapped_column(Json, nullable=False)
+    evidence_artifact_ids: Mapped[Any] = mapped_column(Json, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+    __table_args__ = (
+        CheckConstraint("scope_version >= 1 AND user_id LIKE 'user:%' AND length(trim(reason)) > 0", name='user_decision'),
+        CheckConstraint(_sha('target_digest'), name='target_digest'),
+        _json('manual_uac_ids', 'array'), _json('excluded_test_ids', 'array'), _json('evidence_artifact_ids', 'array'),
+        ForeignKeyConstraint(['ticket_id', 'scope_version'], ['ticket_versions.ticket_id', 'ticket_versions.version']),
+        ForeignKeyConstraint(['target_artifact_id', 'target_digest'], ['artifacts.id', 'artifacts.checksum']),
+        Index('ix_qa_waivers_candidate', 'candidate_id'),
+    )

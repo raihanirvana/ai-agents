@@ -24,6 +24,7 @@ class ProjectCreate(Body):
     mode: Literal["new", "existing"] = "new"
     brief: str = Field(default="", max_length=30000)
     repo_ref: str | None = Field(default=None, max_length=2000)
+    qa_profile: Literal["lightweight", "manual"] = "lightweight"
 
 
 class Brief(Revision):
@@ -48,6 +49,7 @@ class Scope(Body):
     uac: list[Criterion] = Field(min_length=1, max_length=100)
     dependencies: list[str] = Field(default_factory=list, max_length=100)
     reverts_candidate_id: str | None = None
+    qa_profile: Literal["lightweight", "manual"] | None = None
 
 
 class ScopeEdit(Revision):
@@ -150,3 +152,18 @@ class CandidateReview(Revision):
 class Tool(Body):
     name: str
     args: dict[str, Any] = Field(default_factory=dict)
+
+
+class QaProfile(Revision):
+    qa_profile: Literal['lightweight', 'manual']
+
+
+class QaManualDecision(Revision):
+    candidate_id: str
+    verification_id: str
+    target_artifact_id: str
+    target_digest: str
+    diagnosis_artifact_id: str
+    evidence_ids: list[str] = Field(min_length=1, max_length=500)
+    manual_uac_ids: list[str] = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=4000)

@@ -84,7 +84,10 @@ def verification(session, store, candidate, verification_id):
     manifest = document(session, store, v.target_artifact_id)
     if v.suite_digest != manifest["runner_manifest_digest"]:
         raise Conflict("verification suite differs from pinned runner manifest")
-    if v.status != "passed" or v.results.get("fake_provider") is not False or v.results.get("infrastructure_failure") is not False:
+    if v.status != 'passed':
+        from .qa_resolution import validate_persisted
+        return validate_persisted(session, store, candidate, v.id)
+    if v.results.get("fake_provider") is not False or v.results.get("infrastructure_failure") is not False:
         raise Invalid("QA requires non-fake successful harness execution")
     counts = v.counts
     mandatory = v.expected_test_ids

@@ -12,6 +12,7 @@ export interface Project {
   id: string; name: string; mode: "new" | "existing"; brief: string; brief_version: number;
   revision: number; onboarding: string; accepted_tip: string | null;
   demo_unlimited_budgets?: boolean;
+  qa_profile?: "lightweight" | "manual";
   onboarding_detail?: { job_id: string; report_artifact_id?: string; source_sha?: string | null;
     baseline_sha?: string | null; dirty?: boolean; dirty_status?: string[]; dirty_total?: number; patch_applied?: boolean;
     blocker?: string | null; required_checks?: string } | null;
@@ -86,10 +87,14 @@ export interface Candidate {
   target_artifact_id: string | null; target_digest: string | null; evidence_ids: string[]; preview: Json;
   commit_artifact_id: string; build_artifact_id: string | null; live_preview: Preview | null;
   integrated_sha: string | null; integration: Integration | null;
+  qa_waiver?: { id: string; reason: string; manual_uac_ids: string[]; verification_id: string } | null;
   verifications: Verification[];
 }
 export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; preview: Preview | null; releases: Release[]; cursor: number }
 export interface TicketDetail {
+  qa_resolution?: { eligible: boolean; reason?: string; candidate_id?: string; verification_id?: string;
+    target_artifact_id?: string; target_digest?: string; diagnosis_artifact_id?: string;
+    evidence_ids?: string[]; criteria?: Criterion[] } | null;
   verification_plan?: { profile: "lightweight"; scope_version: number;
     status: "not_planned" | "planned" | "legacy"; test_count: number | null;
     criteria: (Criterion & { test_ids: string[] })[] };
@@ -122,6 +127,8 @@ export interface Commands {
   cancel: { body: Revision; response: { ticket: Ticket } };
   changes: { body: Revision & { candidate_id: string; reason: string }; response: { ticket: Ticket } };
   repair: { body: Revision & { additional_cycles: number }; response: { ticket: Ticket } };
+  qaManual: { body: Body.QaManualDecision; response: { ticket: Ticket } };
+  qaProfile: { body: Body.QaProfile; response: { project: Project } };
   uat: { body: UatDecision; response: { integration: { operation_id: string; [key: string]: Json } } };
   waiver: { body: Revision & { ticket_id: string; fingerprint_artifact_id: string; reason: string }; response: { approval_id: string } };
   release: { body: Revision & { target_artifact_id: string; target_digest: string; evidence_ids: string[] }; response: { release_id: string; revision: number; status: string } };

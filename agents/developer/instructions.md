@@ -27,6 +27,13 @@ This file defines the task contract; the structured PO/lead runtime does not run
 
 ## Task: `implement`
 
+QA source planning runs concurrently in the lightweight lane. A missing qa_suite
+at startup is expected; implement the approved scope and TL ui_contract while QA
+plans. submit_candidate waits for the current validated suite without another model
+call. Do not ask the user to start QA or invent its suite. UI contract amendments
+remain fenced by revision; honor missing_testids reported by current run_checks.
+
+
 1. Read the approved scope and acceptance criteria. Read the existing code before changing it.
    An empty source_files list on a new project is expected: create the scoped app and Node tests in this
    snapshot. There is no host repository to search. Use read_file path "." once; never guess absolute paths.

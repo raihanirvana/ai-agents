@@ -299,7 +299,8 @@ class WorkspaceSupervisor:
             "argv": [re.sub(r"run-[0-9a-f]{12}\.\d+\.[A-Za-z0-9_-]+", "[REDACTED]", a)
                      for a in result.argv], "network": result.network, "exit_code": result.exit_code,
             "timed_out": result.timed_out, "cancelled": result.cancelled, "oom_killed": result.oom_killed,
-            "duration_s": result.duration_s, "truncated": result.truncated, "image": manifest.image,
+            "duration_s": result.duration_s, "peak_memory_bytes": result.peak_memory_bytes,
+            "seed_inventory_digest": result.seed_inventory_digest, "memory_observation": result.memory_observation, "truncated": result.truncated, "image": manifest.image,
             "image_id": image_id, "manifest_digest": manifest.digest,
             "container_network": "none",
             "dependency_acquisition": ('verified-install-snapshot' if result.cache_key else
@@ -769,7 +770,7 @@ class WorkspaceSupervisor:
         if run_dir.parent.parent.parent != self.root or run_dir.name != ref.run_id or spec.run_id != ref.run_id:
             raise WorkspaceError("refusing cleanup outside the run's own directory")
         self.broker(ref.project_id).remove_worktree(run_dir / "worktree")
-        for sub in ("sandbox", "verify"):
+        for sub in ("sandbox", "verify", "baseline", "baseline-cache"):
             shutil.rmtree(run_dir / sub, ignore_errors=True)
 
     def reap_orphans(self, project_id: str) -> list[str]:

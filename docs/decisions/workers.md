@@ -213,3 +213,12 @@ Identitas workspace supervisor dipublikasikan di bawah `flock` pada lockfile
 terpisah, menggunakan temporary file, fsync dan atomic rename. Pembaca juga
 mengambil lock, menolak symlink/file khusus/owner salah/ID invalid. ID existing
 tidak diganti karena label container dan bukti cleanup bergantung pada ID itu.
+
+## Planning QA paralel (11 Oktober 2026)
+
+`qa_plan` memakai lane interactive yang menyisakan kapasitas chat. Scheduler boleh
+menjalankan satu QA source planner dan satu Developer pada scope yang sama setelah
+TL plan; Developer tetap satu penulis. Cleanup dari job terminal, review, verify dan
+job lain pada scope itu tetap menghalangi dispatch. Semua job berbagi budget pipeline
+scope; parallelism tidak menggandakan cap maupun me-reset usage. UI contract revision
+mem-fence suite publication; submission menunggu suite current tanpa model call baru.

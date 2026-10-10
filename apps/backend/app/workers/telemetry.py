@@ -7,7 +7,7 @@ from datetime import datetime
 
 PHASES = frozenset({'model', 'tool', 'provider_slot_wait', 'install', 'test', 'build',
     'browser', 'baseline_browser', 'baseline_build', 'baseline_browser_restore', 'checks',
-    'queue_wait', 'user_wait', 'provider_quota_wait'})
+    'queue_wait', 'user_wait', 'provider_quota_wait', 'qa_plan_wait'})
 
 
 def validate(metric):

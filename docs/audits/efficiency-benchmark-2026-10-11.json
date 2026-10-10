@@ -1,0 +1,223 @@
+{
+  "schema": 1,
+  "label": "isolated real Docker/Git/browser; no provider, no product approvals",
+  "host": "macOS-15.6-arm64-arm-64bit",
+  "base_sha": "41f8063443a73bd0410a130ed569f37b2edf36b0",
+  "manifest_digest": "7df143a1b6454c748bd2a3ef8dfb6c2219fffb316623bcd48a35e322a335f6a5",
+  "lock_digest": "6a229f6ec69b8c1ec758d2af629c7b3e86279cf17aac11d3f68b481aab82f15a",
+  "node_image_id": "sha256:ce917ae8c972e277e9d3a611162e26be08f538ed3ac49cebb191de28066291aa",
+  "runner": {
+    "runner_code_digest": "c46a49aaed90ff05b2c6e2d192d450fc8acd670935b96db00cefe852965a4ba2",
+    "runner_image_id": "sha256:2ef0f8a3cfc5dc85474f35f3b4f0e9e35960f4ba84877d5816043435bbcd2362"
+  },
+  "workload": "base install/build/repo test + browser + independent developer run_checks",
+  "samples": [
+    {
+      "round": 0,
+      "cache": "cold",
+      "duration_s": 162.768,
+      "baseline_build_s": 118.369,
+      "baseline_browser_s": 5.817,
+      "developer_checks_s": 38.107,
+      "baseline_build_cache_hit": false,
+      "baseline_browser_cache_hit": false,
+      "developer_phases": [
+        {
+          "phase": "install",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 22.684,
+          "peak_memory_bytes": null,
+          "cache_hit": true,
+          "infrastructure_failure": false
+        },
+        {
+          "phase": "test",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 1.818,
+          "peak_memory_bytes": null,
+          "cache_hit": false,
+          "infrastructure_failure": false,
+          "repository_gate": {
+            "status": "passed",
+            "counts": {
+              "discovered": 3,
+              "executed": 3,
+              "passed": 3,
+              "failed": 0,
+              "skipped": 0
+            },
+            "failed_test_ids": []
+          }
+        },
+        {
+          "phase": "build",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 11.124,
+          "peak_memory_bytes": null,
+          "cache_hit": false,
+          "infrastructure_failure": false
+        }
+      ],
+      "commands": [
+        {
+          "label": "baseline-build",
+          "duration_s": 12.393,
+          "peak_memory_bytes": null,
+          "execution_kind": "executed",
+          "exit_code": 0,
+          "oom_killed": false
+        },
+        {
+          "label": "baseline-install",
+          "duration_s": 103.523,
+          "peak_memory_bytes": null,
+          "execution_kind": "executed",
+          "exit_code": 0,
+          "oom_killed": false
+        },
+        {
+          "label": "phase-install",
+          "duration_s": 22.684,
+          "peak_memory_bytes": null,
+          "execution_kind": "cache_reuse",
+          "exit_code": 0,
+          "oom_killed": false
+        },
+        {
+          "label": "phase-test",
+          "duration_s": 1.818,
+          "peak_memory_bytes": null,
+          "execution_kind": "executed",
+          "exit_code": 0,
+          "oom_killed": false
+        },
+        {
+          "label": "required-repo-test",
+          "duration_s": 1.862,
+          "peak_memory_bytes": null,
+          "execution_kind": "executed",
+          "exit_code": 0,
+          "oom_killed": false
+        },
+        {
+          "label": "phase-build",
+          "duration_s": 11.124,
+          "peak_memory_bytes": null,
+          "execution_kind": "executed",
+          "exit_code": 0,
+          "oom_killed": false
+        }
+      ],
+      "peak_memory_bytes": null
+    },
+    {
+      "round": 1,
+      "cache": "warm",
+      "duration_s": 36.354,
+      "baseline_build_s": 0.431,
+      "baseline_browser_s": 0.147,
+      "developer_checks_s": 35.151,
+      "baseline_build_cache_hit": true,
+      "baseline_browser_cache_hit": true,
+      "developer_phases": [
+        {
+          "phase": "install",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 19.144,
+          "peak_memory_bytes": null,
+          "cache_hit": true,
+          "infrastructure_failure": false
+        },
+        {
+          "phase": "test",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 1.7,
+          "peak_memory_bytes": null,
+          "cache_hit": false,
+          "infrastructure_failure": false,
+          "repository_gate": {
+            "status": "passed",
+            "counts": {
+              "discovered": 3,
+              "executed": 3,
+              "passed": 3,
+              "failed": 0,
+              "skipped": 0
+            },
+            "failed_test_ids": []
+          }
+        },
+        {
+          "phase": "build",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 11.605,
+          "peak_memory_bytes": null,
+          "cache_hit": false,
+          "infrastructure_failure": false
+        }
+      ],
+      "commands": [
+        {
+          "label": "phase-build",
+          "duration_s": 11.605,
+          "peak_memory_bytes": null,
+          "execution_kind": "executed",
+          "exit_code": 0,
+          "oom_killed": false
+        },
+        {
+          "label": "phase-test",
+          "duration_s": 1.7,
+          "peak_memory_bytes": null,
+          "execution_kind": "executed",
+          "exit_code": 0,
+          "oom_killed": false
+        },
+        {
+          "label": "phase-install",
+          "duration_s": 19.144,
+          "peak_memory_bytes": null,
+          "execution_kind": "cache_reuse",
+          "exit_code": 0,
+          "oom_killed": false
+        }
+      ],
+      "peak_memory_bytes": null
+    }
+  ],
+  "transcript_replay": {
+    "label": "synthetic replay; estimates, not provider usage or prompt-cache hits",
+    "calls": 80,
+    "cumulative_estimated_input_tokens": {
+      "unprojected": 15481203,
+      "stable_projection": 1293564,
+      "projection_rollover_10_calls": 1206819
+    },
+    "rollover_message_counts": [
+      22,
+      42,
+      51,
+      51,
+      51,
+      51,
+      51,
+      51
+    ],
+    "actual_provider_calls": 0,
+    "actual_cost_usd": 0
+  },
+  "billable_token_usage": null,
+  "measurement_status": "preliminary_reference_fixture_concurrent_with_functional_tests",
+  "limitations": [
+    "Not a controlled demo speed measurement.",
+    "Kernel peak memory was unavailable in this run; optional sampling added afterwards was not measured.",
+    "Synthetic transcript values are estimates, not provider usage or prompt-cache measurements.",
+    "Further performance measurements deferred by user until demo."
+  ]
+}

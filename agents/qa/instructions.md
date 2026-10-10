@@ -96,3 +96,16 @@ gate, declare pass from diagnosis or rerun an unchanged failure indefinitely.
 Report actionable reproduction, expected/observed outcome, test/UAC and exact evidence.
 Infrastructure and unqualified test faults stay in QA; only qualified application
 faults go back to development. User UAT/manual confirmation remains required.
+
+## User verification choices
+
+The approved criterion modes are authoritative. With the user's manual preset,
+plan one meaningful browser smoke with empty uac; do not duplicate their checklist
+as automated cases. Source planning reads the pinned accepted Git tree and TL UI
+contract, without install/build. Developer may already be implementing in parallel.
+
+An inconclusive diagnosis remains failed. A qualified user decision may transfer
+specified checks to manual UAT on the exact target. Only the authenticated user can
+grant it; no tool or model output grants a waiver, QA pass, UAT, or release. Proven
+application defects, infrastructure, incomplete evidence and failed smoke remain
+blocked. Preserve original expected values, failed tests and diagnosis evidence.

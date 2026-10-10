@@ -18,7 +18,7 @@ def row(s, model, identity, project_id=None):
 
 def project(p):
     return {"id": p.id, "name": p.name, "mode": p.mode, "brief": p.brief, "brief_version": p.brief_version,
-            "revision": p.revision, "onboarding": p.workflow.get("onboarding", "pending"),
+            "revision": p.revision, "qa_profile": p.workflow.get("qa_profile", "lightweight"), "onboarding": p.workflow.get("onboarding", "pending"),
             "accepted_tip": p.workflow.get("accepted_tip"),
             "onboarding_detail": p.workflow.get("onboarding_detail"),
             "demo_unlimited_budgets": p.workflow.get('demo_unlimited_budgets') is True}
@@ -137,9 +137,13 @@ def artifact(a):
 
 
 def candidate(s, c):
+    from app.domain.qa_resolution import waiver_for
+    waiver = waiver_for(s, c)
     return {"id": c.id, "ticket_id": c.ticket_id, "scope_version": c.scope_version, "commit_sha": c.commit_sha,
             "base_sha": c.base_sha, "status": c.status, "target_artifact_id": c.target_artifact_id,
             "target_digest": c.target_digest, "evidence_ids": c.evidence_artifact_ids, "preview": c.preview,
+            "qa_waiver": {"id": waiver.id, "reason": waiver.reason, "manual_uac_ids": waiver.manual_uac_ids,
+                          "verification_id": waiver.verification_id} if waiver else None,
             "commit_artifact_id": c.commit_artifact_id, "build_artifact_id": c.build_artifact_id,
             "live_preview": (lambda p: previews.public(p) if p else None)(previews.latest_for(s, c.id)),
             "integrated_sha": c.integrated_sha, "integration": integration(c.integration),
@@ -202,10 +206,12 @@ def verification_plan(s, t):
             for c in version.uac] if version else []}
 
 
-def detail(s, ticket_id, threads):
+def detail(s, ticket_id, threads, store=None):
+    from app.domain.qa_resolution import available
     t = row(s, Ticket, ticket_id)
     return {"ticket": {**ticket(t), 'dependency_waits': dependency_waits(s, [t])[t.id],
                        'rebase_notice': rebase_notices(s, [t])[t.id]},
+            'qa_resolution': available(s, store, t) if store is not None else None,
             'verification_plan': verification_plan(s, t), "versions": [{"version": v.version, "title": v.title, "description": v.description,
             "uac": v.uac, "scope": v.scope} for v in s.scalars(select(TicketVersion).where(TicketVersion.ticket_id == t.id)
                                                                     .order_by(TicketVersion.version))],

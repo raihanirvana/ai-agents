@@ -111,7 +111,19 @@ class ReleaseRuntime:
                 if not target.get("suite_artifact_id"):
                     raise ReleaseBlocked(f"ticket #{entry['number']} has no stored QA suite")
                 plan = QaPlan.model_validate(json.loads(self.store.read_bytes(s, target["suite_artifact_id"])))
+                from app.domain.qa_resolution import waiver_for, validate_persisted
+                waiver = waiver_for(s, candidate)
+                excluded = set()
+                if waiver:
+                    validate_persisted(s, self.store, candidate, waiver.verification_id)
+                    expected = {'id': waiver.id, 'reason': waiver.reason, 'manual_uac_ids': waiver.manual_uac_ids,
+                                'excluded_test_ids': waiver.excluded_test_ids}
+                    if entry.get('qa_waiver') != expected:
+                        raise ReleaseBlocked('Release freeze differs from the pinned user QA decision')
+                    excluded = set(waiver.excluded_test_ids)
                 for test in plan.tests:
+                    if test.id in excluded:
+                        continue
                     name = f"t{entry['number']}-{test.id}"
                     if len(name) > 64:
                         name = f"t{entry['number']}-{digest_of(test.id)[:20]}"
@@ -121,7 +133,12 @@ class ReleaseRuntime:
                                              uac=[f"{entry['ticket_id']}:{u}" for u in test.uac]))
         required = {f"{e['ticket_id']}:{u['id']}" for e in entries for u in e["uac"] if u.get("mode", "automated") == "automated"}
         if not tests:
-            raise ReleaseBlocked("the included tickets have no automated regression tests")
+            if not any(e.get('qa_waiver') for e in entries):
+                raise ReleaseBlocked("the included tickets have no automated regression tests")
+            # All affected UAC stay manual. A fresh isolated smoke still runs on
+            # the combined release target; this never claims feature coverage.
+            tests.append(BrowserTest(id='release-smoke', purpose='smoke', uac=[],
+                steps=[{'action': 'navigate', 'value': '/'}, {'action': 'assert_visible', 'selector': 'body'}]))
         if len({t.id for t in tests}) != len(tests):
             raise ReleaseBlocked("regression test IDs collide between tickets")
         suite = QaPlan.model_construct(kind="qa_plan", summary=f"Release regression of {len(entries)} accepted tickets", tests=tests)

@@ -23,6 +23,9 @@ You are given an approved ticket (scope, UAC, dependencies) and project knowledg
   QA is limited to this vocabulary. Include result rows/messages/empty-state nodes,
   rather than declaring only input/buttons. Do not invent arbitrary CSS selectors.
 
+After this plan, QA source planning and Developer may run concurrently. The UI contract
+is their shared starting point; declare it completely without waiting for browser execution.
+
 Keep the plan proportional to the approved ticket. For a small app, prefer a few concrete steps
 using the existing/reference stack. Cover every UAC, necessary scaffolding, and any supplied QA
 selector contract without implementing sibling tickets. Record consequential decisions only; omit proposals

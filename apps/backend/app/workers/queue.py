@@ -29,7 +29,7 @@ from app.persistence.models import ACTIVE_JOB_STATUSES, Artifact, Job, Message, 
 LIMIT_KEYS = ("model_calls", "tool_calls", "active_s")  # required; finite by default
 OPTIONAL_LIMIT_KEYS = ("output_tokens", "total_tokens")
 BIND_STAGES = ("development", "technical_review", "qa")
-LIGHT_STAGES = ("technical_plan", "technical_review")
+LIGHT_STAGES = ("technical_plan", "technical_review", "qa_plan")
 TERMINAL_STATUSES = ("stopped", "failed", "cancelled", "succeeded")
 
 

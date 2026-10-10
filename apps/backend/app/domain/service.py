@@ -14,14 +14,16 @@ class Workflow:
     def __init__(self, db: Database, store: ArtifactStore):
         self.db, self.store = db, store
 
-    def create_project(self, actor, *, name, mode, brief="", repo_ref=None):
+    def create_project(self, actor, *, name, mode, brief="", repo_ref=None, qa_profile="lightweight"):
         if actor.role != "user" or not name.strip() or mode not in ("new", "existing"):
             raise Invalid("user project name and valid mode required")
+        if qa_profile not in ("lightweight", "manual"):
+            raise Invalid("Invalid user QA profile")
         if mode == "existing" and not repo_ref:
             raise Invalid("existing project requires a repository reference")
         with self.db.write() as s:
             project = Project(id=actor.project_id, name=name, mode=mode, brief=brief, repo_ref=repo_ref,
-                              workflow={"onboarding": "pending"})
+                              workflow={"onboarding": "pending", "qa_profile": qa_profile})
             s.add(project)
             s.flush()
             self._event(s, actor, "project.created", project, {"mode": mode})
@@ -34,6 +36,16 @@ class Workflow:
             return apply_change(s, Project, project.id, expected_revision=expected_revision,
                 values={"brief": brief, "brief_version": project.brief_version + 1},
                 event=EventSpec("project.brief_changed", actor.id))
+
+    def set_qa_profile(self, actor, expected_revision, qa_profile):
+        with self.db.write() as s:
+            self._permit(s, actor, 'user')
+            project = self._row(s, Project, actor.project_id, actor)
+            if qa_profile not in ('lightweight', 'manual'):
+                raise Invalid('Invalid user QA profile')
+            return apply_change(s, Project, project.id, expected_revision=expected_revision,
+                values={'workflow': {**project.workflow, 'qa_profile': qa_profile}},
+                event=EventSpec('project.qa_profile_changed', actor.id, {'qa_profile': qa_profile}))
 
     def set_priority(self, actor, ticket_id, expected_revision, priority):
         with self.db.write() as s:
@@ -98,8 +110,11 @@ class Workflow:
         return None
 
     def _scope(self, s, actor, t, document):
-        if not isinstance(document, dict) or set(document) - {"title", "description", "uac", "dependencies", "reverts_candidate_id"}:
-            raise Invalid("scope fields are title/description/uac/dependencies/reverts_candidate_id")
+        if not isinstance(document, dict) or set(document) - {"title", "description", "uac", "dependencies", "reverts_candidate_id", "qa_profile"}:
+            raise Invalid("scope fields are title/description/uac/dependencies/reverts_candidate_id/qa_profile")
+        profile = document.get('qa_profile')
+        if profile not in (None, 'lightweight', 'manual'):
+            raise Invalid('Invalid QA profile')
         title, uac, deps = document.get("title"), document.get("uac"), document.get("dependencies", [])
         if not isinstance(title, str) or not title.strip() or not isinstance(document.get("description", ""), str):
             raise Invalid("scope title/description invalid")
@@ -108,6 +123,8 @@ class Workflow:
             not isinstance(c.get("text"), str) or not c["text"].strip() or
             c.get("mode", "automated") not in ("automated", "manual") for c in uac):
             raise Invalid("scope needs uniquely identified UAC")
+        if profile == 'manual':
+            uac = [{**c, 'mode': 'manual'} for c in uac]
         if len({c["id"] for c in uac}) != len(uac) or not isinstance(deps, list) or any(not isinstance(d, str) for d in deps) or len(set(deps)) != len(deps):
             raise Invalid("duplicate UAC/dependency")
         for dep in deps:
@@ -120,7 +137,8 @@ class Workflow:
             if candidate.status != "accepted" or not candidate.integrated_sha:
                 raise Invalid("revert must reference an integrated accepted candidate")
         return {"title": title.strip(), "description": document.get("description", ""),
-                "uac": uac, "dependencies": deps, "reverts_candidate_id": revert}
+                "uac": uac, "dependencies": deps, "reverts_candidate_id": revert,
+                **({"qa_profile": profile} if profile else {})}
 
     def _dag(self, s, actor, replacement=None):
         tids = set(s.scalars(select(Ticket.id).where(Ticket.project_id == actor.project_id)))
@@ -180,7 +198,8 @@ class Workflow:
         s.flush()
         s.add(TicketVersion(ticket_id=t.id, version=version, title=doc["title"],
             description=doc["description"], uac=doc["uac"], scope={"dependencies": doc["dependencies"],
-                "reverts_candidate_id": doc["reverts_candidate_id"]},
+                "reverts_candidate_id": doc["reverts_candidate_id"],
+                **({"qa_profile": doc["qa_profile"]} if doc.get("qa_profile") else {})},
             content_digest=sha256_bytes(canonical_json(doc)), created_by=actor.id))
         s.flush()
         for dep in doc["dependencies"]:
@@ -209,6 +228,8 @@ class Workflow:
                 for known in s.scalars(select(Ticket).where(Ticket.project_id == actor.project_id)):
                     if known.workflow.get("creation_key") == idempotency_key:
                         return known
+            if actor.role == 'po' or document.get('qa_profile') is None:
+                document = {**document, 'qa_profile': s.get(Project, actor.project_id).workflow.get('qa_profile', 'lightweight')}
             # A new PO proposal starts unapproved; existing scope can only change with user confirmation.
             number = max(s.scalars(select(Ticket.number).where(Ticket.project_id == actor.project_id)), default=0) + 1
             t = Ticket(project_id=actor.project_id, number=number, title="Untitled")
@@ -389,7 +410,7 @@ class Workflow:
                 raise Conflict("base is already initialized")
             evidence.digest(base_sha, (40, 64))
             return apply_change(s, Project, p.id, expected_revision=expected_revision,
-                values={"workflow": {"accepted_tip": base_sha}},
+                values={"workflow": {**p.workflow, "accepted_tip": base_sha}},
                 event=EventSpec("project.base_initialized", actor.id, {"accepted_tip": base_sha}))
 
     def submit_candidate(self, actor, ticket_id, expected_revision, attempt, *, commit_artifact_id,
@@ -490,6 +511,52 @@ class Workflow:
             s.flush()
             return self._change(s, actor, t, "uat_opened", phase="uat")
 
+    def waive_uncertain_qa(self, actor, ticket_id, expected_revision, *, candidate_id, verification_id,
+                          target_artifact_id, target_digest, diagnosis_artifact_id, evidence_ids,
+                          manual_uac_ids, reason):
+        from .qa_resolution import qualify
+        from app.persistence.models import QaWaiver
+        with self.db.write() as s:
+            self._permit(s, actor, 'user')
+            t = self._ticket(s, actor, ticket_id, expected_revision, ('qa',))
+            c = self._candidate(s, actor, t, candidate_id)
+            if c.status != 'review_approved' or (target_artifact_id, target_digest) != (c.target_artifact_id, c.target_digest):
+                raise Conflict('QA candidate/target changed')
+            if s.get(Project, t.project_id).workflow.get('accepted_tip') != c.base_sha:
+                raise Conflict('Accepted base changed; fresh candidate/QA/UAT required')
+            if t.blocker and t.blocker.get('reason') != 'needs_human':
+                raise Conflict('Resolve the ticket blocker before a manual QA decision')
+            try:
+                qualified = qualify(s, self.store, c, verification_id, diagnosis_artifact_id)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise Invalid('QA decision evidence is malformed or unavailable') from exc
+            if (len(evidence_ids) != len(set(evidence_ids)) or set(evidence_ids) != set(qualified['evidence_ids']) or
+                    len(manual_uac_ids) != len(set(manual_uac_ids)) or sorted(manual_uac_ids) != qualified['manual_uac_ids']):
+                raise Conflict('Manual QA ownership or displayed evidence differs from current diagnosis')
+            if not isinstance(reason, str) or not reason.strip():
+                raise Invalid('Manual QA ownership requires a reason')
+            decision = QaWaiver(project_id=t.project_id, ticket_id=t.id, scope_version=t.current_version,
+                candidate_id=c.id, verification_id=verification_id, target_artifact_id=c.target_artifact_id,
+                target_digest=c.target_digest, diagnosis_artifact_id=diagnosis_artifact_id,
+                user_id=actor.id, reason=reason.strip(), manual_uac_ids=qualified['manual_uac_ids'],
+                excluded_test_ids=qualified['excluded_test_ids'], evidence_artifact_ids=qualified['evidence_ids'])
+            s.add(decision)
+            s.flush()
+            # The authoritative runner already proved smoke on exactly these build bytes.
+            smoke = self.store.put_json(s, project_id=t.project_id, kind='report', name='preview-smoke.json',
+                document={'target_artifact_id': c.target_artifact_id, 'target_digest': c.target_digest,
+                          'status': 'passed', 'kind': 'preview_smoke'},
+                meta={'producer': 'verification', 'source_verification_id': verification_id,
+                      'qa_waiver_id': decision.id})
+            c.evidence_artifact_ids = [*decision.evidence_artifact_ids, smoke.id]
+            c.preview = {'verification_id': verification_id, 'smoke_artifact_id': smoke.id, 'qa_waiver_id': decision.id}
+            c.status = 'verified'
+            s.flush()
+            self._event(s, actor, 'qa.manual_ownership_accepted', decision,
+                        {'target_digest': c.target_digest, 'verification_id': verification_id,
+                         'manual_uac_ids': decision.manual_uac_ids})
+            return self._change(s, actor, t, 'manual_uat_opened', phase='uat', blocker=None)
+
     def reopen_qa(self, actor, ticket_id, expected_revision, candidate_id, verification_id, reason):
         """Withdraw an unaccepted QA result for trusted evidence correction, preserving reviewed code.
 
@@ -533,7 +600,11 @@ class Workflow:
                 evidence.artifact(s, self.store, t.project_id, aid)
             scope = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id, TicketVersion.version == t.current_version))
             required_manual = {u["id"] for u in scope.uac if u.get("mode") == "manual"}
-            if set(manual_uac_ids) != required_manual:
+            from .qa_resolution import waiver_for
+            qa_decision = waiver_for(s, c, v.id)
+            if qa_decision:
+                required_manual.update(qa_decision.manual_uac_ids)
+            if len(manual_uac_ids) != len(set(manual_uac_ids)) or set(manual_uac_ids) != required_manual:
                 raise Invalid("manual UAC confirmation incomplete")
             p = s.get(Project, t.project_id)
             if p.workflow.get("accepted_tip") != c.base_sha:
@@ -898,11 +969,17 @@ class Workflow:
                 version = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id,
                                                                TicketVersion.version == c.scope_version))
                 approval = s.scalar(select(Approval).where(Approval.type == "uat", Approval.candidate_id == c.id))
+                from .qa_resolution import waiver_for
+                qa_decision = waiver_for(s, c)
+                manual_ids = set(qa_decision.manual_uac_ids) if qa_decision else set()
                 entries.append({"ticket_id": t.id, "number": t.number, "title": version.title, "scope_version": c.scope_version,
                     "candidate_id": c.id, "integrated_sha": c.integrated_sha, "uat_approval_id": approval.id if approval else None,
                     "target_artifact_id": c.target_artifact_id, "target_digest": c.target_digest,
-                    "uac": [{"id": u["id"], "text": u["text"], "mode": u.get("mode", "automated")} for u in version.uac],
-                    "checklist": [f"{t.id}:{u['id']}" for u in version.uac if u.get("mode") == "manual"]})
+                    "uac": [{"id": u["id"], "text": u["text"], "mode": "manual" if u['id'] in manual_ids else u.get("mode", "automated")} for u in version.uac],
+                    "qa_waiver": {'id': qa_decision.id, 'reason': qa_decision.reason,
+                                  'manual_uac_ids': qa_decision.manual_uac_ids,
+                                  'excluded_test_ids': qa_decision.excluded_test_ids} if qa_decision else None,
+                    "checklist": [f"{t.id}:{u['id']}" for u in version.uac if u.get("mode") == "manual" or u['id'] in manual_ids]})
             if not entries:
                 raise Invalid("no accepted tickets are waiting for a release")
             return tip, entries

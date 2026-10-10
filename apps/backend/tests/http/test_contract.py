@@ -33,6 +33,10 @@ def test_api_migration_preserves_data_and_guards_and_downgrades(db_path, db):
     migrate.upgrade(db_path)
     with db.read() as s:
         after = dict(s.execute(text("SELECT name, sql FROM sqlite_master WHERE type='trigger'")).all())
-        assert before == after and len(after) > 10
+        assert len(after) > 10
+        assert {name: sql for name, sql in after.items() if name in before and
+                name != 'trg_candidates_verified_needs_pass'} == {
+                    name: sql for name, sql in before.items() if name != 'trg_candidates_verified_needs_pass'}
+        assert 'qa_waivers' in after['trg_candidates_verified_needs_pass']
         assert s.execute(text("SELECT id FROM projects WHERE id=:id"), {"id": p.id}).scalar() == p.id
     assert migrate.schema_drift(db_path) == []

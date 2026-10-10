@@ -38,6 +38,13 @@ export default function Workspace({ onProjects, onLogout }: { onProjects: () => 
       </header>
       <ErrorBanner error={error} onDismiss={dismissError} />
       <Onboarding />
+      {board && <label className="qa-profile">Preset QA untuk proposal tiket berikutnya
+        <select value={board.project.qa_profile ?? "lightweight"} disabled={busy} onChange={(e) => {
+          void command<"qaProfile">(`/projects/${board.project.id}/qa-profile`, {
+            expected_revision: board.project.revision, qa_profile: e.target.value as "lightweight" | "manual" });
+        }}><option value="lightweight">Otomatis sesuai UAC</option><option value="manual">Smoke otomatis + saya uji manual</option></select>
+        <span className="muted">Tiket yang sudah dibuat tetap memakai scope masing-masing.</span>
+      </label>}
       {board && (
         <details className="brief" open={editing} onToggle={(e) => {
           if (e.currentTarget.open && !editing) { setBrief(board.project.brief); setBriefRevision(board.project.revision); }

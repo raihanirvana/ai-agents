@@ -304,6 +304,10 @@ class ProductWorkspace:
             row = self.latest_intent(s, identity, 'qa_plan')
             if not row:
                 raise ValueError('no persisted QA suite for current scope')
+            plan = self.latest_intent(s, identity, 'technical_plan')
+            revision = ((plan.meta.get('plan') or {}).get('ui_contract') or {}).get('revision', 1) if plan else 1
+            if row.meta.get('ui_contract_revision', 1) != revision:
+                raise ValueError('QA suite belongs to an obsolete UI contract revision')
             suite = QaPlan.model_validate(json.loads(self.store.read_bytes(s, row.attachment_ids[-1])))
             version = s.query(TicketVersion).filter_by(ticket_id=identity['ticket_id'], version=identity['scope_version']).one()
             suite.check_criteria(version.uac)
@@ -323,6 +327,9 @@ class ProductWorkspace:
         ui_contract = self.ui_contract(identity)
         if ui_contract is not None:
             ui_contract.check_suite(suite)
+        # Planning no longer executes the base. Preserve baseline test coverage
+        # and fingerprint evidence before publishing the independent candidate.
+        self.base_build(ctx)
         record = sup.submit_candidate(started.ref, started.credential, message)
         from .test_concerns import qualify_concerns
         concerns, _, ignored = qualify_concerns(test_concerns or [], suite,

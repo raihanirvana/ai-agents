@@ -20,6 +20,7 @@ def command_summary(phase, result):
     passed = clean and (gate is None or gate['status'] == 'passed')
     row = {'phase': phase, 'status': 'passed' if passed else 'failed',
            'exit_code': result.exit_code, 'duration_s': result.duration_s,
+           'peak_memory_bytes': result.peak_memory_bytes,
            'cache_hit': bool(result.cache_key),
            'infrastructure_failure': any((result.cancelled, result.timed_out, result.oom_killed, result.truncated))}
     if gate is not None:

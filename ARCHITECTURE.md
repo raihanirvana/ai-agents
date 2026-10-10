@@ -578,6 +578,36 @@ infrastruktur, atau acceptance UAC tiket tidak dapat ditutup waiver tersebut.
 UI menampilkan gate eligible dengan baseline waiver dan failure yang tersisa,
 tanpa klaim semua checks hijau. Agent hanya boleh mengusulkan waiver.
 
+### Keputusan pengguna ketika QA tidak konklusif (11 Oktober 2026)
+
+`qa_waivers` adalah record keputusan pengguna tambahan, terpisah dari 12 entitas
+inti dan `Approval` UAT. Record immutable mem-pin project/ticket/scope/candidate,
+verification ID, target ID/digest, diagnosis/evidence IDs, test IDs terdampak,
+UAC yang dialihkan ke manual, user ID dan alasan. Triggers menjaga identitas dan
+melarang update/delete. Semua artefak keputusan dipin untuk cleanup/backup.
+
+Command `qa-manual-decisions` hanya tersedia pada HTTP local-session dengan CSRF,
+idempotency key dan expected ticket revision, ketika kandidat masih review-approved
+pada base aktif dan tidak ada attempt QA berjalan. Hanya report runner resmi lengkap,
+non-fake, smoke sehat, repo gates passed dan diagnosis test/unknown tanpa temuan
+application/infrastructure yang memenuhi syarat. Missing/skipped/incomplete execution,
+coverage gap, gate/baseline/health failure tetap ditolak. Baseline waiver tidak berubah.
+
+Verification asli tidak diubah menjadi passed. Kandidat boleh membuka UAT melalui
+keputusan user yang persis cocok; UI menampilkan QA belum konklusif. UAT tetap
+approval terpisah dengan konfirmasi manual seluruh UAC terdampak. Release freeze
+menyimpan keputusan/exclusions, mengalihkan UAC tersebut ke checklist manual dan
+menjalankan regression yang tersisa beserta smoke baru pada target gabungan.
+Approval release meminta checklist target gabungan baru; acceptance/approval
+historis tidak berpindah. Scope/UAC snapshot asli tidak ditulis ulang.
+
+Preset project `lightweight`/`manual` berlaku hanya untuk proposal baru. Preset tiket
+menjadi snapshot scope baru dan perlu approval. Semua-manual tetap membutuhkan
+harness smoke nyata, build dan repo gates. Tidak ada tool agent pemberi waiver.
+QA plan bersifat source-only pada lane ringan; Developer dapat berjalan paralel
+setelah TL plan. Publication suite memeriksa current UI revision, dan submit
+menunggu suite current tanpa model call tambahan. Review/browser/cleanup tetap fenced.
+
 ### Identitas build dan verification target
 
 Kandidat mengidentifikasi source/base SHA dan scope version. Build record baru

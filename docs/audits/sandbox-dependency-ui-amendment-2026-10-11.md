@@ -225,3 +225,39 @@ Penyebab hilangnya file di command sandbox belum terbukti; perlu workload berula
 serta inventory source sebelum/ sesudah seed/export untuk isolasi, bukan klaim
 bahwa seluruh grup selalu hijau. Worker/backend/frontend demo tetap mati;
 container pengujian dibersihkan.
+
+
+## F. Planning paralel, pilihan QA dan input command immutable
+
+Implementasi tersedia, review **NOT_REVIEWED**. Benchmark lanjutan dan validasi
+workload demo ditunda atas instruksi pengguna pada 11 Oktober 2026; catatan ini
+tidak mengklaim pengukuran performa final atau penyebab pasti insiden test.cjs.
+
+| Scope | Implementasi / file utama | Bukti dan batas |
+| --- | --- | --- |
+| QA planning paralel | `pipeline/scheduler.py`, `runtime.py`, `workspace.py`, `workers/queue.py`: QA plan source-only berada di lane interactive dan bisa berjalan bersama Developer setelah TL plan. Developer mulai dari UI contract dan menunggu suite valid sebelum submit. Revision, lease, cleanup dan shared budget tetap diperiksa. Baseline dieksekusi sebelum publikasi commit, melalui cache. | Regresi scheduler/contract amendment; tidak ada otomatisasi scope approval, QA pass atau UAT. |
+| Benchmark siap demo | `pipeline/benchmark.py`: temp DB/Git/artifact/cache, cold/warm per identitas, browser baseline dan Developer checks; replay transcript berlabel estimasi, tanpa provider call. `workspace/memory_observation.py` menyediakan sampling optional bila kernel tidak menyediakan memory.peak. | Putaran awal pada fixture reference disimpan sebagai **preliminary**, berjalan bersamaan dengan tes lain; tidak membuktikan speedup demo atau peak memory. Pengukuran berikutnya ditunda. |
+| Keputusan user untuk QA tidak meyakinkan | `domain/qa_resolution.py`, `service.py`, `evidence.py`, migration `0007_qa_waivers.py`, HTTP/queries/UI Ticket, pin dan release runtime. Keputusan user immutable mem-pin semua identitas dan hanya dapat mengambil alih UAC dari test gagal yang dieksekusi lengkap dengan diagnosis test/unknown. | QA asli tetap failed. Missing/skipped, fake, smoke/gate/infra gagal, proven app failure dan evidence stale ditolak. UAT checklist wajib mencakup UAC yang diambil alih. Release gabungan hanya mengecualikan test ID yang diputuskan, mempertahankan smoke dan manual approval baru. |
+| Preset QA | Scope/project `qa_profile`: lightweight (otomatis atau campuran sesuai UAC), manual (smoke otomatis + UAC user). Projects/Workspace/ScopeForm, HTTP dan kontrak API mengikuti pilihan. | Pilihan proyek memengaruhi proposal berikutnya; scope historis immutable. PO/model tidak bisa mengubah approval lama. |
+| Stabilitas source mount | `workspace/command_seed.py`, `sandbox.py`, `supervisor.py`: setiap command mendapat source snapshot bounded unik, node_modules terpisah, inventory file/type/SHA diperiksa initializer sebelum target berjalan. Mount tidak mengacu pada path yang diganti import. | Tes seed membuktikan snapshot bertahan ketika source diganti; enam command Docker nyata node --test test.cjs mempertahankan file dan inventory. Mitigasi dan observabilitas, belum pembuktian akar penyebab insiden historis. |
+
+### Verifikasi dan keterbatasan
+
+Dari `apps/backend`, memakai venv dan Git modern pada PATH:
+
+- Selection akhir: `pytest tests/domain/test_qa_manual_resolution.py tests/http/test_qa_choices.py tests/pipeline/test_scheduler.py tests/pipeline/test_contract_amendment.py tests/persistence/test_constraints.py -q --tb=short`: **65 passed**, 11,67 s.
+- Selection sebelumnya termasuk migration dan seed: **27 passed**, 11,73 s;
+  warning yang sudah dikenal tentang refleksi expression index SQLite.
+- `npm run build`: lulus; warning ukuran chunk Office yang sudah ada.
+- Grup luas domain/http/persistence/workers/agents/pipeline dihentikan pengguna:
+  **700 passed, 2 failed**, 473,91 s. Dua kegagalan berasal dari ekspektasi teks
+  guard `passed verification`, diperbaiki pada migrasi dan selection akhir lulus.
+- Grup workspace/release/recovery/onboarding dihentikan pengguna:
+  **93 passed**, 471,12 s, sebelum selesai. Bukan hasil full suite.
+- Proses pytest panjang sudah berhenti dan `docker ps` kosong setelah cleanup.
+  Worker, backend dan frontend demo tidak dinyalakan.
+
+Bukti domain/HTTP memakai receipt fixture terkontrol, bukan QA model nyata.
+Sampling memory hanya observational, lower bound jika memakai memory.current;
+OOM, recovery SIGKILL, runtime provider dan workload proyek besar belum dibuktikan
+oleh selection ini. Tidak ada independent review, commit, push atau restart.

@@ -1,6 +1,6 @@
 import type { Criterion, Json } from "../../../contracts/api/types";
 
-export interface ScopeDoc { title: string; description?: string; uac: Criterion[]; dependencies?: string[]; reverts_candidate_id?: string }
+export interface ScopeDoc { title: string; description?: string; uac: Criterion[]; dependencies?: string[]; reverts_candidate_id?: string; qa_profile?: "lightweight" | "manual" }
 export type Change = { kind: "same" | "added" | "removed" | "changed"; label: string; before?: string; after?: string };
 
 const mode = (c: Criterion) => c.mode ?? "automated";
@@ -12,6 +12,7 @@ export function asScope(value: Json | undefined, fallback: ScopeDoc): ScopeDoc {
     title: typeof doc.title === "string" ? doc.title : fallback.title,
     description: typeof doc.description === "string" ? doc.description : fallback.description ?? "",
     uac: Array.isArray(doc.uac) ? (doc.uac as unknown as Criterion[]) : fallback.uac,
+    ...(doc.qa_profile === "lightweight" || doc.qa_profile === "manual" ? { qa_profile: doc.qa_profile } : {}),
     dependencies: Array.isArray(doc.dependencies) ? (doc.dependencies as string[]) : [],
     ...(typeof doc.reverts_candidate_id === "string" ? { reverts_candidate_id: doc.reverts_candidate_id } : {}),
   };

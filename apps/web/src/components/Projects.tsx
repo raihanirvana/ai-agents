@@ -10,6 +10,7 @@ export default function Projects({ onOpen, onAuthLost }: { onOpen: (id: string) 
   const [name, setName] = useState("");
   const [brief, setBrief] = useState("");
   const [mode, setMode] = useState<"new" | "existing">("new");
+  const [qaProfile, setQaProfile] = useState<"lightweight" | "manual">("lightweight");
   const [repo, setRepo] = useState("");
   const [busy, setBusy] = useState(false);
   // One key per logical creation: a retry after a network failure returns the same project.
@@ -40,7 +41,7 @@ export default function Projects({ onOpen, onAuthLost }: { onOpen: (id: string) 
           <h2 id="new-h">Proyek baru</h2>
           <form className="form" onSubmit={async (e) => {
             e.preventDefault(); setBusy(true); setError(null);
-            const body = { name: name.trim(), mode, brief: brief.trim(), repo_ref: mode === "existing" ? repo.trim() : null };
+            const body = { name: name.trim(), mode, brief: brief.trim(), qa_profile: qaProfile, repo_ref: mode === "existing" ? repo.trim() : null };
             const signature = JSON.stringify(body);
             const key = keys.current.get(signature) ?? crypto.randomUUID();
             keys.current.set(signature, key);
@@ -61,6 +62,9 @@ export default function Projects({ onOpen, onAuthLost }: { onOpen: (id: string) 
               <label>Path repo lokal<input value={repo} onChange={(e) => setRepo(e.target.value)} required />
                 <span className="muted">Path pada host worker (WSL memakai path Linux). Setelah dibuat, pilih manifest untuk onboarding clone managed.</span></label>
             )}
+            <label>Pengujian tiket baru<select value={qaProfile} onChange={(e) => setQaProfile(e.target.value as "lightweight" | "manual")}>
+              <option value="lightweight">Otomatis sesuai UAC</option><option value="manual">Smoke otomatis + UAC saya uji manual</option>
+            </select><span className="muted">Scope tetap perlu Anda setujui. Build dan repo tests selalu diperiksa.</span></label>
             <label>Brief (opsional)
               <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={4} placeholder="Mis. Aplikasi kedai kopi dengan profil, menu, dan transaksi." />
             </label>

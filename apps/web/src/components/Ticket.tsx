@@ -35,6 +35,7 @@ export default function TicketPanel() {
       <ProposalSection detail={detail} />
       <Dependencies detail={detail} />
       <VerificationPlan detail={detail} />
+      <QaResolution key={JSON.stringify(detail.qa_resolution)} detail={detail} />
       <Candidates detail={detail} fake={fake} />
       <Approvals detail={detail} />
       <Work detail={detail} />
@@ -115,7 +116,7 @@ function VerificationPlan({ detail }: { detail: TicketDetail }) {
       <h3 id="verification-plan-h">Rencana pengujian</h3>
       <p>{automatic.length} kriteria otomatis · {manual.length} kriteria Anda periksa saat UAT.
         {plan?.status === "planned" && <> Direncanakan {plan.test_count} skenario browser.</>}</p>
-      {plan?.status === "not_planned" && <p className="muted">Skenario disiapkan sebelum Developer mulai. Kemampuan pengujian yang belum tersedia dibahas saat planning.</p>}
+      {plan?.status === "not_planned" && <p className="muted">Skenario disiapkan paralel dengan Developer dan harus tersedia sebelum submit. Kemampuan pengujian yang belum tersedia dibahas saat planning.</p>}
       <details><summary>Lihat pembagian pemeriksaan</summary><ul className="plain">
         {criteria.map((c) => <li key={c.id}><code>{c.id}</code> {c.text}{" "}
           <Badge tone={c.mode === "manual" ? "warn" : "info"}>{c.mode === "manual" ? "Checklist UAT" : "Otomatis"}</Badge>
@@ -131,22 +132,28 @@ function ScopeForm({ doc, onSave, onCancel }: { doc: ScopeDoc; onSave: (d: Scope
   const [title, setTitle] = useState(doc.title);
   const [description, setDescription] = useState(doc.description ?? "");
   const [uac, setUac] = useState<Criterion[]>(doc.uac.map((c) => ({ ...c })));
+  const [qaProfile, setQaProfile] = useState<"lightweight" | "manual">(doc.qa_profile ?? "lightweight");
   const [saving, setSaving] = useState(false);
   const patch = (index: number, change: Partial<Criterion>) => setUac((rows) => rows.map((r, i) => (i === index ? { ...r, ...change } : r)));
   return (
     <form className="form" onSubmit={async (e) => {
       e.preventDefault(); setSaving(true);
-      await onSave({ ...doc, title, description, uac: uac.filter((c) => c.text.trim()), dependencies: doc.dependencies ?? [] });
+      await onSave({ ...doc, qa_profile: qaProfile, title, description, uac: uac.filter((c) => c.text.trim()), dependencies: doc.dependencies ?? [] });
       setSaving(false);
     }}>
       <label>Judul<input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={120} /></label>
       <label>Deskripsi<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} /></label>
+      <label>Preset QA<select value={qaProfile} onChange={(e) => {
+        const value = e.target.value as "lightweight" | "manual"; setQaProfile(value);
+        setUac((rows) => rows.map((c) => ({ ...c, mode: value === "manual" ? "manual" : "automated" })));
+      }}><option value="lightweight">Otomatis sesuai UAC</option><option value="manual">Smoke otomatis + saya uji manual</option></select></label>
+      <p className="muted">Perubahan menjadi scope versi baru dan perlu persetujuan Anda. Build, repo tests, dan smoke tetap wajib.</p>
       <fieldset><legend>Kriteria penerimaan (UAC)</legend>
         {uac.map((c, i) => (
           <div className="uac-row" key={c.id}>
             <code>{c.id}</code>
             <input aria-label={`Teks ${c.id}`} value={c.text} onChange={(e) => patch(i, { text: e.target.value })} />
-            <select aria-label={`Mode ${c.id}`} value={c.mode ?? "automated"} onChange={(e) => patch(i, { mode: e.target.value as "automated" | "manual" })}>
+            <select aria-label={`Mode ${c.id}`} value={c.mode ?? "automated"} onChange={(e) => { setQaProfile("lightweight"); patch(i, { mode: e.target.value as "automated" | "manual" }); }}>
               <option value="automated">otomatis</option><option value="manual">manual</option>
             </select>
           </div>
@@ -284,6 +291,37 @@ function ArtifactChip({ id, label }: { id: string; label: string }) {
   );
 }
 
+function QaResolution({ detail }: { detail: TicketDetail }) {
+  const { command } = useWorkspace();
+  const resolution = detail.qa_resolution;
+  const [reason, setReason] = useState("");
+  const [owned, setOwned] = useState<Set<string>>(new Set());
+  if (!resolution) return null;
+  if (!resolution.eligible) return <p className="notice">Keputusan QA manual belum tersedia: {resolution.reason}</p>;
+  const criteria = resolution.criteria ?? [];
+  const complete = criteria.length > 0 && criteria.every((c) => owned.has(c.id));
+  return <section aria-label="Keputusan QA tidak konklusif">
+    <h3>QA tidak konklusif</h3>
+    <p>Anda dapat mengambil alih pemeriksaan berikut untuk target <code>{short(resolution.target_digest, 12)}</code>.
+      Hasil QA tetap gagal. Setelah ini, buka preview dan konfirmasikan hasil Anda pada UAT.</p>
+    <div className="evidence">{resolution.evidence_ids?.map((id) => <ArtifactChip key={id} id={id} label="bukti diagnosis" />)}</div>
+    <fieldset><legend>Kriteria yang akan saya periksa sendiri</legend>{criteria.map((c) =>
+      <label key={c.id}><input type="checkbox" checked={owned.has(c.id)} onChange={(e) => setOwned((previous) => {
+        const next = new Set(previous); e.target.checked ? next.add(c.id) : next.delete(c.id); return next;
+      })} />{c.id}: {c.text}</label>)}</fieldset>
+    <label>Alasan<textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={4000} /></label>
+    <ConfirmButton label="Ambil alih dan buka UAT" confirmLabel="Ya, saya periksa kriteria ini" disabled={!complete || !reason.trim()}
+      intent={JSON.stringify([detail.ticket.revision, resolution, reason, [...owned]])} onConfirm={async () => {
+        await command<"qaManual">(`/tickets/${detail.ticket.id}/qa-manual-decisions`, {
+          expected_revision: detail.ticket.revision, candidate_id: resolution.candidate_id!,
+          verification_id: resolution.verification_id!, target_artifact_id: resolution.target_artifact_id!,
+          target_digest: resolution.target_digest!, diagnosis_artifact_id: resolution.diagnosis_artifact_id!,
+          evidence_ids: resolution.evidence_ids!, manual_uac_ids: [...owned], reason: reason.trim(),
+        });
+      }} />
+  </section>;
+}
+
 function Candidates({ detail, fake }: { detail: TicketDetail; fake: boolean }) {
   if (detail.candidates.length === 0) {
     return <section aria-labelledby="cand-h"><h3 id="cand-h">Kandidat dan bukti</h3><p className="muted">Belum ada kandidat. Bukti QA muncul setelah harness menjalankan verifikasi.</p></section>;
@@ -313,6 +351,7 @@ function CandidateCard({ candidate: c, detail }: { candidate: Candidate; detail:
           {c.target_artifact_id && <> · <ArtifactChip id={c.target_artifact_id} label="target" /></>}
         </dd>
       </dl>
+      {c.qa_waiver && <p className="notice">QA belum konklusif · keputusan manual pengguna: {c.qa_waiver.reason}. Kriteria {c.qa_waiver.manual_uac_ids.join(", ")} harus dikonfirmasi saat UAT.</p>}
       {c.verifications.length === 0 && <p className="muted">Belum ada verifikasi untuk target ini.</p>}
       {c.verifications.map((v) => <VerificationRow key={v.id} v={v} />)}
       <div className="evidence">{c.evidence_ids.filter((id) => !c.verifications.some((v) => v.evidence_ids.includes(id)))
@@ -431,13 +470,13 @@ function UatSection({ detail }: { detail: TicketDetail }) {
       if (c.status === "superseded" || c.status === "rejected" || c.scope_version !== ticket.scope_version) continue;
       const pinnedId = c.preview && typeof c.preview === "object" && !Array.isArray(c.preview)
         ? c.preview.verification_id : undefined;
-      const v = c.verifications.find((x) => x.id === pinnedId && x.status === "passed"
+      const v = c.verifications.find((x) => x.id === pinnedId && (x.status === "passed" || c.qa_waiver?.verification_id === x.id)
         && x.target_digest === c.target_digest);
       if (v && c.target_artifact_id && c.target_digest) return { candidate: c, verification: v };
     }
     return null;
   }, [detail.candidates, ticket.scope_version]);
-  const manualUac = (detail.versions.find((v) => v.version === ticket.scope_version)?.uac ?? []).filter((c) => c.mode === "manual");
+  const manualUac = (detail.versions.find((v) => v.version === ticket.scope_version)?.uac ?? []).filter((c) => c.mode === "manual" || target?.candidate.qa_waiver?.manual_uac_ids.includes(c.id));
   if (ticket.phase !== "uat") return null;
   if (!target) return <p className="notice">UAT belum bisa diputuskan: tidak ada kandidat dengan verifikasi lulus untuk scope saat ini.</p>;
   const { candidate, verification } = target;
@@ -457,7 +496,7 @@ function UatDecision({ detail, candidate, verification, manualUac, identity }: {
   return (
     <div className="uat" aria-label="Keputusan UAT">
       <h4>Keputusan UAT untuk target <code>{short(candidate.target_digest, 12)}</code></h4>
-      <p className="muted">Tes otomatis lulus untuk target ini. Coba alur utama dan kenyamanan aplikasi lewat preview.
+      <p className="muted">{candidate.qa_waiver ? "QA otomatis belum konklusif. Anda mengambil alih kriteria di bawah untuk target ini." : "Tes otomatis lulus untuk target ini."} Coba alur utama dan kenyamanan aplikasi lewat preview.
         {manualUac.length > 0 && " Centang kriteria manual hanya setelah Anda memeriksanya; hasil otomatis tidak mengisi checklist ini."}</p>
       {manualUac.length > 0 && (
         <fieldset><legend>Konfirmasi UAC manual (Anda yang memeriksa)</legend>

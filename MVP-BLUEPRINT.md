@@ -108,6 +108,19 @@ Integrating → Accepted.
   Kriteria manual disepakati saat scope dan dikonfirmasi pengguna saat UAT.
   Capability gap dibahas sebelum development. Failure browser didiagnosis
   sebelum meminta perubahan aplikasi; model diagnosis tidak dapat meluluskan QA.
+- Preset pengguna pada proyek berlaku untuk proposal tiket baru: QA otomatis
+  sesuai UAC, atau smoke otomatis + UAC manual. Mengubah tiket tetap membuat
+  scope versi baru yang perlu disetujui; build/repo gates/smoke selalu wajib.
+- Pengguna boleh mengambil alih pemeriksaan QA yang tidak konklusif setelah
+  diagnosis test-contract/unknown dan eksekusi resmi lengkap. Keputusan mem-pin
+  kandidat/scope/target/verification/diagnosis/evidence dan alasan; verification
+  asli tetap gagal. Bug aplikasi terbukti, infrastruktur, bukti tidak lengkap,
+  repo gates dan smoke gagal tidak dapat dilewati. Pengambilalihan membuka UAT,
+  bukan acceptance; UAC terdampak wajib dikonfirmasi pengguna pada UAT dan lagi
+  pada target release gabungan. Agent tidak memiliki command pengambilalihan ini.
+- QA planning membaca source Git dan berjalan paralel dengan Developer pada
+  lane ringan. Suite/current UI revision tetap wajib sebelum submit kandidat;
+  baseline build/check/browser dijalankan oleh supervisor dengan cache identitas.
 - UAT meminta perbaikan kembali ke Development, kemudian review dan QA ulang.
 - Kebutuhan tambahan masuk usulan revisi scope/tiket baru, bukan perubahan diam-diam.
 - Perubahan scope yang sudah disetujui memerlukan approval versi baru.

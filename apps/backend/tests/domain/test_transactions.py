@@ -91,7 +91,11 @@ def test_migrate_populated_0001_preserves_rows_cursor_and_triggers(tmp_path):
     with sqlite3.connect(path) as c:
         assert c.execute("SELECT workflow FROM projects WHERE id='p'").fetchone() == ("{}",)
         assert c.execute("SELECT workflow FROM tickets WHERE id='t'").fetchone() == ("{}",)
-        assert c.execute("SELECT name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name").fetchall() == before
+        after = dict(c.execute("SELECT name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name").fetchall())
+        for name, sql in before:
+            if name != 'trg_candidates_verified_needs_pass':
+                assert after[name] == sql
+        assert 'qa_waivers' in after['trg_candidates_verified_needs_pass']
         assert c.execute("SELECT cursor FROM events").fetchall() == [(1,)]
         with pytest.raises(sqlite3.IntegrityError, match="revision"):
             c.execute("UPDATE tickets SET title='unsafe' WHERE id='t'")

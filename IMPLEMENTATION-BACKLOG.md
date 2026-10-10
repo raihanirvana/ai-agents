@@ -49,6 +49,38 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ## Daftar tiket
 
+### Efisiensi planning, pilihan QA dan stabilitas sandbox — 11 Oktober 2026
+
+Status: IN_PROGRESS. Review: NOT_REVIEWED.
+Scope disetujui pengguna: (1) QA planning lane ringan/paralel dengan development,
+(2) benchmark cold/warm beserta metrik/token/rollover dan peak memory,
+(3) keputusan user untuk QA tidak meyakinkan dengan waiver target/evidence spesifik,
+(4) preset QA ringan proyek/tiket sebelum scope approval,
+(5) isolasi dan perbaikan kehilangan file test intermiten pada sandbox.
+Rencana: scheduler/runtime/workspace; domain/evidence/HTTP/UI dan migrasi jika
+perlu; sandbox/bounded_io dan regresi; benchmark lokal terisolasi serta audit.
+Worker demo tetap mati. Approval tidak dialihkan ke model; fake tidak diberi QA
+pass. Perubahan kebijakan QA dicatat pada blueprint/architecture/keputusan.
+Implementasi kelima perubahan tersedia: QA planning source-only paralel dengan
+Developer (budget tetap shared); CLI benchmark terisolasi; keputusan manual user
+untuk kegagalan QA yang lengkap tetapi tidak meyakinkan; preset lightweight/manual
+pada proyek dan scope tiket; input mount per command dengan inventory SHA-256.
+Keputusan manual mem-pin kandidat/target/diagnosis/evidence, tidak mengubah QA
+failed menjadi passed, tetap mewajibkan UAT dan release oleh user. Test hilang,
+smoke/gate/infra gagal dan diagnosis bug aplikasi tidak bisa dialihkan ke manual.
+Verifikasi terakhir: 65 tes domain/HTTP/scheduler/kontrak/constraint lulus (11,67 s);
+build web lulus. Grup luas dihentikan sesuai arahan pengguna: 700 passed + 2
+kegagalan ekspektasi teks trigger lama (diperbaiki dan diuji ulang pada 65 tes),
+serta 93 passed pada grup Docker sebelum interupsi. Bukan klaim full-suite lulus.
+Tes seed terarah membuktikan test.cjs bertahan pada enam command/import berulang;
+penyebab historis kehilangan file belum terbukti. Container tes sudah bersih,
+worker demo tetap mati. Pengguna meminta benchmark kecepatan lanjutan ditunda
+hingga demo; instrumentasi memory optional tersedia, peak memory belum terukur.
+Status IN_PROGRESS untuk validasi demo yang ditunda; review NOT_REVIEWED.
+Handoff dan batas bukti: bagian F audit sandbox-dependency-ui-amendment-2026-10-11.md.
+Tidak ada commit/push/restart otomatis.
+
+
 ### Salinan dependency sandbox dan pemulihan kontrak UI — 11 Oktober 2026
 
 Status: IN_PROGRESS. Review: NOT_REVIEWED.

@@ -50,8 +50,9 @@ class PipelineScheduler:
             return None
         jobs = list(s.scalars(select(Job).where(Job.ticket_id == t.id, Job.scope_version == t.current_version)
             .order_by(Job.created_at, Job.id)))
-        if any(j.status in ACTIVE or j.runtime_ref.get("cleanup") for j in jobs):
+        if any(j.runtime_ref.get("cleanup") and j.status not in ACTIVE for j in jobs):
             return None
+        active = [j for j in jobs if j.status in ACTIVE]
         revalidation, amendment = None, None
         contract_revision = 1
         if t.blocker:
@@ -76,9 +77,14 @@ class PipelineScheduler:
                 stage, role, task = 'technical_plan', 'technical-lead', 'technical_plan'
             elif not plans:
                 stage, role, task = 'technical_plan', 'technical-lead', 'technical_plan'
-            elif not qa_done:
+            elif not qa_done and not any(j.stage == 'qa_plan' and
+                    j.runtime_ref.get('payload', {}).get('ui_contract_revision', 1) == contract_revision for j in jobs):
                 stage, role, task = 'qa_plan', 'qa', 'qa_plan'
             else:
+                current_qa = [j for j in jobs if j.stage == 'qa_plan' and
+                    j.runtime_ref.get('payload', {}).get('ui_contract_revision', 1) == contract_revision]
+                if not qa_done and current_qa and current_qa[-1].status in ('failed', 'stopped', 'cancelled'):
+                    return None
                 stage, role, task = 'development', 'developer', 'implement'
         else:
             stage = t.phase
@@ -89,6 +95,13 @@ class PipelineScheduler:
         legacy_key = key
         suite_repaired = False
         payload = {"task": task, "candidate_id": candidate}
+        if stage == 'qa_plan':
+            payload['ui_contract_revision'] = contract_revision
+        # Source-only planning and one fenced developer may overlap. Every
+        # other stage stays serialized, including review, verify and cleanup.
+        companions = ('development',) if stage in ('technical_plan', 'qa_plan') else ('qa_plan',) if stage == 'development' else ()
+        if any(j.stage not in companions for j in active):
+            return None
         if amendment is not None:
             payload['contract_amendment'] = amendment.result['contract_amendment']
             payload['amendment_request_job_id'] = amendment.id
@@ -139,7 +152,7 @@ class PipelineScheduler:
         caps = ({k: v for k, v in pool[-1].limits.items() if k != "budget_key"} if pool else
                 {**project_limits(p, self.limits), **p.workflow['pipeline'].get('budget_limits', {})})
         return dict(project_id=t.project_id, ticket_id=t.id, expected_scope=t.current_version,
-                    lane="interactive" if stage in ('technical_plan', 'technical_review') or
+                    lane="interactive" if stage in ('technical_plan', 'technical_review', 'qa_plan') or
                         payload.get('task') == 'diagnose' else "execution",
                     role=role, stage=stage, runtime=self.runtime, idempotency_key=key, limits=caps,
                     budget_pool=BUDGET_POOL, payload=payload, actor="scheduler:pipeline")

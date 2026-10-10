@@ -105,6 +105,13 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     def command(request, body, action, runtime=False):
         principal = auth(request, runtime)
         data = body.model_dump() if body else {}
+        # New defaults do not change hashes of historical command replays.
+        if isinstance(body, b.ProjectCreate) and 'qa_profile' not in body.model_fields_set:
+            data.pop('qa_profile', None)
+        if isinstance(body, b.Scope) and body.qa_profile is None:
+            data.pop('qa_profile', None)
+        if isinstance(body, b.ScopeEdit) and body.document.qa_profile is None:
+            data['document'].pop('qa_profile', None)
         if isinstance(body, b.Budget) and not body.unlimited_total_tokens:
             # Keep legacy budget command payloads stable for idempotent replay.
             data.pop('unlimited_total_tokens', None)
@@ -184,7 +191,7 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     @app.get("/tickets/{ticket_id}")
     def detail(request: Request, ticket_id: str):
         auth(request)
-        with request.app.state.api.db.read() as s: return clean(request, q.detail(s, ticket_id, request.app.state.api.threads))
+        with request.app.state.api.db.read() as s: return clean(request, q.detail(s, ticket_id, request.app.state.api.threads, request.app.state.api.store))
     @app.post("/tickets/{ticket_id}/scope-versions")
     def edit_scope(request: Request, ticket_id: str, body: b.ScopeEdit):
         return command(request, body, lambda s, svc, key, p: {"ticket": q.ticket(svc.workflow.edit_scope(
@@ -218,6 +225,20 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
     def repair(request: Request, ticket_id: str, body: b.Repair):
         return command(request, body, lambda s, svc, key, p: {"ticket": q.ticket(svc.workflow.authorize_repair(
             ticket_actor(s, p, ticket_id), ticket_id, body.expected_revision, body.additional_cycles))})
+    @app.post('/projects/{project_id}/qa-profile')
+    def qa_profile(request: Request, project_id: str, body: b.QaProfile):
+        return command(request, body, lambda s, svc, key, p: {'project': q.project(svc.workflow.set_qa_profile(
+            user_actor(p, project_id), body.expected_revision, body.qa_profile))})
+
+    @app.post('/tickets/{ticket_id}/qa-manual-decisions')
+    def qa_manual(request: Request, ticket_id: str, body: b.QaManualDecision):
+        def action(s, svc, key, principal):
+            data = body.model_dump(exclude={'expected_revision'})
+            data['reason'] = request.app.state.api.redactor.redact(body.reason)
+            return {'ticket': q.ticket(svc.workflow.waive_uncertain_qa(ticket_actor(s, principal, ticket_id),
+                ticket_id, body.expected_revision, **data))}
+        return command(request, body, action)
+
     @app.post("/tickets/{ticket_id}/uat-decisions")
     def uat(request: Request, ticket_id: str, body: b.Uat):
         return command(request, body, lambda s, svc, key, p: {"integration": svc.workflow.accept_uat(

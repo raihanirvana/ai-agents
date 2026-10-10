@@ -17,12 +17,14 @@ export type NonblockingAnswer = { "scope_version": number | null; "generation": 
 export type Onboarding = { "expected_revision": number; "manifest": { [key: string]: unknown; }; "patch"?: string | null; "source_sha"?: string | null; };
 export type Phase = "draft" | "scope_review" | "ready" | "development" | "technical_review" | "qa" | "uat" | "integrating" | "accepted" | "cancelled";
 export type Priority = { "expected_revision": number; "priority": number; };
-export type ProjectCreate = { "name": string; "mode"?: "new" | "existing"; "brief"?: string; "repo_ref"?: string | null; };
+export type ProjectCreate = { "name": string; "mode"?: "new" | "existing"; "brief"?: string; "repo_ref"?: string | null; "qa_profile"?: "lightweight" | "manual"; };
 export type ProposalDecision = { "expected_revision": number; "accept": boolean; };
+export type QaManualDecision = { "expected_revision": number; "candidate_id": string; "verification_id": string; "target_artifact_id": string; "target_digest": string; "diagnosis_artifact_id": string; "evidence_ids": (string)[]; "manual_uac_ids": (string)[]; "reason": string; };
+export type QaProfile = { "expected_revision": number; "qa_profile": "lightweight" | "manual"; };
 export type ReleaseDecision = { "expected_revision": number; "target_artifact_id": string; "target_digest": string; "evidence_ids": (string)[]; "manual_uac_ids"?: (string)[]; "reviewed_diff_ids"?: (string)[]; };
 export type Repair = { "expected_revision": number; "additional_cycles": number; };
 export type Revision = { "expected_revision": number; };
-export type Scope = { "title": string; "description"?: string; "uac": (Criterion)[]; "dependencies"?: (string)[]; "reverts_candidate_id"?: string | null; };
+export type Scope = { "title": string; "description"?: string; "uac": (Criterion)[]; "dependencies"?: (string)[]; "reverts_candidate_id"?: string | null; "qa_profile"?: "lightweight" | "manual" | null; };
 export type ScopeEdit = { "expected_revision": number; "document": Scope; };
 export type Tool = { "name": string; "args"?: { [key: string]: unknown; }; };
 export type Uat = { "expected_revision": number; "candidate_id": string; "scope_version": number; "target_artifact_id": string; "target_digest": string; "verification_id": string; "evidence_ids": (string)[]; "manual_uac_ids"?: (string)[]; };
@@ -38,6 +40,7 @@ export interface RequestBodies {
   "POST /projects/{project_id}/inputs/{request_id}": NonblockingAnswer;
   "POST /projects/{project_id}/messages": MessageCreate;
   "POST /projects/{project_id}/onboarding": Onboarding;
+  "POST /projects/{project_id}/qa-profile": QaProfile;
   "POST /projects/{project_id}/releases": Revision;
   "POST /projects/{project_id}/scope-approvals": ApprovalBatch;
   "POST /projects/{project_id}/tickets": Scope;
@@ -56,6 +59,7 @@ export interface RequestBodies {
   "POST /tickets/{ticket_id}/candidates/{candidate_id}/previews": Empty;
   "POST /tickets/{ticket_id}/priority": Priority;
   "POST /tickets/{ticket_id}/proposals/{proposal_id}/decisions": ProposalDecision;
+  "POST /tickets/{ticket_id}/qa-manual-decisions": QaManualDecision;
   "POST /tickets/{ticket_id}/repair-authorizations": Repair;
   "POST /tickets/{ticket_id}/request-changes": Changes;
   "POST /tickets/{ticket_id}/scope-versions": ScopeEdit;

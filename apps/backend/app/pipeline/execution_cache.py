@@ -15,7 +15,7 @@ from .contracts import digest_of, validate_report
 
 def execution_policy():
     root = Path(__file__).resolve().parents[1]
-    files = ('workspace/sandbox.py', 'workspace/bounded_io.py', 'workspace/installation_cache.py',
+    files = ('workspace/sandbox.py', 'workspace/command_seed.py', 'workspace/bounded_io.py', 'workspace/installation_cache.py',
              'workspace/dependencies.py', 'workspace/manifest.py', 'pipeline/gates.py',
              'pipeline/execution_cache.py', 'pipeline/workspace.py')
     import hashlib

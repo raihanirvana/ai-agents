@@ -149,3 +149,21 @@ expected dari output atau downgrade automated UAC. Seed statis dapat dideklarasi
 sebagai literal text dalam kontrak; dynamic text berasal dari fill/select_option
 asli, termasuk multi-select. Native confirm memakai click_dialog, bukan kontrol DOM.
 Amendment ini untuk planning sebelum development; target QA lama tetap immutable.
+
+## Keputusan pengguna dan preset (11 Oktober 2026)
+
+- Project/ticket preset `lightweight` atau `manual`: default proyek hanya untuk
+  proposal baru; preset tiket bagian versi scope yang disetujui. Semua-manual
+  memakai smoke harness nyata + checklist UAT, bukan zero tests.
+- `POST /tickets/{id}/qa-manual-decisions` memindahkan pemeriksaan test/unknown
+  yang sudah dieksekusi lengkap ke pengguna. `qa_waivers` immutable mem-pin target,
+  verification/diagnosis/evidence, test/UAC IDs dan alasan. QA asli tetap failed.
+- Gate/baseline failure, fake, infra, missing/skipped, smoke failure, proven app
+  defects dan active/stale attempts ditolak. Hanya pengguna terautentikasi dapat
+  memutuskan; model tidak dapat grant waiver.
+- UAT checklist mencakup UAC waiver; release freeze menyimpan keputusan, mengecualikan
+  hanya failed test IDs tersebut, menjalankan regression/smoke target gabungan dan
+  meminta konfirmasi manual ulang. Scope snapshot asli tidak dimodifikasi.
+- QA planning source-only pada lane ringan berjalan paralel dengan implementasi.
+  Suite harus cocok UI revision aktif sebelum kandidat disubmit. Baseline dieksekusi
+  saat submit/verify, dengan cache identitas dan evidence asli tetap disimpan.
