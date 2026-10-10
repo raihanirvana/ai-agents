@@ -268,6 +268,9 @@ class Job(Base):
         _json("result", "object"),
         Index("ix_jobs_claim", "status", "lane", "created_at"),
         Index("ix_jobs_scope", "ticket_id", "scope_version"),
+        Index("ix_jobs_lease_expiry", "status", "lease_expires_at"),
+        Index("ix_jobs_cleanup_expiry", text("julianday(json_extract(runtime_ref, '$.cleanup.expires_at'))"),
+              sqlite_where=text("json_type(runtime_ref, '$.cleanup') = 'object'")),
     )
 
 

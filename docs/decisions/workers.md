@@ -182,3 +182,16 @@ budget diperiksa ulang sebelum enqueue dalam transaksi yang sama. Perubahan
 saat jeda snapshot ditunda ke tick berikutnya. Tidak meng-upgrade transaksi
 baca menjadi write, tidak memotong usage atau menaikkan kapasitas execution.
 Detail/batas verifikasi: [audit](../audits/source-redaction-and-scheduler-2026-10-10.md).
+
+## Polling recovery — 10 Oktober 2026
+
+`expired()` memilih ID di SQL melalui union lease running yang kedaluwarsa
+serta deadline cleanup. Waktu diambil sekali per polling. Deadline JSON
+menggunakan `julianday` agar offset zona waktu tidak dibandingkan sebagai teks.
+Migrasi `0006` menambahkan indeks `(status, lease_expires_at)` dan indeks ekspresi
+parsial deadline cleanup; payload job tidak dimuat selama pencarian deadline.
+
+Identitas workspace supervisor dipublikasikan di bawah `flock` pada lockfile
+terpisah, menggunakan temporary file, fsync dan atomic rename. Pembaca juga
+mengambil lock, menolak symlink/file khusus/owner salah/ID invalid. ID existing
+tidak diganti karena label container dan bukti cleanup bergantung pada ID itu.

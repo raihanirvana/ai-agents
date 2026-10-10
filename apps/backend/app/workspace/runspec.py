@@ -34,6 +34,7 @@ class ResourceLimits:
     pids: int = 256
     command_timeout_s: int = 300
     tmpfs_mb: int = 512
+    work_mb: int = 512
     max_log_bytes: int = 1024 * 1024
     max_commands: int = 200
     max_snapshot_bytes: int = 200 * 1024 * 1024
@@ -42,7 +43,7 @@ class ResourceLimits:
     def validate(self) -> None:
         bounds = {
             "memory_mb": (64, 8192), "cpus": (0.1, 8), "pids": (16, 4096), "command_timeout_s": (1, 3600),
-            "tmpfs_mb": (16, 4096), "max_log_bytes": (1024, 16 * 1024 * 1024), "max_commands": (1, 5000),
+            "tmpfs_mb": (16, 4096), "work_mb": (16, 4096), "max_log_bytes": (1024, 16 * 1024 * 1024), "max_commands": (1, 5000),
             "max_snapshot_bytes": (1024, 2 * 1024**3), "max_snapshot_files": (1, 200_000),
         }
         for name, (low, high) in bounds.items():

@@ -49,6 +49,22 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ## Daftar tiket
 
+### Recovery dependency, disk sandbox dan polling — 10 Oktober 2026
+
+Status: IN_PROGRESS. Review: NOT_REVIEWED.
+Scope: SQL filtering/index untuk expired jobs; jalur revalidasi dependency
+dengan harness/evidence nyata; bounded writable /work tanpa bind mount host
+writable; publikasi supervisor ID dengan lock dan atomic rename.
+Rencana/file: workers/queue dan migrasi/index jobs; pipeline scheduler/runtime
+dan domain receipt; workspace sandbox/export/runspec/supervisor. Worker tetap
+dimatikan; tidak menjalankan demo atau mengubah approval/budget historis.
+Hasil implementasi: keempat jalur sudah diperbaiki; detail/file/handoff di
+[recovery-worker-workspace-2026-10-10.md](docs/audits/recovery-worker-workspace-2026-10-10.md).
+Verifikasi aktual: kompilasi Python dan `git diff --check` lulus. Inspeksi proses
+menemukan nol worker/Hermes. Tes tidak ditambah/dijalankan karena tidak diminta.
+Status tetap IN_PROGRESS sampai perilaku Docker, migrasi dan recovery concurrent
+terverifikasi; tidak mengklaim DONE dari pemeriksaan sintaks. Worker tetap mati.
+
 ### Koreksi redaksi source, konteks dan scheduler — 10 Oktober 2026
 
 Status: DONE (implementasi). Review: NOT_REVIEWED.

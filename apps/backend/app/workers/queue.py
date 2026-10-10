@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, literal_column, text
 
 from app.persistence import (Database, EventSpec, answer_input_request, append_event, append_message,
                              record_usage)
@@ -609,9 +609,14 @@ class JobQueue:
 
     def expired(self) -> list[str]:
         with self.db.read() as s:
-            return [job.id for job in s.scalars(select(Job)) if (
-                job.status == "running" and job.lease_expires_at <= self.clock()) or (
-                self._cleanup(job) and datetime.fromisoformat(self._cleanup(job)["expires_at"]) <= self.clock())]
+            now = self.clock()
+            leased = select(Job.id).where(Job.status == "running", Job.lease_expires_at <= now)
+            # julianday handles offsets and fractional seconds consistently.
+            # Literal paths match the expression index, unlike bound JSON paths.
+            cleanup = select(Job.id).where(text("json_type(runtime_ref, '$.cleanup') = 'object'"),
+                literal_column("julianday(json_extract(runtime_ref, '$.cleanup.expires_at'))")
+                <= func.julianday(now.isoformat()))
+            return list(s.scalars(leased.union(cleanup)))
 
     def recover(self, job_id: str, reap: Callable[[dict[str, Any]], bool], *, actor: str) -> str | None:
         """Reconcile a job whose owner stopped heartbeating.

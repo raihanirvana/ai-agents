@@ -541,3 +541,25 @@ Review/handoff mengikat concern ke candidate/scope/commit/suite. QA memeriksa
 concern dengan source immutable dan runner sebelum persiapan baseline, dengan
 receipt/proposal yang persisten. Lihat [qa-policy.md](./qa-policy.md) untuk syarat
 koreksi selector, repin target dan verifikasi penuh; concern tidak memberi QA pass.
+
+## Recovery dependency — 10 Oktober 2026
+
+Scheduler membuat job `dependency_revalidation` untuk scope yang masih memiliki
+approval pengguna dan blocker `dependency_revalidation`. Upstream harus masih
+accepted/integrated dengan target terpin; kontrak transitive diperiksa setelah
+pending dependency upstream sudah selesai. Scope review, cancelled, accepted
+historis dan blocker lain tidak dibuka oleh jalur ini.
+
+Job membangun accepted base terbaru dengan runner proyek, mewajibkan repo gate
+lulus, lalu menjalankan suite upstream accepted melalui DockerHarness terpisah.
+Receipt mencatat request revalidasi, scope, accepted candidate upstream, target,
+base, manifest, suite/build/runner identity, command dan counts. Sebelum efek DB,
+lease, revision, request, base, manifest dan pin upstream dibaca ulang dalam
+transaksi yang sama dengan `Workflow.revalidate_dependency`. Hasil job disimpan
+dalam transaksi itu agar crash setelah efek tidak menjalankan ulang efeknya.
+
+Ini membuktikan kontrak upstream yang tercakup suite, bukan seluruh perilaku
+fitur downstream yang belum dibuat. Downstream tetap menjalani review/QA/UAT
+normal. Perubahan UAC membutuhkan scope baru dan approval pengguna. Bukti fake,
+missing, failed/incomplete, atau usang tidak membuka blocker. Failure tampil
+sebagai job gagal dengan laporan terlampir; tidak diulang tanpa henti.

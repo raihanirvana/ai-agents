@@ -46,13 +46,20 @@ class PipelineScheduler:
             return None
         p = s.get(Project, t.project_id)
         # Only projects explicitly configured for this runner are touched.
-        if p is None or not p.workflow.get("pipeline") or not p.workflow.get("accepted_tip") or t.blocker:
+        if p is None or not p.workflow.get("pipeline") or not p.workflow.get("accepted_tip"):
             return None
         jobs = list(s.scalars(select(Job).where(Job.ticket_id == t.id, Job.scope_version == t.current_version)
             .order_by(Job.created_at, Job.id)))
         if any(j.status in ACTIVE or j.runtime_ref.get("cleanup") for j in jobs):
             return None
-        if t.phase in ("ready", "development"):
+        revalidation = None
+        if t.blocker:
+            from .dependency_revalidation import pending_contract
+            revalidation = pending_contract(s, t, p)
+            if revalidation is None:
+                return None
+            stage, role, task = 'dependency_revalidation', 'qa', 'revalidate_dependency'
+        elif t.phase in ("ready", "development"):
             if not self.workflow._eligible(s, t):
                 return None
             done = {j.runtime_ref.get("payload", {}).get("task") for j in jobs if j.status == "succeeded"}
@@ -71,6 +78,11 @@ class PipelineScheduler:
         legacy_key = key
         suite_repaired = False
         payload = {"task": task, "candidate_id": candidate}
+        if revalidation:
+            from .contracts import digest_of
+            payload = revalidation
+            key += ':' + digest_of(revalidation)
+            legacy_key = key
         if stage in ('technical_review', 'qa') and candidate:
             current = s.get(Candidate, candidate)
             if current and current.target_digest:

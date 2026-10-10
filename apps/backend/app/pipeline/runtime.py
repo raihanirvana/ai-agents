@@ -44,7 +44,7 @@ class PipelineRuntime:
         if identity['fake'] != self.fake or bool(self.structured.client.provider_for(role).fake) != self.fake:
             return Outcome('failed', error='provider and pipeline fake labels disagree')
         wanted = {'technical_plan': 'technical-lead', 'qa_plan': 'qa', 'implement': 'developer',
-                  'review': 'technical-lead', 'verify': 'qa', 'diagnose': 'qa'}
+                  'review': 'technical-lead', 'verify': 'qa', 'diagnose': 'qa', 'revalidate_dependency': 'qa'}
         if wanted.get(task) != role:
             return Outcome('failed', error='pipeline task/role mismatch')
         if task in ('technical_plan', 'qa_plan'):
@@ -71,6 +71,9 @@ class PipelineRuntime:
             ctx.log(error)
             return Outcome('failed', {'failure_kind': 'workflow'}, error=error, retryable=False)
         except ValueError as exc:
+            if task == 'revalidate_dependency':
+                return Outcome('failed', {'failure_kind': 'dependency_revalidation'},
+                    error='Revalidasi dependency ditolak: ' + self.redactor.redact(str(exc))[:400], retryable=False)
             if task != 'diagnose':
                 raise
             detail = self.redactor.redact(str(exc))[:400]
@@ -93,6 +96,10 @@ class PipelineRuntime:
             return Outcome('failed', {'failure_kind': kind, 'reason': reason,
                 'verification_id': ctx.job['runtime_ref'].get('payload', {}).get('verification_id')},
                 error=error, retryable=False)
+
+    def _revalidate_dependency(self, ctx, identity):
+        from .dependency_revalidation import run
+        return run(self, ctx, identity)
 
     def _technical_plan(self, ctx, identity):
         from app.workspace import WorkspaceSupervisor

@@ -111,3 +111,31 @@ Pemeriksaan aktual terbatas pada sintaks AST lima file Python dan whitespace
 diff. Modul eksperimen standalone yang hanya di-skim oleh reviewer tidak
 diklaim sudah melalui review penuh. Pemetaan file dan handoff regresi tercatat
 di log Batch 2 pada `IMPLEMENTATION-BACKLOG.md`.
+
+## Ruang tulis target — 10 Oktober 2026
+
+Source host dipasang read-only di `/source`; `/work` memakai tmpfs dengan batas
+`ResourceLimits.work_mb` (default 512 MiB, rentang 16–4096). `/tmp` juga terbatas;
+`--memory-swap` disamakan dengan `--memory`. Batas filesystem/memory ini terpisah
+dari budget token. Node toolchain menyalin source tanpa mengubah symlink relatif.
+Start/smoke juga memakai tmpfs; output build terpin tetap berupa mount read-only.
+
+Command berjalan melalui `docker exec`, sehingga exit code berasal dari Docker
+CLI, bukan marker yang ditulis target. PID 1 tetap hidup untuk menjaga tmpfs
+sampai container dijeda. Supervisor menyalin `/work` sebagai stream tar dengan
+batas byte dan waktu, memeriksa path, entry count, ukuran total/per file, symlink,
+serta menolak hardlink/sparse/special files. Hanya tree tervalidasi menggantikan
+source host; failed export tidak menerapkan output parsial. Timeout/cancel/OOM
+tidak menyalin hasil. CLI logs dibaca sebagai stream dengan buffer terbatas.
+
+Batas ini mencegah target menulis tanpa batas langsung ke disk host. Retention
+arsip/artefak/Git/cache lintas banyak attempt tetap merupakan masalah terpisah;
+ini bukan kuota total data platform. Copy/export source termasuk node_modules
+menambah I/O dan perlu pengukuran sebelum optimasi. Runner Node 22 menyediakan
+`fs.cpSync` dengan `verbatimSymlinks` dan filter untuk menghindari mount build.
+
+Dasar implementasi: [Docker tmpfs](https://docs.docker.com/engine/storage/tmpfs/),
+[resource constraints](https://docs.docker.com/engine/containers/resource_constraints/),
+[pause](https://docs.docker.com/reference/cli/docker/container/pause/),
+[cp tar stream](https://docs.docker.com/reference/cli/docker/container/cp/), dan
+[source Node 22.20.0 cpSync](https://github.com/nodejs/node/blob/v22.20.0/lib/internal/fs/cp/cp-sync.js).

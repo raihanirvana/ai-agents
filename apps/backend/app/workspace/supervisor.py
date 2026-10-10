@@ -18,6 +18,7 @@ Layout under `root` (gitignored runtime data):
 from __future__ import annotations
 
 import hmac
+import fcntl
 import json
 import os
 import math
@@ -26,6 +27,8 @@ import secrets
 import shutil
 import time
 import uuid
+import tempfile
+import stat
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
@@ -76,9 +79,40 @@ class WorkspaceSupervisor:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         id_file = self.root / ".supervisor-id"
-        if not id_file.exists():
-            id_file.write_text(uuid.uuid4().hex)
-        self.supervisor_id = id_file.read_text().strip()
+        lock_fd = os.open(self.root / '.supervisor-id.lock',
+                          os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(lock_fd).st_mode) or os.fstat(lock_fd).st_uid != os.getuid():
+                raise WorkspaceError('supervisor ID lock is not a trusted regular file')
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            try:
+                fd = os.open(id_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            except FileNotFoundError:
+                fd, temporary = tempfile.mkstemp(dir=self.root, prefix='.supervisor-id-')
+                try:
+                    with os.fdopen(fd, 'w') as output:
+                        output.write(uuid.uuid4().hex + '\n')
+                        output.flush()
+                        os.fsync(output.fileno())
+                    os.replace(temporary, id_file)
+                    parent = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        os.fsync(parent)
+                    finally:
+                        os.close(parent)
+                finally:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
+                fd = os.open(id_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            with os.fdopen(fd, 'r') as identity:
+                info = os.fstat(identity.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                    raise WorkspaceError('supervisor ID is not a trusted regular file')
+                self.supervisor_id = identity.read(64).strip()
+                if info.st_size > 64 or not re.fullmatch(r'[0-9a-f]{32}', self.supervisor_id):
+                    raise WorkspaceError('supervisor ID is invalid; do not replace an existing ownership identity')
+        finally:
+            os.close(lock_fd)
         self.sandbox = sandbox or DockerSandbox(supervisor_id=self.supervisor_id, dependency_cache=self.root / ".dependency-cache")
         self._scratch_home = self.root / ".git-home"
 
@@ -268,7 +302,10 @@ class WorkspaceSupervisor:
             "image_id": image_id, "manifest_digest": manifest.digest,
             "container_network": "none",
             "dependency_acquisition": "verified-npm-tarballs" if result.network == "egress" else "none",
-            "limits": {"memory_mb": spec.limits.memory_mb, "cpus": spec.limits.cpus, "pids": spec.limits.pids},
+            "limits": {"memory_mb": spec.limits.memory_mb, "cpus": spec.limits.cpus, "pids": spec.limits.pids,
+                       "work_mb": spec.limits.work_mb, "tmpfs_mb": spec.limits.tmpfs_mb,
+                       "max_snapshot_bytes": spec.limits.max_snapshot_bytes,
+                       "max_snapshot_files": spec.limits.max_snapshot_files},
             "env_names": sorted(manifest.env), "stdout_file": f"{base}.stdout.log", "stderr_file": f"{base}.stderr.log",
             "stdout_sha256": sha256_bytes(result.stdout), "stderr_sha256": sha256_bytes(result.stderr),
             "recorded_at": utcnow(),
