@@ -1,5 +1,5 @@
 """Explicit public projections: never expose credential hashes, runtime refs or storage paths."""
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.persistence import NotFound, latest_cursor
 from app.persistence.messages import not_runtime_log
@@ -29,6 +29,38 @@ def ticket(t):
             "revision": t.revision, "scope_version": t.current_version, "priority": t.priority,
             "blocker": t.blocker, "repair_cycles": t.workflow.get("repair_cycles", 0),
             "repair_limit": None if t.workflow.get('unlimited_repairs') is True else t.workflow.get("repair_limit", 3)}
+
+
+def rebase_notices(s, tickets):
+    """Project the latest persisted handoff, including tickets created before this UI update."""
+    by_id = {t.id: t for t in tickets if t.phase == 'development' and not t.workflow.get('candidate_id')}
+    notices = {t.id: None for t in tickets}
+    if not by_id:
+        return notices
+    messages = s.scalars(select(Message).where(Message.ticket_id.in_(by_id), not_runtime_log(),
+        func.json_extract(Message.meta, '$.intent').in_(('rebase_request', 'repair_feedback')))
+        .order_by(Message.created_at.desc(), Message.seq.desc(), Message.id.desc()))
+    latest = {}
+    for message in messages:
+        owner = by_id[message.ticket_id]
+        if message.meta.get('scope_version') == owner.current_version:
+            latest.setdefault(owner.id, message)
+    rebases = {key: value for key, value in latest.items() if value.meta.get('intent') == 'rebase_request'}
+    tips = {message.meta.get('new_base') for message in rebases.values() if isinstance(message.meta.get('new_base'), str)}
+    causes = {}
+    if tips:
+        # Integrated SHA is the accepted ref; commit SHA alone is not sufficient.
+        for candidate in s.scalars(select(Candidate).where(Candidate.project_id.in_({t.project_id for t in tickets}),
+                Candidate.integrated_sha.in_(tips), Candidate.status == 'accepted')):
+            source = s.get(Ticket, candidate.ticket_id)
+            if source:
+                causes[(candidate.project_id, candidate.integrated_sha)] = {
+                    'id': source.id, 'number': source.number, 'title': source.title}
+    for key, message in rebases.items():
+        owner = by_id[key]
+        notices[key] = {'reason': 'accepted_base_changed',
+                        'source_ticket': causes.get((owner.project_id, message.meta.get('new_base')))}
+    return notices
 
 
 def dependency_waits(s, tickets):
@@ -130,7 +162,9 @@ def board(s, project_id):
     tickets = list(s.scalars(select(Ticket).where(Ticket.project_id == project_id)
                             .order_by(Ticket.priority.desc(), Ticket.number)))
     waits = dependency_waits(s, tickets)
-    return {"project": project(p), "tickets": [{**ticket(t), 'dependency_waits': waits[t.id]} for t in tickets],
+    rebases = rebase_notices(s, tickets)
+    return {"project": project(p), "tickets": [{**ticket(t), 'dependency_waits': waits[t.id],
+                                                'rebase_notice': rebases[t.id]} for t in tickets],
             "runs": _runs(s, project_id),
             "preview": (lambda rows: previews.public(rows[0]) if rows else None)(previews.active(s, project_id)),
             "releases": [releases.public(r, s) for r in releases.releases(s, project_id)[:5]],
@@ -170,7 +204,8 @@ def verification_plan(s, t):
 
 def detail(s, ticket_id, threads):
     t = row(s, Ticket, ticket_id)
-    return {"ticket": {**ticket(t), 'dependency_waits': dependency_waits(s, [t])[t.id]},
+    return {"ticket": {**ticket(t), 'dependency_waits': dependency_waits(s, [t])[t.id],
+                       'rebase_notice': rebase_notices(s, [t])[t.id]},
             'verification_plan': verification_plan(s, t), "versions": [{"version": v.version, "title": v.title, "description": v.description,
             "uac": v.uac, "scope": v.scope} for v in s.scalars(select(TicketVersion).where(TicketVersion.ticket_id == t.id)
                                                                     .order_by(TicketVersion.version))],

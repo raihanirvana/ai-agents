@@ -49,6 +49,57 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ## Daftar tiket
 
+### Penjelasan penyesuaian kode pada web — 10 Oktober 2026
+
+Status: DONE. Review: NOT_REVIEWED. Scope: tampilkan alasan kembali ke Development akibat
+accepted base berubah pada board, detail tiket dan aktivitas; terjemahkan
+handoff rebase historis. Gunakan pesan backend aktual, scope saat ini dan
+alasan terakhir, agar pesan lama tidak menutupi feedback bug yang lebih baru.
+File utama: `http/queries.py`, DTO tiket, komponen RebaseNotice/Board/Ticket/Activity.
+Tidak mengubah scheduler, persetujuan atau job proyek yang sedang berjalan.
+Hasil: notice ringkas dengan tautan ke tiket pemicu pada board/aktivitas;
+penjelasan lengkap pada detail, termasuk penggabungan pekerjaan lama,
+review/QA/UAT baru dan repair cycle yang tetap. Pesan rebase historis dibaca
+dalam Bahasa Indonesia. Notice hanya aktif pada Development dan hilang ketika
+penyesuaian selesai; feedback repair terbaru/scope baru mencegah pesan usang.
+Backend memakai proyeksi pesan persisten secara batch dan integrated SHA untuk
+mencari tiket pemicu, tanpa migrasi atau mutasi state proyek.
+Verifikasi: `npm run build` lulus (TypeScript/Vite); `git diff --check` bersih.
+Pembacaan state Mini Kasir: #3 sudah UAT, notice aktif tidak ditampilkan; pesan
+historis tetap ada. Tes otomatis baru/regresi tidak dijalankan pada assignment
+UI ini karena pengguna tidak meminta tes. Backend direstart untuk memuat
+proyeksi baru; frontend menerima HMR, worker tetap berjalan.
+Known issues: build masih memberi warning ukuran chunk Office >500 kB.
+Handoff: diff file di atas termasuk komponen baru `RebaseNotice.tsx` dan
+`contracts/api/types.ts`. Tidak ada independent review atau commit/push.
+
+### Perbaikan QA Mini Kasir — 10 Oktober 2026
+
+Status: DONE. Review: NOT_REVIEWED. Scope: bedakan tes feature/bug yang lulus pada accepted
+base dari kegagalan infrastruktur; jadwalkan perbaikan coverage oleh QA dengan
+source dan bukti yang dipin, bukan repair aplikasi. Pertahankan kandidat,
+approval scope, histori/usage dan kewajiban verifikasi baseline/candidate penuh.
+File utama: `pipeline/runtime.py`, `pipeline/qa_repair.py`,
+`pipeline/contracts.py`, `domain/service.py`, `Activity.tsx`, instruksi QA
+dan keputusan QA policy. Tambahan: koreksi proposal dengan feedback validasi
+sekali; reopening QA oleh service verification hanya sebelum approval UAT,
+untuk melengkapi bukti dengan source/build yang sama. Agent tidak mendapat tool
+untuk menarik approval atau mengubah kriteria.
+Verifikasi: 63 + 39 passed pada tes coverage/contracts/scheduler dan regresi
+baseline/selector/concern; rerun coverage setelah tambahan koreksi model:
+20 passed, termasuk satu kasus parametrik baru (103 tes pipeline berbeda).
+Domain reopen/evidence/workflow: 72 passed; reopen setelah fencing disempitkan
+ke QA saja: 8 passed. Build web lulus; diff check bersih. Total 175 tes berbeda
+yang relevan lulus; full suite/lintas OS belum dijalankan.
+Demo nyata: #2 dan #3 lulus 3/3 pada kandidat, gagal 3/3 pada base dan masuk
+UAT, tanpa perubahan commit/build atau repair cycle developer. Tes pembayaran
+#2 dilengkapi assertion stok setelah double click pada target baru. #4 tetap
+menunggu dependency diterima pengguna. Histori dan usage dipertahankan.
+Handoff/bukti dan batas semantik witness dicatat pada
+`docs/audits/mini-kasir-qa-coverage-2026-10-10.md`. Witness/source qualification
+bukan jaminan bahwa setiap proposal model sudah lengkap; suite masih harus
+ditinjau dan dieksekusi. Commit/push tidak dilakukan pada assignment ini.
+
 | ID | Hasil | Dependency | Status |
 | --- | --- | --- | --- |
 | DEV-001 | Skeleton repository dan cara menjalankan lokal | — | DONE |
@@ -1640,6 +1691,30 @@ batch approval, daftar run/activity, blocker, dan indikator fake/real.
 uji browser untuk alur utama, termasuk conflict revision dan fake label.
 
 ## DEV-010 — Pipeline lead/developer/QA dengan bukti test
+
+### Efisiensi tools Developer dan concern QA — 10 Oktober 2026
+
+Status: DONE. Review: NOT_REVIEWED.
+Rencana: read handle mengikat path/digest, batch read terbatas dan beberapa edit
+dalam satu file dengan CAS atomik; error edit actionable. Pisahkan pesan commit
+dari handoff/concern terstruktur; QA memeriksa concern berdasarkan source dan
+runner sebelum verifikasi penuh, dengan suite/target baru jika koreksi terbukti.
+Acceptance: stale handle/multi-edit invalid tidak menulis; semua assertion/input
+QA tetap; concern palsu/obsolete tidak dapat melewati harness; approval/budget
+historis tetap. File: source_tools, supervisor, contracts/runtime/workspace,
+policy tools, transcript, instruksi agent, tes product loop/concern/source/projection dan dokumen.
+Hasil: read_files <=6 halaman/24000 karakter dengan batas byte JSON, handle
+attempt-local dan CAS, edit_file_batch <=10 replacement pada satu file dengan
+publikasi atomik/checkpoint sekali, error match berisi indeks/count/excerpt.
+Commit message terpisah dari handoff; concern exact candidate/scope/commit/suite
+diperiksa terhadap source dan browser sebelum baseline. Koreksi mengubah hanya
+selector fill, membuat target baru dan tetap mewajibkan verifikasi penuh. Receipt
+dan proposal disimpan untuk retry exact target; preflight bukan QA pass.
+Verifikasi: pytest terarah 165 passed (source/fs/supervisor/concern/selector/
+contracts/projection/tools) dan 37 passed (product loop/regressions/review/
+context/scheduler/admission/Hermes). Docker/browser nyata, provider FAKE berlabel.
+git diff --check lulus. Full suite, provider nyata, pengukuran demo ulang dan
+review independen belum dilakukan. Handoff: docs/audits/library-efficiency-updates-2026-10-10.md.
 
 ### Kontrak fixture dan triage QA — 2026-10-07
 

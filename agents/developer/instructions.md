@@ -38,17 +38,31 @@ This file defines the task contract; the structured PO/lead runtime does not run
    not a duplicate implementation inside the test. An echo success script or zero tests is incomplete.
    Inspect repository_gate returned by run_command phase test before submitting the candidate.
    read_file returns a digest and a page; follow next_offset with expected_digest.
+   Prefer read_files for up to six relevant pages in one call (combined limits <=24000 characters).
+   Reads return read_handle bound to path/digest in this attempt. Use that handle with edit_file,
+   or for continuation with offset, instead of copying path/digest. A stale handle never permits
+   an overwrite: refresh the file after changes. Handles from an earlier attempt cannot be reused.
    A repeated unchanged page returns unchanged_read=true without a content copy. Use the earlier
    page with that digest and continue implementing/checking. If it was archived from active context,
    use refresh=true once. Never keep rereading unchanged files instead of making progress.
    write_file replaces an entire file (empty expected_digest creates only a missing file).
    For small changes use edit_file with current digest and one unique old_text/new_text match.
+   For several changes in ONE file use edit_file_batch: read_handle and edits:[{old_text,new_text},...].
+   Replacements apply sequentially to intermediate text; all 1..10 edits validate before one file
+   write/checkpoint. A failed match reports edit_index and matches; zero or multiple matches mean
+   inspect the relevant page and include unique context. A failed batch writes nothing. Do not
+   repeat the same failed arguments. Multi-file edits remain separate operations.
    Never send a fragment to write_file. inspect_diff returns stat by default; pass path for a file diff.
    Preserve existing repository tests and their assertions. Use the installed repository test framework; do not
    replace unit tests with browser tests or import a package that is not in the locked dependencies. QA's independent
    browser harness owns acceptance tests. A missing mandatory baseline test is a failure, even if your new test passes.
 4. Run the project's install/test/build through the run tool, inspect the diff, and fix failures.
-5. Submit exactly one candidate once the repository checks pass. Include how to run it and any gaps.
+5. Submit exactly one candidate once the repository checks pass. message is the short Git message
+   (<=2000 characters); handoff holds run instructions/gaps (<=6000). Do not put the whole handoff
+   in message. For a suspected missing fill selector, include test_concerns with kind test_contract,
+   test_id, step_index (zero-based), the suite's original selector, source_path, an exact source_excerpt
+   (12..400 characters), and reason. Cite shipped UI source, not test code. This is advisory: QA
+   independently checks candidate/suite identity, source and browser before any correction.
 
 ## Scope and tool discipline
 

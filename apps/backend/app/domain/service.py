@@ -490,6 +490,34 @@ class Workflow:
             s.flush()
             return self._change(s, actor, t, "uat_opened", phase="uat")
 
+    def reopen_qa(self, actor, ticket_id, expected_revision, candidate_id, verification_id, reason):
+        """Withdraw an unaccepted QA result for trusted evidence correction, preserving reviewed code.
+
+        No agent tool exposes this command. Accepted/integrating candidates and
+        user approvals cannot be invalidated through this recovery path.
+        """
+        with self.db.write() as s:
+            self._permit(s, actor, 'verification')
+            t = self._ticket(s, actor, ticket_id, expected_revision, ('uat',))
+            c = self._candidate(s, actor, t, candidate_id)
+            evidence.verification(s, self.store, c, verification_id)
+            if c.status != 'verified' or c.preview.get('verification_id') != verification_id:
+                raise Conflict('QA correction belongs to an obsolete verification')
+            if not isinstance(reason, str) or not reason.strip():
+                raise Invalid('QA evidence correction requires a reason')
+            for job in s.scalars(select(Job).where(Job.ticket_id == t.id, Job.stage == 'qa',
+                                                   Job.status.in_(ACTIVE_JOB_STATUSES))):
+                job.status, job.lease_owner, job.lease_expires_at = 'cancelled', None, None
+                job.lease_generation += 1
+                self._event(s, actor, 'job.cancellation_requested', job,
+                    {'reason': 'qa_evidence_correction', 'generation': job.lease_generation})
+            c.status, c.preview = 'review_approved', {}
+            s.flush()
+            attempts = {key: value for key, value in t.workflow.get('attempts', {}).items() if key != 'qa'}
+            return self._change(s, actor, t, 'qa_reopened', phase='qa',
+                workflow={**t.workflow, 'attempts': attempts, 'qa_correction': {
+                    'verification_id': verification_id, 'reason': reason.strip()[:2000]}})
+
     def accept_uat(self, actor, ticket_id, expected_revision, candidate_id, scope_version,
                    target_artifact_id, target_digest, verification_id, evidence_ids, manual_uac_ids=()):
         with self.db.write() as s:

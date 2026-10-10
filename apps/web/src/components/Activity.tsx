@@ -5,6 +5,7 @@ import { ApiError } from "../api/client";
 import { ACTIVE_RUN, ROLE_LABEL, RUN_STATUS_LABEL, blockerLabel, text, when } from "../format";
 import { useWorkspace } from "../workspace";
 import { Badge, ConfirmButton, FakeBadge } from "./ui";
+import RebaseNotice from "./RebaseNotice";
 
 const tone = (status: Run["status"]) =>
   status === "failed" ? "bad" : status === "waiting_input" || status === "waiting_quota" ? "warn" : status === "succeeded" ? "good" : ACTIVE_RUN.has(status) ? "info" : "neutral";
@@ -83,6 +84,7 @@ function RunRow({ run }: { run: Run }) {
         </span>
       </div>
       {ticket && <div className="muted">Tiket <button type="button" className="link" onClick={() => selectTicket(ticket.id)}>#{ticket.number} {ticket.title}</button>{run.scope_version ? ` · scope v${run.scope_version}` : ""}</div>}
+      {ticket && active && run.stage === "development" && <RebaseNotice ticket={ticket} compact />}
       {run.recovery?.needs_action && <p className="notice notice--bad" role="status">
         Retry otomatis sudah berhenti. Periksa penyebab kegagalan, lalu coba lagi setelah penyebabnya diperbaiki.
         {!run.recovery.can_retry && run.recovery.reason && <> {run.recovery.reason}</>}
@@ -90,8 +92,10 @@ function RunRow({ run }: { run: Run }) {
       {run.recovery?.retry_job_id && <p className="muted">Run ini sudah dilanjutkan pada attempt berikutnya.</p>}
       {run.result?.failure_kind === "relay_context" && <p className="notice notice--bad" role="status">Konteks ditolak relay lokal sebelum dikirim ke provider. Periksa ukuran request dan pemadatan.</p>}
       {run.result?.qa_status === "suite_repaired" && <p className="notice" role="status">Kontrak tes QA diperbaiki. Menunggu pengujian ulang pada target baru.</p>}
-      {run.result?.diagnosis_required === true && <p className="notice" role="status">Tes browser gagal. QA akan mendiagnosis bukti sebelum meminta perubahan aplikasi.</p>}
-      {run.result?.failure_kind === "test_contract" && run.status === "failed" && <p className="notice" role="status">Operasi, selector, atau expected tes QA perlu diperiksa terhadap kriteria dan input tes. Tiket tetap di QA.</p>}
+      {run.result?.diagnosis_required === true && <p className="notice" role="status">{Array.isArray(run.result?.coverage_gap_test_ids)
+        ? "Tes fitur juga lulus pada kode lama. QA akan memperbaiki cakupan tes; kandidat tetap."
+        : "Tes browser gagal. QA akan mendiagnosis bukti sebelum meminta perubahan aplikasi."}</p>}
+      {run.result?.failure_kind === "test_contract" && run.status === "failed" && <p className="notice" role="status">Cakupan, operasi, selector, atau expected tes QA perlu diperiksa terhadap kriteria dan input tes. Tiket tetap di QA.</p>}
       {run.result?.failure_kind === "infrastructure" && run.status === "failed" && <p className="notice" role="status">Runner atau infrastruktur QA bermasalah. Lihat detail dan status retry.</p>}
       {run.result?.failure_kind === "provider" && run.status === "failed" && <p className="notice" role="status">Permintaan ke provider model gagal. Lihat detail dan status retry.</p>}
       {run.result?.qa_status === "failed" && run.result?.request_changes === true && <p className="notice" role="status">QA gagal; bukti kegagalan dikirim ke developer.</p>}

@@ -322,13 +322,14 @@ class WorkspaceSupervisor:
     @serialized_operation
     def change_file(self, ref: RunRef, credential: str, path: str, *, expected_digest: str,
                     content: str | None = None, old_text: str | None = None,
-                    new_text: str | None = None) -> dict:
+                    new_text: str | None = None, edits: list[dict] | None = None) -> dict:
         """Compare-and-swap under the same operation/state locks as target commands.
 
         Empty expected_digest means create only; edits require a current SHA-256
         and exactly one matching occurrence. No Git/symlink paths are trusted.
         """
         with self._store(ref).lock():
+            from .errors import EditConflict
             spec, manifest, _ = self.authorize(ref, credential, 'write_file')
             if path.split('/', 1)[0] in manifest.exclude_from_sync:
                 raise WorkspaceError('path is managed by the runner')
@@ -343,14 +344,34 @@ class WorkspaceSupervisor:
                 current = None
             actual = sha256_bytes(current) if current is not None else ''
             if not hmac.compare_digest(actual, expected_digest):
-                raise WorkspaceError('file changed or exists; read_file and use its current digest')
-            if old_text is not None:
-                if current is None or not expected_digest or not old_text or not isinstance(new_text, str):
-                    raise WorkspaceError('edit requires existing file, digest, non-empty old_text and new_text')
+                raise EditConflict('file changed or exists; refresh read_file before retrying',
+                                   path=path, digest=actual)
+            if edits is not None and (content is not None or old_text is not None or new_text is not None):
+                raise WorkspaceError('edits cannot be combined with content/old_text/new_text')
+            if old_text is not None or edits is not None:
+                changes = edits if edits is not None else [{'old_text': old_text, 'new_text': new_text}]
+                if (not isinstance(changes, list) or not 1 <= len(changes) <= 10 or
+                        any(not isinstance(e, dict) or set(e) != {'old_text', 'new_text'} or
+                            not isinstance(e['old_text'], str) or not e['old_text'] or
+                            not isinstance(e['new_text'], str) for e in changes) or
+                        sum(len(e['old_text']) + len(e['new_text']) for e in changes) > 64000):
+                    raise WorkspaceError('edits requires 1..10 exact replacements, at most 64000 characters')
+                if current is None or not expected_digest:
+                    raise WorkspaceError('edit requires an existing file and its current digest')
                 text = current.decode('utf-8')
-                if text.count(old_text) != 1:
-                    raise WorkspaceError('old_text must match exactly once; read current file before editing')
-                content = text.replace(old_text, new_text, 1)
+                for index, edit in enumerate(changes):
+                    matches = text.count(edit['old_text'])
+                    if matches != 1:
+                        original = current.decode('utf-8')
+                        offset = max(0, original.find(edit['old_text'][:80]) - 100)
+                        raise EditConflict('old_text must match exactly once; add unique surrounding context',
+                            path=path, digest=actual, edit_index=index, matches=matches,
+                            read_offset=offset, current_excerpt=original[offset:offset + 400],
+                            next='No changes were written. Refresh the relevant page and retry the whole batch.')
+                    text = text.replace(edit['old_text'], edit['new_text'], 1)
+                    if len(text.encode('utf-8')) > min(50 * 1024 * 1024, spec.limits.max_snapshot_bytes):
+                        raise WorkspaceError('file exceeds snapshot byte limit')
+                content = text
             if content is None:
                 if current is None:
                     raise WorkspaceError('cannot delete a missing file')
@@ -360,9 +381,9 @@ class WorkspaceSupervisor:
             data = content.encode('utf-8')
             if len(data) > min(50 * 1024 * 1024, spec.limits.max_snapshot_bytes):
                 raise WorkspaceError('file exceeds snapshot byte limit')
-            fsutil.write_file_beneath(self.src_dir(ref), path, data)
+            fsutil.atomic_write_file_beneath(self.src_dir(ref), path, data)
             return {'path': path, 'digest': sha256_bytes(data), 'bytes': len(data),
-                    'operation': 'edit' if old_text is not None else 'write'}
+                    'operation': 'edit' if old_text is not None or edits is not None else 'write'}
 
     @serialized_operation
     def delete_file(self, ref: RunRef, credential: str, path: str) -> None:

@@ -7,6 +7,7 @@ import { RUN_STATUS_LABEL, blockerLabel, senderLabel, short, text, when } from "
 import { useWorkspace } from "../workspace";
 import { Badge, ConfirmButton, FakeBadge } from "./ui";
 import DependencyNotice from "./DependencyNotice";
+import RebaseNotice from "./RebaseNotice";
 
 export default function TicketPanel() {
   const { detail, board, selectedTicket, selectTicket } = useWorkspace();
@@ -28,6 +29,7 @@ export default function TicketPanel() {
         </div>
         {blocker && <div className="blocker" role="alert"><strong>Blocker:</strong> {blocker}</div>}
         <DependencyNotice ticket={ticket} />
+        <RebaseNotice ticket={ticket} />
       </header>
       <ScopeSection detail={detail} />
       <ProposalSection detail={detail} />
@@ -572,7 +574,9 @@ function Messages({ messages }: { messages: Message[] }) {
         <ol className="messages compact">
           {visible.map((m) => (
             <li key={m.id}><strong>{senderLabel(m.sender)}</strong> <span className="muted">{when(m.created_at)}</span>
-              {m.metadata.fake === true && <> <FakeBadge /></>}<p>{m.body}</p></li>
+              {m.metadata.fake === true && <> <FakeBadge /></>}<p>{m.metadata.intent === "rebase_request"
+                ? "Kode utama proyek berubah. Pekerjaan tiket ini perlu digabungkan dengan kode terbaru, kemudian melalui review teknis, QA, dan UAT kembali. Pekerjaan sebelumnya tetap tersimpan."
+                : m.body}</p></li>
           ))}
         </ol>
       )}

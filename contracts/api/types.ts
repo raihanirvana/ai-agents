@@ -20,6 +20,8 @@ export interface Ticket {
   id: string; project_id: string; number: number; title: string; phase: Phase; revision: number;
   scope_version: number; priority: number; blocker: Json; repair_cycles: number; repair_limit: number | null;
   dependency_waits?: { upstream_id: string; number: number; title: string; phase: Phase; state: string }[];
+  rebase_notice?: { reason: "accepted_base_changed";
+    source_ticket: { id: string; number: number; title: string } | null } | null;
 }
 export interface Usage { [name: string]: number | string[] }
 export interface Run {

@@ -75,14 +75,18 @@ def test_baseline_green_is_allowed_only_for_regression_not_a_new_feature(agent_e
     ctx = start_stage(env, runtime, scheduler, t, 'qa')
     try:
         outcome = runtime.run(ctx)
-        assert outcome.status == 'failed'  # FAKE still cannot authorize QA/UAT
+        assert outcome.status == ('succeeded' if purpose == 'feature' else 'failed')
         with env.db.read() as s:
             v = s.scalar(select(Verification))
             reports = [json.loads(env.store.read_bytes(s, aid)) for aid in v.evidence_artifact_ids
                 if s.get(Artifact, aid).kind == 'report']
             proof = next(p for p in reports if p.get('invocation_id') == v.evidence_id)
         assert proof['baseline']['execution']['counts']['passed'] == 1
-        assert ('FAKE provider' if purpose == 'regression' else 'assertion also passed on base') in proof['error']
+        assert ('FAKE provider' if purpose == 'regression' else 'repair feature coverage') in proof['error']
+        if purpose == 'feature':
+            assert outcome.result['diagnosis_required'] is True
+            assert outcome.result['failure_kind'] == 'test_contract'
+            assert v.status == 'incomplete' and proof['infrastructure_failure'] is False
         assert env.world.ticket(t.id).phase == 'qa'
     finally:
         ctx.stop_resources()

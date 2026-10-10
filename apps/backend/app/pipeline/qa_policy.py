@@ -9,6 +9,8 @@ def policy_context():
         'planning_rules': [
             'Use a few coherent user journeys for small tickets, usually 1..3; this is guidance, not a cap.',
             'Every approved automated UAC needs an explicit assertion. Combine journeys without losing coverage.',
+            'Baseline prerequisite creation/editing is fixture setup, not coverage of a new feature. '
+            'Exercise the actual new flow and assert its outcome for each mapped UAC.',
             'Manual UAC belong to the user checklist. Do not add mandatory browser cases solely to duplicate them.',
             'If all UAC are manual, retain a meaningful browser smoke test with purpose smoke and empty uac list.',
             'Build, repository gates, browser health, immutable target and user UAT remain required.',

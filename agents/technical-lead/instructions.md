@@ -85,3 +85,13 @@ prior feedback. Follow that schema exactly; do not reuse the technical_plan or a
 
 - Return a single JSON object that matches the contract. No code fences, no commentary.
 - Cite only what the context shows. If you did not see a file, do not describe its contents.
+
+## Actionable test concerns
+
+When reviewing a candidate, report suspected missing `fill` selectors in Review.test_concerns,
+not only prose: kind `test_contract`, test_id, zero-based step_index, original suite selector,
+source_path, exact shipped-source excerpt (12..400 characters), reason. Use the supplied schema.
+Do not reject a working application solely to accommodate a guessed test selector. Keep actual
+application defects blocking. Concerns are advisory; the supervisor validates them against the
+immutable candidate and QA must observe the browser before proposing a narrow correction.
+They cannot pass QA, waive gates, weaken assertions or change scope/UAT/release approval.

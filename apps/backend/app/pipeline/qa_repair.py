@@ -7,6 +7,74 @@ from .contracts import QaPlan
 MAX_SUITE_REPAIRS = 2
 
 
+def baseline_coverage_gaps(suite, proof):
+    """Only completed, authoritative base executions can expose surrogate feature tests."""
+    baseline = (proof.get('baseline') or {}).get('execution') or {}
+    if (baseline.get('status') not in ('passed', 'failed')
+            or baseline.get('infrastructure_failure') or proof.get('infrastructure_failure')):
+        return []
+    report = baseline.get('report') or {}
+    results = report.get('tests') or []
+    expected = {test.id for test in suite.tests}
+    if (len(results) != len(expected) or {row.get('id') for row in results} != expected
+            or report.get('discovered') != len(expected) or report.get('executed') != len(expected)
+            or report.get('skipped') != 0
+            or any(row.get('status') not in ('passed', 'failed') for row in results)):
+        return []
+    statuses = {row['id']: row['status'] for row in results}
+    return [test.id for test in suite.tests
+            if test.purpose in ('feature', 'bug') and statuses[test.id] == 'passed']
+
+
+def repair_coverage(suite, proof, proposal, criteria, source):
+    """Permit new journeys only for proven coverage gaps; keep other cases and UAC fixed.
+
+    Source witnesses make the proposed behaviour reviewable. They do not establish
+    correctness: the new target must pass all gates and fresh base/candidate runs.
+    """
+    affected = set(baseline_coverage_gaps(suite, proof))
+    if not affected:
+        raise ValueError('coverage repair requires completed baseline evidence')
+    repaired = proposal.suite.materialize_fixtures()
+    repaired.check_criteria(criteria)
+    repaired.check_selector_contracts()
+    repaired.check_selection_contracts()
+    repaired.check_csv_expectations()
+    old = {test.id: test for test in suite.tests}
+    new = {test.id: test for test in repaired.tests}
+    if set(old) != set(new):
+        raise ValueError('coverage repair must retain every original test ID')
+    for key, original in old.items():
+        updated = new[key]
+        if updated.uac != original.uac or updated.purpose != original.purpose:
+            raise ValueError('coverage repair cannot change test UAC or purpose')
+        if key not in affected and updated.model_dump() != original.model_dump():
+            raise ValueError('coverage repair cannot alter unaffected/regression cases')
+        if key in affected and updated.steps == original.steps:
+            raise ValueError('coverage repair must replace the surrogate journey')
+    required = {(key, uac) for key in affected for uac in old[key].uac}
+    witnesses = set()
+    for witness in proposal.witnesses:
+        pair = (witness.test_id, witness.criterion_id)
+        if pair not in required or pair in witnesses:
+            raise ValueError('coverage witness must map each affected test/UAC exactly once')
+        test = new[witness.test_id]
+        if not 0 <= witness.action_step < witness.assertion_step < len(test.steps):
+            raise ValueError('coverage witness must link an action to a later assertion')
+        if test.steps[witness.action_step].action not in (
+                'click', 'click_dialog', 'fill', 'select_option', 'press', 'check', 'uncheck',
+                'double_click', 'upload_file', 'download', 'reload'):
+            raise ValueError('coverage witness needs an actual user action')
+        if not test.steps[witness.assertion_step].action.startswith('assert_'):
+            raise ValueError('coverage witness needs an explicit behaviour assertion')
+        if witness.source_excerpt not in source.get(witness.source_path, ''):
+            raise ValueError('coverage witness must quote supplied shipped source exactly')
+        witnesses.add(pair)
+    if witnesses != required or repaired.digest == suite.digest:
+        raise ValueError('coverage repair needs witnesses for every affected test/UAC')
+    return repaired
+
+
 def fill_selector_candidates(suite, proof, source):
     """Bound proposals to unique editable DOM controls with literal source declarations."""
     if proof.get('status') != 'failed' or proof.get('infrastructure_failure'):
@@ -169,6 +237,17 @@ def repair_test_setup(suite, proof, proposal):
 
 
 def classify_failure(proof):
+    baseline = (proof.get('baseline') or {}).get('execution') or {}
+    report = baseline.get('report') or {}
+    rows = report.get('tests') or []
+    gaps = proof.get('coverage_gap_test_ids') or []
+    if (not proof.get('infrastructure_failure') and not baseline.get('infrastructure_failure') and gaps
+            and baseline.get('status') in ('passed', 'failed')
+            and report.get('discovered') == report.get('executed') == len(rows) and report.get('skipped') == 0
+            and len({row.get('id') for row in rows}) == len(rows)
+            and all(row.get('status') in ('passed', 'failed') for row in rows)
+            and set(gaps) <= {row.get('id') for row in rows if row.get('status') == 'passed'}):
+        return 'test_contract'
     if proof.get('infrastructure_failure') or proof.get('status') == 'incomplete':
         return 'infrastructure'
     failed = [t for t in (proof.get('report') or {}).get('tests', []) if t.get('status') == 'failed']

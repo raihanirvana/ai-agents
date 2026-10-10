@@ -369,6 +369,7 @@ Implementasi, belum diukur pada demo ulang atau melalui tes regresi:
   yang dapat dipaginasi. Batas byte source/diff tetap berlaku, dan broker menolak
   diff terlalu besar alih-alih memotongnya diam-diam. Submit schema menyebut
   batas pesan 2000 karakter yang memang diwajibkan broker.
+
 - Relay produk developer memproyeksikan hanya exchanges tool yang telah selesai:
   read/write usang serta hasil check lama diringkas menjadi metadata/hash dan
   failure excerpt. Read/page dan mutasi terbaru serta enam messages terakhir
@@ -521,3 +522,22 @@ optional platform/peer packages, missing required dependency, bukti install/buil
 gagal versus berhasil pada kandidat yang sama, dan kontrak QA target lama/baru.
 Batas repair, usage, approval, scope dan histori proyek tetap mengikuti domain;
 restart sendiri tidak memulihkan tiket yang sudah needs_human.
+
+# Efisiensi tools dan handoff QA — 10 Oktober 2026
+
+Pembaruan 10 Oktober 2026: `read_files` membaca 1..6 halaman sekaligus, dengan
+jumlah limit <=24000 karakter. Output mempertimbangkan escaping JSON relay;
+halaman dapat lebih pendek, tetapi next_offset/digest tetap benar. Read dan
+mutasi sukses menghasilkan `read_handle` untuk binding path/digest dalam attempt
+yang sama. Handle tidak mengubah lease/role/path policy atau pemeriksaan CAS.
+`edit_file_batch` menerima 1..10 replacement berurutan pada **satu file**; semua
+match dan batas ukuran diperiksa sebelum publikasi melalui temporary file dan
+dir-fd rename. Gagal validasi/penulisan tidak menulis sebagian file. Error match
+membawa indeks edit, jumlah match, current digest dan excerpt source yang diredaksi.
+Checkpoint sekali setelah batch sukses. Edit lintas file tetap operasi terpisah.
+
+`submit_candidate` memisahkan pesan commit dari `handoff` dan concern terstruktur.
+Review/handoff mengikat concern ke candidate/scope/commit/suite. QA memeriksa
+concern dengan source immutable dan runner sebelum persiapan baseline, dengan
+receipt/proposal yang persisten. Lihat [qa-policy.md](./qa-policy.md) untuk syarat
+koreksi selector, repin target dan verifikasi penuh; concern tidak memberi QA pass.

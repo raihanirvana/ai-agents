@@ -74,6 +74,44 @@ tidak waive dan tidak approve. Actual download tidak menjadi acuan expected.
 Mixed/unknown dan test fault di luar koreksi sempit masih memerlukan diagnosis/
 intervensi lanjutan; platform tidak menjanjikan semua capability tersedia.
 
+### Tes feature/bug yang lulus pada base — 10 Oktober 2026
+
+Jika eksekusi base lengkap menunjukkan tes feature/bug juga lulus, ini gap
+coverage, bukan error infrastruktur atau bukti bug aplikasi. Verification tetap
+`incomplete`; job selesai dengan `diagnosis_required` agar scheduler membuat
+QA diagnosis persisten untuk target/evidence yang sama. Baseline unavailable,
+skipped atau incomplete tetap ditangani sebagai infrastruktur, tanpa replan.
+
+QA dapat mengusulkan `QaCoverageRepair` untuk mengganti hanya journey yang
+terbukti tidak membedakan fitur baru. ID tes, purpose, mapping UAC dan kasus lain
+tetap. Setiap pasangan test/UAC yang diubah wajib mempunyai witness action →
+assertion dengan kutipan tepat source kandidat. Witness adalah usulan yang bisa
+ditinjau, bukan bukti semantik otomatis atau QA pass. Expected berasal dari
+UAC/fixture; model tidak boleh memakai hasil aplikasi untuk mengubah expected.
+Skenario salah sasaran boleh diganti, termasuk assertion yang tidak menguji UAC;
+UAC tidak boleh dikurangi/diganti. Source/build kandidat dan repair cycle
+developer tetap; suite/target baru wajib menjalankan seluruh base dan kandidat.
+Proposal dipin dan disimpan agar retry provider tidak mengulang browser maupun
+mengganti proposal yang telah tervalidasi. Jika struktur valid namun witness/
+coverage tidak valid, model mendapat satu koreksi dengan error spesifik,
+proposal sebelumnya dan daftar pasangan test/UAC yang wajib. Kedua respons
+di-checkpoint; proposal invalid tidak mengubah target. Batas suite repair yang sudah ada
+tetap berlaku; jika tidak terselesaikan, intervensi diminta di QA.
+
+Pada Mini Kasir #2, tes katalog menggantikan tes keranjang/pembayaran; #3
+memakai edit stok katalog alih-alih fitur stok masuk dan riwayat. Kedua suite
+lulus 3/3 pada base dan kandidat. Upgrade tidak mengubah bukti lama maupun
+membuka retry legacy otomatis; operator dapat retry setelah koreksi platform.
+
+Service verification dapat `reopen_qa` untuk koreksi bukti sebelum pengguna
+menerima UAT. Command internal ini tidak diekspos sebagai tool agent: hanya
+fase UAT, current candidate dan current passed verification diterima, dengan
+alasan persisten. Source/build dan review tetap; QA attempt lama difence dan
+preview receipt dilepas. Bukti lama immutable dan menjadi histori. Suite/target
+baru serta eksekusi penuh wajib sebelum UAT kembali dibuka. Integrating/accepted
+dan approval pengguna tidak dapat ditarik lewat command ini. Pada demo #2,
+reopening melengkapi assertion stok setelah klik pembayaran ganda.
+
 Scheduler tidak mengulang diagnosis permanen yang gagal, dan tidak membuat
 retry baru untuk legacy failure hanya karena kode di-upgrade. Lease/generation,
 cleanup, target drift, budget pool/usage kumulatif dan batas suite repair tetap.
@@ -125,3 +163,27 @@ memberi QA pass, tidak mengganti approval, dan tidak memakai repair cycle aplika
 Runner baru pada target lama memerlukan refresh identitas runner dan execution
 baru terlebih dahulu. Maksimal suite repair tetap berlaku. Jalur ini belum
 mencakup selector assertion, tombol, custom widget atau kontrol yang ambigu.
+
+## Concern handoff and early contract checks — 10 October 2026
+
+Developer submission separates a short Git `message` from the public `handoff`.
+Submission and technical review can include at most eight typed `test_concerns`:
+test/step/original selector, shipped-source path/exact excerpt, and reason.
+The trusted service qualifies only missing-fill concerns for the exact candidate,
+scope, commit and suite. Obsolete, fabricated or unsupported concerns are logged
+and ignored; they cannot reject an application or waive a required gate.
+
+QA observes the entire original candidate suite once before preparing the baseline.
+The early path is used only for source-qualified concerns. All failed cases must be
+the specifically cited missing-fill steps and have source-declared, unique editable
+controls observed by the isolated runner. QA proposes an existing candidate index
+for the same intended input; no replacement assertion or input is accepted.
+The existing narrow selector repair publishes a new suite/target. Complete fresh
+candidate/baseline verification is still mandatory; preflight receipts cannot open UAT.
+
+If no correction is justified, the same candidate execution proceeds to normal
+baseline/gate/diagnosis checks, without an extra browser run. Browser proof and QA
+proposal are persisted separately with exact pins and retry-stable keys; retries
+can reuse them only for the same candidate/target/concerns. Diagnostics are retained
+as artifacts. Fake provider labels remain enforced. Source/build/review remain pinned;
+prior approval or QA evidence never transfers to a changed target.

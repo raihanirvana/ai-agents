@@ -5,6 +5,14 @@ class WorkspaceError(Exception):
     """Base class; every failure in this package derives from it."""
 
 
+class EditConflict(WorkspaceError):
+    """A fenced edit failed validation before any source bytes were changed."""
+
+    def __init__(self, message, **details):
+        super().__init__(message)
+        self.details = details
+
+
 class AuthorizationError(WorkspaceError):
     """Caller identity, credential, generation, lease, or role does not permit the call."""
 

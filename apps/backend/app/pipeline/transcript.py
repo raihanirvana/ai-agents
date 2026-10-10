@@ -8,8 +8,16 @@ import copy
 import hashlib
 import json
 
-SOURCE = {'read_file', 'write_file', 'edit_file', 'patch_file', 'inspect_diff'}
-WRITES = {'write_file', 'edit_file', 'patch_file'}
+SOURCE = {'read_file', 'read_files', 'write_file', 'edit_file', 'edit_file_batch', 'patch_file', 'inspect_diff'}
+WRITES = {'write_file', 'edit_file', 'edit_file_batch', 'patch_file'}
+
+
+def observations(name, args, result):
+    if name == 'read_files':
+        return result.get('files', [])
+    if name == 'read_file':
+        return [{**result, 'path': result.get('path') or args.get('path')}]
+    return []
 
 
 def digest(text):
@@ -49,23 +57,27 @@ class TranscriptProjection:
                 ri, rm, result = found
                 if ri <= idx:
                     continue
-                path = args.get('path')
+                path = result.get('path') or args.get('path')
                 exchanges.append((idx, ri, call, name, args, rm, result))
                 success = not result.get('error') and result.get('exit_code', 0) == 0
                 if success and isinstance(path, str):
                     if name in WRITES:
                         latest_write[path] = idx
-                    if name == 'read_file' and not result.get('unchanged_read'):
-                        latest_read[(path, args.get('offset', 0))] = idx
+                if success:
+                    for row in observations(name, args, result):
+                        if not row.get('unchanged_read'):
+                            latest_read[(row.get('path'), row.get('offset', 0))] = idx
                 if name == 'run_command':
                     latest_command[args.get('phase')] = idx
         compacted = 0
         active_reads, active_chars = set(), 0
         for idx, ri, call, name, args, message, result in reversed(exchanges):
-            if name != 'read_file' or result.get('error') or result.get('unchanged_read'):
+            if name not in ('read_file', 'read_files') or result.get('error'):
                 continue
-            path = args.get('path')
-            if idx < latest_write.get(path, -1) or idx < latest_read.get((path, args.get('offset', 0)), idx):
+            if not any(not row.get('unchanged_read') and
+                idx >= latest_write.get(row.get('path'), -1) and
+                idx >= latest_read.get((row.get('path'), row.get('offset', 0)), idx)
+                for row in observations(name, args, result)):
                 continue
             size = len(message.get('content') or '')
             if active_chars + size <= 64000:
@@ -75,13 +87,13 @@ class TranscriptProjection:
             # Pending calls, decision tools and recent results never lose detail.
             if ri >= len(projected) - 6 or result.get('error'):
                 continue
-            path = args.get('path')
+            path = result.get('path') or args.get('path')
             obsolete_read = (name == 'read_file' and
                 (idx < latest_write.get(path, -1) or idx < latest_read.get((path, args.get('offset', 0)), idx)))
             obsolete_write = name in WRITES and idx < latest_write.get(path, idx)
             old_check = name == 'run_command' and idx < latest_command.get(args.get('phase'), idx)
             old_diff = name == 'inspect_diff'
-            archived_read = name == 'read_file' and call.get('id') not in active_reads
+            archived_read = name in ('read_file', 'read_files') and call.get('id') not in active_reads
             archived_write = name in WRITES
             if not (obsolete_read or obsolete_write or old_check or old_diff or archived_read or archived_write):
                 continue
@@ -91,9 +103,13 @@ class TranscriptProjection:
                        'note': 'Executed observation archived. Reread path/range for current contents and digest before editing. '
                                'Original retained in runtime diagnostics.'}
             for key in ('path', 'digest', 'bytes', 'deleted', 'operation', 'offset', 'next_offset',
-                        'truncated', 'total_chars', 'exit_code', 'status'):
+                        'truncated', 'total_chars', 'exit_code', 'status', 'read_handle'):
                 if key in result:
                     summary[key] = result[key]
+            if name == 'read_files':
+                summary['files'] = [{k: row[k] for k in ('path', 'digest', 'read_handle', 'offset',
+                    'next_offset', 'truncated', 'total_chars', 'unchanged_read') if k in row}
+                    for row in result.get('files', [])]
             if old_check:
                 gate = result.get('repository_gate') or {}
                 summary['repository_gate'] = {k: gate[k] for k in
@@ -110,6 +126,10 @@ class TranscriptProjection:
                     value = abbreviated.get(key)
                     if isinstance(value, str):
                         abbreviated[key] = '[Archived executed argument: sha256=' + digest(value) + ', chars=' + str(len(value)) + ']'
+                if isinstance(abbreviated.get('edits'), list):
+                    abbreviated['edits'] = [{key: '[Archived executed argument: sha256=' + digest(value) +
+                        ', chars=' + str(len(value)) + ']' for key, value in edit.items()}
+                        for edit in abbreviated['edits']]
                 call['function']['arguments'] = json.dumps(abbreviated, ensure_ascii=False)
             compacted += 1
         # Repeated read receipts are pure observations, with a freshly checked

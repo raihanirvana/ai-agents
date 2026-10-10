@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import secrets
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
@@ -195,6 +196,40 @@ def write_file_beneath(root: Path, rel: str, data: bytes, *, executable: bool = 
             view = view[os.write(fd, view) :]
     finally:
         os.close(fd)
+
+
+def atomic_write_file_beneath(root: Path, rel: str, data: bytes) -> None:
+    """Publish one complete file via dir-fd rename; failed writes retain the old file."""
+    parts = validate_relpath(rel).parts
+    parent = _open_parent(root, parts, create=True, mode=0o777)
+    temporary = '.source-edit-' + secrets.token_hex(16)
+    fd = None
+    try:
+        try:
+            target = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+            if not stat.S_ISREG(target.st_mode):
+                raise PathViolation(f'not a regular file: {rel}')
+        except FileNotFoundError:
+            pass
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=parent)
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError('source write made no progress')
+            view = view[written:]
+        os.fchmod(fd, 0o666)
+        os.fsync(fd)
+        os.replace(temporary, parts[-1], src_dir_fd=parent, dst_dir_fd=parent)
+    finally:
+        if fd is not None:
+            os.close(fd)
+            try:
+                os.unlink(temporary, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+        os.close(parent)
 
 
 def remove_beneath(root: Path, rel: str) -> None:

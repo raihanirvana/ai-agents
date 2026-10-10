@@ -15,14 +15,11 @@ This file defines the task contract; the structured PO/lead runtime does not run
    Check risk-sensitive invalid inputs for money/stock, permissions, persistence and data loss.
    Do not add cosmetic label/DOM requirements. Accessibility checks should verify approved or
    necessary behaviour (for example keyboard submission), rather than inventing preferred attributes.
-   Keep the suite proportional to the scope: a coherent interaction sequence may cover several UAC,
-   with explicit assertions and mapping for each. Preserve required regression coverage; do not add
-   redundant cases, cosmetic requirements, or tests for sibling features absent from approved scope.
    For `qa_plan`, inspect the baseline source/DOM with `inspect_app` before choosing selectors and expected text.
-   Read baseline_ui_source supplied in the task first. Existing prerequisite controls belong to the accepted
-   baseline: reuse their real IDs/classes, scoped to the record created by this test. Do not invent a new ID
-   for a field merely because its purpose is familiar. For dynamic IDs, inspect their generation or use an
-   existing class scoped by fixture text. Inspect omitted/truncated source through inspect_app.
+   Read baseline_ui_source first; reuse real prerequisite controls scoped to the fixture record.
+   Creating/editing a baseline record is SETUP, never coverage of a new sale, payment, stock-in or history.
+   Exercise the NEW feature flow and assert each mapped UAC outcome. Feature tests must fail on base.
+   For new controls define a contract from the technical plan; inspect omitted source through inspect_app.
    If source_files is empty, the new-project base intentionally has no DOM. Plan feature tests from approved
    UAC and the technical plan, defining selectors/text as an explicit contract for the developer. Do not
    repeatedly search other paths or ask the user for code that does not exist. Do not create regression cases
@@ -43,12 +40,9 @@ This file defines the task contract; the structured PO/lead runtime does not run
    {"action":"click","selector":"#add-button"}]}, then reference fixture_ids:["customer"] in each
    dependent test. Fixtures contain setup actions only; keep assertions in tests. The supervisor expands
    setup independently before pinning the canonical suite. Expanded cases stay within 30 steps.
-   Reuse fixtures for prerequisites shared by journeys; do not duplicate hand-written setup across cases. Prefer approved test-id selectors; avoid global tag counts or invented
-   tag requirements unless the approved criteria require them. Preserve previously accepted behavior.
+   Prefer approved test-id selectors; avoid global tag counts or invented tag requirements.
    Create prerequisite customers/records and select their relationship inside each test before submitting a
    dependent form. Reload preserves storage, but transient detail selection may require reopening the record.
-   jQuery `:contains()` is not supported. Use a scoped CSS selector with `assert_contains_text`, preserving
-   the exact expected text. Do not invent selector syntax from another testing library.
    `fill` only changes text. For Enter submission, fill the input then use
    `{"action":"press","selector":"input selector","value":"Enter"}` and assert the result.
    Never substitute a newline or literal `\\n` for a keyboard event. `press` accepts only the named keys
@@ -96,6 +90,10 @@ This file defines the task contract; the structured PO/lead runtime does not run
 
 ## Planning completion and failure diagnosis
 
+- Developer/TL test_concerns are advisory, never QA approval. Check pinned source/browser facts
+  before baseline preparation. Choose the same intended input or abstain. Keep inputs/assertions/UAC.
+  Corrections require a new target and full fresh verification; otherwise normal checks continue.
+
 - `qa_plan` ends after one validated suite is submitted through `propose_tests`; it does not execute
   acceptance or declare a pass. Execution/reporting uses the supplied task and trusted harness.
 - Read the file list and relevant components before proposing selectors. Do not repeatedly inspect
@@ -106,6 +104,11 @@ This file defines the task contract; the structured PO/lead runtime does not run
 - Suite corrections go through the authorized planning/repair workflow and require fresh evidence for
   the resulting suite and target. Do not edit immutable evidence, loosen an assertion to hide a real
   defect, waive a gate, or rerun an unchanged failure indefinitely.
+- `qa_coverage_repair` replaces only feature/bug journeys proven to pass on accepted base. Return the
+  requested schema with the same test IDs/UAC/purposes and unchanged unaffected cases. Link every
+  affected test/UAC to a real feature action, later outcome assertion and exact supplied source excerpt.
+  Derive expected values from UAC/fixtures, not observed output. Never substitute catalog editing for
+  stock-in or catalog creation for payment. New targets require complete fresh base/candidate execution.
 - Use a selector scoped to the specific form/alert, not a global `.error-message` visibility check.
   The trusted runner can diagnose an ambiguous visibility assertion with exactly one visible alert
   and hidden alternatives. The platform may qualify that assertion to its observed unique alert ID,

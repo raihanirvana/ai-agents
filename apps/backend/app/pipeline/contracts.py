@@ -321,11 +321,31 @@ def browser_capabilities():
             'download_max_bytes': 1024 * 1024, 'suite_max_bytes': 512 * 1024}
 
 
+class TestConcern(Contract):
+    """Advisory test/source mismatch; it is never authority to pass or waive QA."""
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=False)
+    kind: Literal['test_contract'] = 'test_contract'
+    test_id: str = Field(pattern=ID)
+    step_index: StrictInt = Field(ge=0, le=29)
+    selector: StrictStr = Field(min_length=1, max_length=300)
+    source_path: StrictStr = Field(min_length=1, max_length=300)
+    source_excerpt: StrictStr = Field(min_length=12, max_length=400)
+    reason: StrictStr = Field(min_length=1, max_length=800)
+
+
+class CandidateSubmission(Contract):
+    message: StrictStr = Field(min_length=1, max_length=2000,
+        description='Short Git commit message. Put explanation/run instructions in handoff.')
+    handoff: StrictStr = Field(default='', max_length=6000)
+    test_concerns: list[TestConcern] = Field(default_factory=list, max_length=8)
+
+
 class Review(Contract):
     kind: Literal["review"]
     accept: StrictBool
     summary: str = Field(min_length=1, max_length=2000)
     findings: list[str] = Field(default_factory=list, max_length=20)
+    test_concerns: list[TestConcern] = Field(default_factory=list, max_length=8)
 
 
 class DiagnosisFinding(Contract):
@@ -360,6 +380,24 @@ class QaDiagnosis(Contract):
         if self.fault != 'unknown' and any(f.fault != self.fault for f in self.findings):
             raise ValueError('mixed findings require unknown overall fault')
         return self
+
+
+class CoverageWitness(Contract):
+    test_id: str = Field(pattern=ID)
+    criterion_id: str = Field(pattern=ID)
+    action_step: StrictInt = Field(ge=0, le=29)
+    assertion_step: StrictInt = Field(ge=0, le=29)
+    source_path: str = Field(min_length=1, max_length=300)
+    source_excerpt: str = Field(min_length=12, max_length=400)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class QaCoverageRepair(Contract):
+    """A new feature journey, never authority to change criteria or approve QA."""
+    kind: Literal['qa_coverage_repair']
+    summary: str = Field(min_length=1, max_length=1500)
+    suite: QaPlan
+    witnesses: list[CoverageWitness] = Field(min_length=1, max_length=480)
 
 
 class SetupSelection(Contract):

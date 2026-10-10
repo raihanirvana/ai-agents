@@ -4,6 +4,7 @@ import { ACTIVE_RUN, PHASES, RUN_STATUS_LABEL, blockerLabel, byPriority } from "
 import { useWorkspace } from "../workspace";
 import { Badge, ConfirmButton, FakeBadge } from "./ui";
 import DependencyNotice from "./DependencyNotice";
+import RebaseNotice from "./RebaseNotice";
 
 export default function Board() {
   const { board, command, selectedTicket, selectTicket, connection } = useWorkspace();
@@ -41,7 +42,7 @@ export default function Board() {
   return (
     <section className="board" aria-label="Board tiket">
       <div className="board-note" role="note">
-        Seret kartu dalam satu kolom untuk mengubah prioritas (angka lebih besar = lebih atas). Phase hanya berpindah lewat tindakan eksplisit di detail tiket.
+        Seret kartu dalam satu kolom untuk mengubah prioritas (angka lebih besar = lebih atas). Tahap mengikuti proses tim dan persetujuan Anda. Perubahan kode utama dapat memerlukan penyesuaian dan pengujian ulang.
         {connection === "reconnecting" && <strong> Koneksi event terputus; menyambung ulang…</strong>}
       </div>
       {notice && <p className="notice" role="status">{notice}</p>}
@@ -123,6 +124,7 @@ export default function Board() {
                           ))}
                         </div>
                         <DependencyNotice ticket={ticket} />
+                        <RebaseNotice ticket={ticket} compact />
                         <div className="card-actions">
                           <button type="button" className="ghost small" aria-label={`Naikkan prioritas tiket ${ticket.number}`} disabled={index === 0}
                             onClick={() => void reorder(column, ticket.id, column[index - 1].id)}>▲</button>

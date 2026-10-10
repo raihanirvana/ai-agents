@@ -290,10 +290,15 @@ class ProductWorkspace:
             suite.check_criteria(version.uac)
             return suite, row.attachment_ids[-1]
 
-    def submit(self, ctx, sup, started, manifest, message):
+    def submit(self, ctx, sup, started, manifest, message, *, handoff='', test_concerns=None):
         record = sup.submit_candidate(started.ref, started.credential, message)
         identity = ctx.queue.verify(ctx.lease)
         suite, suite_id = self.suite(identity)
+        from .test_concerns import qualify_concerns
+        concerns, _, ignored = qualify_concerns(test_concerns or [], suite,
+                                                sup.broker(identity['project_id']), record['sha'])
+        for reason in ignored:
+            ctx.log('Candidate test concern ignored: ' + self.redactor.redact(reason))
         built, build_files, build_error = None, None, ''
         try:
             built = sup.build_target(started.ref, record['sha'])
@@ -357,8 +362,9 @@ class ProductWorkspace:
                     candidate.id, build_artifact_id=build.id, target_artifact_id=target.id, target_digest=target.checksum)
                 attachments += [bundle.id, build.id, target.id]
             self._post(s, identity, 'candidate:' + identity['root_job_id'],
-                'Candidate submitted; technical review and separate QA execution are required.', attachments,
-                'candidate_handoff', candidate_id=candidate.id, build_error=build_error, gate=gate)
+                handoff or 'Candidate submitted; technical review and separate QA execution are required.', attachments,
+                'candidate_handoff', candidate_id=candidate.id, build_error=build_error, gate=gate,
+                commit_sha=record['sha'], suite_digest=suite.digest, test_concerns=concerns)
             published = {'candidate_id': candidate.id, 'commit_sha': record['sha'], 'build_error': build_error, 'gate': gate,
                 'pipeline_completion': {'job_id': identity['job_id'], 'generation': identity['generation']}}
             bind_service(ctx.queue, s).complete(ctx.lease, published)
