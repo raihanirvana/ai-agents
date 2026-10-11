@@ -61,6 +61,15 @@ tetap mengikuti model registry. Demo ini juga memiliki otorisasi user untuk
 Counter repair dan usage tidak direset. Approval scope/UAT/release, lease fencing,
 sandbox limits dan timeout command tetap berlaku.
 
+ContextBuilder juga mengikuti `job.limits.unlimited_budgets` yang tersimpan:
+job unlimited tidak memiliki plafon total konteks aplikasi 8.000/32.768 token,
+dan manifest snapshot mencatat `limit_tokens: null`. Berlaku untuk semua role,
+termasuk konteks Developer saat repair dan konteks review. Pemilihan history
+opsional tetap memakai layer/summary; scope, UiSpec, suite dan feedback wajib
+tidak ditolak karena plafon token terpisah. Policy berasal dari job DB, bukan
+argumen task/model. Builder bersama tidak dimutasi; job finite tetap memakai
+batas konteks yang dikonfigurasi.
+
 Jika accepted base maju ketika run menunggu, checkpoint dengan scope yang sama
 dan base lama tetap menjadi artefak histori. Resume tidak menyalin source lama
 ke tree terbaru; gunakan jalur repair/rebase kandidat sebelumnya, atau mulai dari

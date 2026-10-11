@@ -75,3 +75,26 @@ retry memakai 21.484 token, USD 0,007349778. Total UI/UX termasuk job gagal
 42.985 token dan USD 0,014851413. TL kemudian succeeded dalam satu call,
 12.052 token, USD 0,002964225. Tiket #1 masuk Development dan QA planning
 berjalan paralel. Tiket #2/#3 sudah Ready, menunggu dependency accepted.
+
+## Intervensi platform: plafon konteks saat repair Developer
+
+Developer pertama selesai dan membuat kandidat; TL meminta perubahan. Job
+repair `15c392563513404e99d838651c57b180` kemudian gagal sebelum model call:
+konteks wajib sekitar 9.606 token ditolak oleh ContextBuilder default 8.000.
+Semua budget job sudah null dengan `unlimited_budgets=true`; seluruh role pada
+konfigurasi model lokal juga memiliki `max_output_tokens=null`. Penyebabnya
+adalah plafon konteks aplikasi yang belum mengikuti policy unlimited.
+
+ContextBuilder sekarang membaca policy dari job DB yang cocok dengan identitas
+proyek/tiket/scope. Pada job unlimited, plafon total konteks aplikasi dihapus dan
+manifest mencatat `limit_tokens=null`; konfigurasi builder bersama tidak diubah.
+Job finite tetap dibatasi, dan task/model tidak dapat mengaktifkan policy ini.
+Approval, scope/version, pemilihan history opsional dan usage tetap berlaku.
+
+Regresi: `pytest tests/agents tests/pipeline/test_review_context.py
+tests/pipeline/test_ui_spec_stage.py -q --tb=short`: **271 passed, 57,86 s**.
+Mencakup semua lima role, konteks wajib di atas 32.768 token, penolakan policy
+palsu dari task dan scope yang belum di-approve. Worker dimuat ulang saat idle;
+retry `8bdc1ba23629478ea10320201816fb69` berjalan. Snapshot nyata
+`184096d6ebc24d7da580101dd11c26bf`: 11.655 estimated tokens, `limit_tokens=null`.
+Cap job model/tool/time/input-output tetap null, approval dan histori dipertahankan.

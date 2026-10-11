@@ -3460,6 +3460,13 @@ Retry operator setelah worker idle dimuat ulang mempertahankan scope/usage;
 UiSpec revisi 1 dan TL succeeded, tiket #1 Development dengan QA planning paralel.
 Histori gagal dan biaya intervensi tetap masuk benchmark; DEV-027 tetap IN_PROGRESS.
 
+Intervensi berikutnya: repair Developer tertahan plafon ContextBuilder 8.000,
+walaupun seluruh budget demo dan max_output_tokens model sudah null. Policy
+unlimited job sekarang meniadakan plafon total konteks aplikasi untuk semua role;
+manifest limit_tokens null, tanpa mutasi builder bersama atau bypass scope.
+Regresi agents + review_context + ui_spec_stage: 271 passed, 57,86 s. Retry nyata
+Developer memakai snapshot 11.655 token dengan limit null; job kembali berjalan.
+
 **Acceptance criteria:** Mini Perpustakaan dengan workload sama; bandingkan dengan 11 Oktober:
 tiket lulus QA percobaan pertama, biaya QA + UI/UX, repair, keputusan user, amandemen, waktu
 total, dan penilaian tampilan saat UAT.

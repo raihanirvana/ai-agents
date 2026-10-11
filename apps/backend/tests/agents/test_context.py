@@ -165,6 +165,38 @@ def test_role_scope_and_task_are_never_dropped_and_too_large_is_an_error(agent_e
     assert "## Scope" in snap.user and snap.estimated_tokens <= budget and "## Task" in snap.user
 
 
+@pytest.mark.parametrize('role', ['po', 'ui-ux', 'technical-lead', 'developer', 'qa'])
+def test_unlimited_job_context_has_no_separate_token_ceiling(agent_env, role):
+    from app.pipeline.budgets import unlimited_limits
+    env = agent_env
+    ticket = env.approved_ticket()
+    ctx = env.ctx(env.job(role, 'context-test', ticket=ticket, stage='reply', limits=unlimited_limits()))
+    task = {'name': 'context-test', 'required_data': 'required-witness ' * 10000}
+    snap = build(env, ctx, task=task, lease=ctx.lease, queue=env.queue)
+    assert snap.estimated_tokens > 32768
+    assert task['required_data'] in snap.user
+    assert snap.manifest['limit_tokens'] is None
+    assert 'APPROVED by the user' in snap.user
+    assert env.builder.limits.total_tokens == 8000  # no shared/concurrent builder mutation
+    assert env.get(ctx.lease.job_id).context_artifact_id == snap.artifact_id
+
+
+def test_task_cannot_enable_unlimited_context_for_a_finite_job(agent_env):
+    env = agent_env
+    ctx = lead(env, env.approved_ticket())
+    with pytest.raises(ContextTooLarge, match='limit 8000'):
+        build(env, ctx, task={'name': 'implement', 'unlimited_budgets': True, 'required_data': 'x' * 40000})
+
+
+def test_unlimited_context_still_requires_scope_approval(agent_env):
+    from app.pipeline.budgets import unlimited_limits
+    env = agent_env
+    ticket = env.world.new(SCOPE)
+    ctx = env.ctx(env.job('developer', 'context-test', ticket=ticket, stage='reply', limits=unlimited_limits()))
+    with pytest.raises(ContextRefused, match='has approved'):
+        build(env, ctx, task={'name': 'implement', 'required_data': 'x' * 40000})
+
+
 def test_a_valid_summary_stands_in_for_trimmed_messages_without_a_gap(agent_env):
     env = agent_env
     env.builder.limits = ContextLimits(total_tokens=8000, messages_tokens=250)

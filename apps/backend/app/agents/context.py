@@ -21,7 +21,7 @@ from sqlalchemy import and_, func, or_, select
 from app.persistence import ArtifactStore, Database
 from app.persistence.artifacts import canonical_json
 from app.persistence.messages import not_runtime_log
-from app.persistence.models import Approval, Dependency, Message, Project, Ticket, TicketVersion
+from app.persistence.models import Approval, Dependency, Job, Message, Project, Ticket, TicketVersion
 
 from .redaction import Redactor
 from .souls import AgentDefinition
@@ -107,6 +107,14 @@ class ContextBuilder:
               answer: str | None = None, lease=None, queue=None, source_safe: bool = False) -> ContextSnapshot:
         role, agent = identity["role"], self.agents[identity["role"]]
         with self.db.read() as s:
+            job = s.get(Job, identity['job_id'])
+            unlimited = (job is not None and job.limits.get('unlimited_budgets') is True and
+                         all(getattr(job, key) == identity[key]
+                             for key in ('project_id', 'ticket_id', 'scope_version')))
+            # Read the persisted user policy, never task/model arguments. Context
+            # selection still curates optional history; mandatory task data must
+            # not hit a separate 8K/32K ceiling when the job is unlimited.
+            token_limit = None if unlimited else self.limits.total_tokens
             scope = self._scope(s, identity)
             if role in NEEDS_APPROVED_SCOPE:
                 if scope is None:
@@ -132,7 +140,7 @@ class ContextBuilder:
         for layer in (decisions, deps, repo, messages):
             layer.fit()
         self._settle(agent, stable, tail, summaries, task_text + run_text, messages, summary,
-                     droppable=(messages, repo, decisions))
+                     droppable=(messages, repo, decisions), token_limit=token_limit)
         gaps = self._gaps(stable + tail) + [{"layer": "history_summary", "omitted": {"id": i},
                                               "reason": "summary_does_not_match_history"} for i in invalid]
         # Scrub conversational layers before assembly. A second generic pass over
@@ -145,9 +153,9 @@ class ContextBuilder:
                                     + f"\n{task_text}\n{run_text}")
         system = self.redactor.redact(agent.text)
         total = estimate_tokens(system) + estimate_tokens(user)
-        if total > self.limits.total_tokens:
+        if token_limit is not None and total > token_limit:
             raise ContextTooLarge(f"role, scope, dependencies and task need ~{total} tokens, limit "
-                                  f"{self.limits.total_tokens}")
+                                  f"{token_limit}")
         manifest = {
             "schema": 1, "estimated": True, "role": role, "agent_digest": agent.digest,
             "source_safe": source_safe,
@@ -155,7 +163,7 @@ class ContextBuilder:
                                               "attempt", "generation")},
             "layers": [{"name": l.name, "estimated_tokens": l.tokens(), "items": [r for r, _ in l.items]}
                        for l in stable + tail],
-            "gaps": [*gaps, RUNTIME_GAP], "estimated_tokens": total, "limit_tokens": self.limits.total_tokens}
+            "gaps": [*gaps, RUNTIME_GAP], "estimated_tokens": total, "limit_tokens": token_limit}
         digest = hashlib.sha256(canonical_json({"system": system, "user": user})).hexdigest()
         prefix_digest = hashlib.sha256(canonical_json({"system": system, "prefix": self.redactor.redact_source(prefix)})).hexdigest()
         snapshot = ContextSnapshot(system, user, self.redactor.redact_value(manifest), digest, prefix_digest, total)
@@ -164,7 +172,7 @@ class ContextBuilder:
         return snapshot
 
     # -- fitting -------------------------------------------------------------------------------------------------------
-    def _settle(self, agent, stable, tail, summaries, fixed_text, messages, summary, droppable) -> int:
+    def _settle(self, agent, stable, tail, summaries, fixed_text, messages, summary, droppable, token_limit) -> int:
         """Drop the oldest/last droppable items until everything fits; summaries follow what was dropped."""
         while True:
             omitted = {ref["id"] for ref in messages.omitted}
@@ -178,7 +186,7 @@ class ContextBuilder:
             summary.fit()
             total = (estimate_tokens(agent.text) + estimate_tokens(fixed_text)
                      + sum(layer.tokens() for layer in stable + tail))
-            if total <= self.limits.total_tokens or not any(layer.drop_one() for layer in droppable):
+            if token_limit is None or total <= token_limit or not any(layer.drop_one() for layer in droppable):
                 return total
 
     @staticmethod
