@@ -44,3 +44,30 @@ def test_denied_intent_inspection_blocks_cleanup(monkeypatch):
     monkeypatch.setattr(runtime, "_intent_pids", denied)
     assert not runtime.reap_recorded_processes({"id": "job", "runtime_ref": {
         "resources": [{"kind": "process_groups", "generation": 1}]}})
+
+@pytest.mark.parametrize('after_denial', ['zombie', 'gone', 'running', 'denied'])
+def test_intent_environment_denial_rechecks_whether_process_can_still_execute(monkeypatch, after_denial):
+    """macOS environ can deny a process that became a zombie after status inspection."""
+    from types import SimpleNamespace
+    pid = 12345
+    class Process:
+        calls = 0
+        def status(self):
+            self.calls += 1
+            if self.calls == 1:
+                return runtime.psutil.STATUS_RUNNING
+            if after_denial == 'gone':
+                raise runtime.psutil.NoSuchProcess(pid)
+            if after_denial == 'denied':
+                raise runtime.psutil.AccessDenied(pid)
+            return runtime.psutil.STATUS_ZOMBIE if after_denial == 'zombie' else runtime.psutil.STATUS_RUNNING
+        def environ(self):
+            raise runtime.psutil.AccessDenied(pid)
+    process = Process()
+    monkeypatch.setattr(runtime.subprocess, 'run', lambda *a, **kw: SimpleNamespace(stdout=f'{pid} {os.getuid()}\n'))
+    monkeypatch.setattr(runtime.psutil, 'Process', lambda _: process)
+    if after_denial in ('zombie', 'gone'):
+        assert runtime._intent_pids() == []
+    else:
+        with pytest.raises(runtime.psutil.AccessDenied):
+            runtime._intent_pids()

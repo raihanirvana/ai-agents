@@ -488,4 +488,13 @@ def _intent_pids() -> list[int]:
                 pids.append(pid)
         except psutil.NoSuchProcess:
             continue
+        except psutil.AccessDenied:
+            # macOS can deny environ() after a live process becomes a zombie.
+            # Recheck death explicitly; a live/unreadable process still blocks cleanup.
+            try:
+                if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
+                    continue
+            except psutil.NoSuchProcess:
+                continue
+            raise
     return pids

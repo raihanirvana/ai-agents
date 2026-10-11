@@ -671,6 +671,11 @@ baru dan tidak mengganti verification IDs dalam approval historis.
 Unit/integration tests yang mengimpor kandidat dalam proses runner dicatat sebagai
 repo gates dengan batas kepercayaan tersebut; exit 0 tidak menggantikan E2E wajib.
 
+Gerbang regresi proyek (12 Oktober 2026): journey QA tiket accepted lain dijalankan pada setiap kandidat
+setelah suite tiketnya lulus; kegagalan mandatory menggagalkan QA (`regression`). Perubahan kontrol dan
+kegagalan base hanya diagnosis; waiver tetap keputusan pengguna yang mem-pin evidence. Detail:
+[docs/decisions/ui-ux.md](docs/decisions/ui-ux.md).
+
 Test fitur baru dan reproduksi bug dibandingkan base/kandidat bila relevan;
 pastikan kegagalan base memang karena perilaku yang hilang/salah. Regression tests
 diharapkan lulus pada keduanya. Tidak semua acceptance test wajib merah di base.

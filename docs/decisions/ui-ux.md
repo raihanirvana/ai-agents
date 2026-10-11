@@ -126,3 +126,26 @@ Skill ini **referensi yang dipin**, bukan dependency runtime:
   huruf besar/kecil; assert_value(s) mempertahankan case dan spasi input persis.
 - PO: `ui_change` per tiket berupa boolean asli; `false` melewati UI/UX. UAC menjelaskan perilaku,
   bukan wording. Marker diwarisi revisi yang menghilangkannya; kontrak scope lama tetap kompatibel.
+
+## Gerbang regresi proyek (DEV-024)
+
+Target, suite, dan evidence sudah dipin saat UAT di-approve. Journey baru menjadi gerbang tiket
+lain setelah kandidat **accepted** (terintegrasi), sehingga regresi menguji perilaku yang sudah
+ada di accepted tip. Kandidat accepted terakhir setiap tiket lain menggantikan journey versi
+sebelumnya; tiket yang sedang dikerjakan dan proyek lain tidak masuk suite gabungan.
+
+Seluruh journey pada suite sumber dijalankan pada build kandidat setelah suite tiketnya lulus,
+termasuk setup fixture. Tidak ada pemotongan jumlah test. Hanya test yang dikecualikan oleh keputusan
+QA pengguna yang masih valid untuk target/evidence asal boleh dikeluarkan. Bila semuanya
+dikecualikan, pin keputusan tetap dicatat sebagai waived, tanpa klaim eksekusi browser. Kegagalan di accepted
+base atau journey yang menyentuh kontrol berubah adalah diagnosis, **bukan waiver otomatis**:
+kegagalan mandatory tetap menggagalkan QA (`failure_kind: regression`) dan kembali ke Developer.
+Scope/UiSpec baru saja tidak mengizinkan agent membuang journey accepted.
+
+Manifest accepted, suite digest, mandatory test IDs, verification dan evidence asal diperiksa ulang.
+Sumber yang hilang/tidak cocok serta report runner yang missing/skipped/tidak lengkap menghasilkan
+incomplete infrastructure (retryable), bukan pass. Artefak acceptance kandidat menyimpan suite
+regresi lengkap, digest, source artifact/verification/evidence IDs, legacy locator IDs, dan report
+runner lengkap (invocation, target, runner, counts, command, error). Diagnosis base juga mem-pin
+build digest/config/toolchain/fixture/migration identity. Runner tetap memiliki timeout dan budget
+finite; batas tersebut tidak boleh menghasilkan pass parsial.

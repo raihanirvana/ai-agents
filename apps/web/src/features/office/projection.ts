@@ -9,7 +9,7 @@ export interface OfficeAgent {
   latestMessage: Message | null;
 }
 
-const ROLE_ORDER: Role[] = ["po", "technical-lead", "developer", "qa"];
+const ROLE_ORDER: Role[] = ["po", "ui-ux", "technical-lead", "developer", "qa"];
 const ACTIVE = new Set<Run["status"]>(["queued", "running", "waiting_input", "waiting_quota"]);
 
 function stateFor(run: Run | null): OfficeState {

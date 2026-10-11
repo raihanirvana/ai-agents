@@ -206,12 +206,25 @@ def verification_plan(s, t):
             for c in version.uac] if version else []}
 
 
+def ui_spec(s, t):
+    """Latest UI/UX output for the current scope (shown for review; copy needs no separate approval)."""
+    row = s.scalar(select(Message).where(Message.ticket_id == t.id, not_runtime_log(),
+        func.json_extract(Message.meta, '$.intent') == 'ui_spec',
+        func.json_extract(Message.meta, '$.scope_version') == t.current_version)
+        .order_by(Message.seq.desc()).limit(1))
+    if row is None:
+        return None
+    return {'revision': row.meta.get('ui_spec_revision', 0), 'no_ui_change': bool(row.meta.get('no_ui_change')),
+            'summary': row.body, 'spec': row.meta.get('spec'), 'fake': row.meta.get('fake') is True}
+
+
 def detail(s, ticket_id, threads, store=None):
     from app.domain.qa_resolution import available
     t = row(s, Ticket, ticket_id)
     return {"ticket": {**ticket(t), 'dependency_waits': dependency_waits(s, [t])[t.id],
                        'rebase_notice': rebase_notices(s, [t])[t.id]},
             'qa_resolution': available(s, store, t) if store is not None else None,
+            'ui_spec': ui_spec(s, t),
             'verification_plan': verification_plan(s, t), "versions": [{"version": v.version, "title": v.title, "description": v.description,
             "uac": v.uac, "scope": v.scope} for v in s.scalars(select(TicketVersion).where(TicketVersion.ticket_id == t.id)
                                                                     .order_by(TicketVersion.version))],

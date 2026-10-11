@@ -34,6 +34,7 @@ export default function TicketPanel() {
       <ScopeSection detail={detail} />
       <ProposalSection detail={detail} />
       <Dependencies detail={detail} />
+      <UiSpecSection detail={detail} />
       <VerificationPlan detail={detail} />
       <QaResolution key={JSON.stringify(detail.qa_resolution)} detail={detail} />
       <Candidates detail={detail} fake={fake} />
@@ -288,6 +289,60 @@ function ArtifactChip({ id, label }: { id: string; label: string }) {
       {missing && <Badge tone="bad">tidak tersedia{artifact?.unavailable_reason ? `: ${artifact.unavailable_reason}` : failure ? `: ${failure}` : ""}</Badge>}
       {artifact?.availability === "available" && <a href={api.artifactUrl(id)} target="_blank" rel="noreferrer">buka</a>}
     </span>
+  );
+}
+
+const STATE_LABEL: Record<string, string> = { empty: "Kosong", error: "Error", success: "Sukses", loading: "Memuat" };
+const FEEDBACK_LABEL: Record<string, string> = {
+  inline: "Inline", toast: "Toast", native_confirm: "Konfirmasi browser", native_alert: "Alert browser",
+};
+
+/** UI/UX output for the current scope: shown for review; copy needs no separate approval. */
+function UiSpecSection({ detail }: { detail: TicketDetail }) {
+  const current = detail.ui_spec;
+  if (!current) return null;
+  if (!current.spec) {
+    return <section aria-labelledby="uispec-h"><h3 id="uispec-h">Spesifikasi UI {current.fake && <FakeBadge />}</h3>
+      <p className="muted">Tiket ini tidak mengubah tampilan: {current.summary}</p></section>;
+  }
+  const spec = current.spec;
+  const copy = new Map(spec.copy.map((entry) => [entry.key, entry.text]));
+  return (
+    <section aria-labelledby="uispec-h" className="uispec">
+      <h3 id="uispec-h">Spesifikasi UI <Badge>rev {current.revision}</Badge> {current.fake && <FakeBadge />}</h3>
+      <p>{spec.tokens.direction}</p>
+      <div className="uispec-swatches">{spec.tokens.colors.map((c) =>
+        <span key={c.name} className="uispec-swatch">
+          <span className="uispec-chip" style={{ background: c.value }} aria-hidden="true" />{c.name} <code>{c.value}</code>
+        </span>)}</div>
+      <ul className="uispec-fonts">{spec.tokens.fonts.map((f) =>
+        <li key={f.role}><span style={{ fontFamily: `"${f.family}", ${f.fallback}` }}>{f.family}</span>{" "}
+          <span className="muted">{f.role}, cadangan {f.fallback}</span></li>)}</ul>
+      <p className="muted">Spacing {spec.tokens.spacing_px.join(" / ")} px · radius {spec.tokens.radius.map((r) => `${r.name} ${r.px}px`).join(", ")}</p>
+      {spec.screens.map((screen) => <details key={screen.id}>
+        <summary>Layar {screen.id}: {screen.purpose} ({screen.components.length} komponen)</summary>
+        <table className="uispec-table"><thead><tr><th>testid</th><th>Role</th><th>Teks</th><th>Catatan</th></tr></thead>
+          <tbody>{screen.components.map((c) => <tr key={c.testid}>
+            <td><code>{c.testid}</code></td><td>{c.role ?? ""}</td>
+            <td>{[c.name_key, c.label_key, c.text_key].filter(Boolean).map((key) => copy.get(key!)).join(" / ")}</td>
+            <td className="muted">{[c.repeated ? "berulang" : "", c.scope_testid ? `di dalam ${c.scope_testid}` : ""].filter(Boolean).join(", ")}</td>
+          </tr>)}</tbody></table>
+      </details>)}
+      <details><summary>Copy ({spec.copy.length})</summary>
+        <table className="uispec-table"><thead><tr><th>Key</th><th>Teks</th></tr></thead>
+          <tbody>{spec.copy.map((entry) => <tr key={entry.key}><td><code>{entry.key}</code></td><td>{entry.text}</td></tr>)}</tbody></table>
+      </details>
+      {(spec.states.length > 0 || spec.feedback.length > 0) && <details><summary>State dan feedback</summary>
+        <table className="uispec-table"><thead><tr><th>Kapan</th><th>Bentuk</th><th>Teks</th></tr></thead>
+          <tbody>
+            {spec.states.map((s, index) => <tr key={`state-${index}`}>
+              <td>{s.screen}: {STATE_LABEL[s.kind] ?? s.kind}{s.testid && <> · <code>{s.testid}</code></>}</td><td>State</td><td>{copy.get(s.copy_key)}</td></tr>)}
+            {spec.feedback.map((f, index) => <tr key={`feedback-${index}`}>
+              <td><code>{f.action_testid}</code> {f.outcome}</td><td>{FEEDBACK_LABEL[f.kind] ?? f.kind}{f.target_testid && <> · <code>{f.target_testid}</code></>}</td>
+              <td>{copy.get(f.copy_key)}</td></tr>)}
+          </tbody></table>
+      </details>}
+    </section>
   );
 }
 

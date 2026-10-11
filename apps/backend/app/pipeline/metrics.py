@@ -8,19 +8,22 @@ from sqlalchemy import select
 
 
 def report(db, project_id):
+    from app.agents.souls import ROLES
     from app.persistence.models import Event, Job, Project
     from app.workers.telemetry import PHASES
     with db.read() as s:
         if s.get(Project, project_id) is None:
             raise ValueError('project not found')
         jobs = list(s.scalars(select(Job).where(Job.project_id == project_id).order_by(Job.created_at, Job.id)))
-        rows, by_role = [], {}
+        # Every registered role is listed (ui-ux included), so cost/time per role compare across demos.
+        rows, by_role = [], {role: {'jobs': 0, 'phases': {}, 'usage': {}, 'unknown_usage_jobs': 0} for role in ROLES}
         now = datetime.now(timezone.utc)
         for job in jobs:
             ref = job.runtime_ref or {}
             phases = ref.get('telemetry', {}).get('phases', {})
             role = ref.get('role', 'unknown')
-            totals = by_role.setdefault(role, {'phases': {}, 'usage': {}, 'unknown_usage_jobs': 0})
+            totals = by_role.setdefault(role, {'jobs': 0, 'phases': {}, 'usage': {}, 'unknown_usage_jobs': 0})
+            totals['jobs'] += 1
             for name, value in phases.items():
                 if name not in PHASES:
                     continue

@@ -197,3 +197,13 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
 .office-fallback button { font-size: 11px; }
 
 .dependency-notice { margin-top: 8px; }
+
+/* UI/UX spec on the ticket page */
+.uispec { min-width: 0; overflow-wrap: anywhere; }
+.uispec-swatches { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0; font-size: 13px; }
+.uispec-swatch { display: inline-flex; align-items: center; gap: 6px; }
+.uispec-chip { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--line); display: inline-block; }
+.uispec-fonts { margin: 4px 0; padding-left: 18px; }
+.uispec-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+.uispec-table th, .uispec-table td { text-align: left; border-bottom: 1px solid var(--line); padding: 4px 6px; vertical-align: top; }
+.uispec-table th { color: var(--muted); font-weight: 500; }

@@ -125,7 +125,7 @@ test("ticket evidence shows target identity, missing artifacts, manual UAC and s
   const t = ticket({ phase: "uat", revision: 12, scope_version: 2 });
   const candidate: Candidate = {
     id: "c1", ticket_id: "t1", scope_version: 2, commit_sha: "a".repeat(40), base_sha: "b".repeat(40), status: "verified",
-    target_artifact_id: "art-target", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok", "ev-gone"], preview: null,
+    target_artifact_id: "art-target", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok", "ev-gone"], preview: { verification_id: "v1" },
     commit_artifact_id: "art-commit", build_artifact_id: "art-build", live_preview: null, integrated_sha: null, integration: null,
     verifications: [{ id: "v1", status: "passed", target_digest: "sha256:" + "d".repeat(64), evidence_ids: ["ev-ok", "ev-gone"],
       counts: { executed: 4, passed: 4, failed: 0 }, results: {}, uac_coverage: { "UAC-1": ["test_menu"], "UAC-2": [] } }] };
@@ -151,7 +151,7 @@ test("ticket evidence shows target identity, missing artifacts, manual UAC and s
   await expect(panel.locator('[data-artifact="ev-ok"] a')).toHaveAttribute("href", `${API}/artifacts/ev-ok/content`);
   await expect(panel.getByText("tanpa tes")).toBeVisible();
   await expect(panel.locator('[data-approval="baseline_waiver"]')).toContainText("Kegagalan baseline sudah diketahui");
-  await expect(panel.locator(".uac").getByText("manual")).toBeVisible();
+  await expect(panel.locator(".uac").getByText("Anda saat UAT")).toBeVisible();
 
   // The manual UAC must be confirmed by the user before the accept action is available.
   await expect(panel.getByRole("button", { name: "Terima (UAT)" })).toBeDisabled();
@@ -398,7 +398,8 @@ test("office projects persisted roles, run state and message thread, while the b
   await expect(page.locator(".office-roles").getByRole("button", { name: /Product Owner/ })).toContainText("Menyusun rencana");
   await expect(page.locator(".office-roles").getByRole("button", { name: /Developer/ })).toContainText("Mengembangkan");
   await expect(page.locator(".office-roles").getByRole("button", { name: /QA/ })).toContainText("Menunggu input");
-  await expect(page.locator(".office-roles").getByRole("button")).toHaveCount(4);
+  await expect(page.locator(".office-roles").getByRole("button")).toHaveCount(5);
+  await expect(page.locator(".office-roles").getByRole("button", { name: /UI\/UX/ })).toBeVisible();
   await expect(page.getByLabel("Scene kantor tiga dimensi")).toBeVisible();
   const motion = page.getByRole("button", { name: "Animasi nonaktif" });
   await expect(motion).toHaveAttribute("aria-pressed", "false");

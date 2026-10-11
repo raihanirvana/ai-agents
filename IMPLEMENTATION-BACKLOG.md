@@ -3363,7 +3363,26 @@ wording/tampilan diserahkan ke UI/UX; instruksi PO diperbarui.
 
 ### Catatan pengerjaan
 
-Status: TODO. Rencana langkah M.
+Review independen dimulai 2026-10-12: periksa kelengkapan journey, waiver pengguna,
+identitas/availability sumber accepted, dan evidence eksekusi. Perbaikan serta test regresi
+dicatat dalam `docs/reviews/DEV-024-026-review.md`; review dan recheck selesai; hasil final dicatat di dokumen review.
+
+Status: DONE (2026-10-12). Review: REVIEWED (Codex, fix reviewer diuji sendiri). Rencana langkah M.
+Hasil setelah review: `app/pipeline/regression.py` mengambil kandidat accepted terakhir per tiket lain
+(urutan approval UAT); target/suite/mandatory IDs/verification/evidence sumber divalidasi. Setup fixture
+ikut dijalankan. Seluruh journey masuk suite gabungan, tanpa pemotongan 60 test. Hanya keputusan QA
+pengguna yang valid untuk evidence asal dapat mengecualikan test; bahkan bila semua test dikecualikan,
+evidence keputusan tetap dicatat (`waived`, tanpa mengklaim eksekusi browser).
+Gerbang `_verify_attempt` berjalan setelah suite tiket lulus pada build kandidat. Changed controls dan
+kegagalan base adalah diagnosis, bukan waiver otomatis. Kegagalan mandatory menghasilkan
+`failure_kind: regression` dan kembali ke Developer dengan journey/tiket/error. Sumber/report unavailable,
+missing/skipped/mismatched = incomplete infrastructure (retryable), bukan pass. Acceptance artifact
+mem-pin suite gabungan/digest, source artifact/verification/evidence/waiver IDs, legacy IDs dan report
+runner lengkap; diagnosis base menyertakan build/config/toolchain/fixture/migration identity.
+Verifikasi awal: unit gate/source/waiver serta Docker browser mengeksekusi 61 journey, mendeteksi
+kegagalan journey terakhir (60 passed, 1 failed, 0 skipped). Regresi reviewer: 1055 passed / 1 failed worker (run awal); race inspection macOS
+diperbaiki, seluruh 98 test workers lulus. Recheck gate/fake/browser 30 passed,
+recheck akhir gate/waiver/fake 29 passed. Final tree: 1065 kasus backend unik terverifikasi.
 
 **Acceptance criteria:** setelah UAT di-approve, journey QA yang lulus dipin sebagai suite regresi
 proyek dan menjadi gerbang wajib tiket berikutnya, dengan target/evidence yang dipin.
@@ -3372,7 +3391,20 @@ proyek dan menjadi gerbang wajib tiket berikutnya, dengan target/evidence yang d
 
 ### Catatan pengerjaan
 
-Status: TODO. Rencana langkah N.
+Review independen dimulai 2026-10-12: verifikasi panel UiSpec melalui browser nyata,
+label FAKE, serta kantor dengan lima role. Review selesai setelah fix dan browser/build recheck.
+
+Status: DONE (2026-10-12). Review: REVIEWED (Codex, fix reviewer diuji sendiri). Rencana langkah N.
+Hasil: label `ui-ux` → "UI/UX" (`format.ts`), ROLE_ORDER kantor (po, ui-ux, TL, developer, QA) dengan jarak meja
+menyesuaikan jumlah role di dalam dinding; `TicketDetail.ui_spec` dari `queries.ui_spec` (spec terbaru scope
+aktif, spec:null untuk no_ui_change); panel "Spesifikasi UI" di halaman tiket: swatch warna + nilai, font dalam
+typeface-nya, spacing/radius, layar dan komponen, tabel copy, state dan feedback. `contracts/api/types.ts`:
+Role, UiSpec, TicketUiSpec. openapi.json tidak berubah (respons detail tidak bertipe di OpenAPI; field scope
+`ui_change` sudah diregenerasi di DEV-023). Verifikasi: `tsc --noEmit` web; test fungsi query detail.
+Browser Playwright: 41 passed (33,4 detik), lalu recheck panel 3 passed (6,1 detik);
+42 kasus browser unik terverifikasi, termasuk panel token/copy/state/feedback/no_ui_change,
+label FAKE, kantor lima role dan interaksi WebGL. Fix review menambahkan metadata fake pada DTO,
+key state yang unik, target testid state/feedback, wrapping copy panjang, serta batas posisi meja ±4,25 di dalam dinding ±4,42.
 
 **Acceptance criteria:** label role di `format.ts`, ROLE_ORDER kantor, tampilan UiSpec di halaman
 tiket (swatch warna/font, layar, tabel copy, state), `contracts/api/types.ts` dan `openapi.json`.
@@ -3381,7 +3413,20 @@ tiket (swatch warna/font, layar, tabel copy, state), `contracts/api/types.ts` da
 
 ### Catatan pengerjaan
 
-Status: TODO. Rencana langkah P.
+Review independen dimulai 2026-10-12: periksa telemetry semua role dan routing fake driver
+terhadap konteks percakapan serta amandemen. Review selesai bersama regresi/recheck backend.
+
+Status: DONE (2026-10-12). Review: REVIEWED (Codex, fix reviewer diuji sendiri). Rencana langkah P.
+Hasil: `pipeline/metrics.py` selalu memuat setiap role terdaftar (termasuk ui-ux) di `by_role` dengan jumlah job,
+fase, dan usage/biaya, sehingga laporan biaya/waktu per role bisa dibandingkan antar demo. Test O tambahan:
+`app/pipeline/fake_ui_ux.py` — FakeUiUxDriver berlabel FAKE (spec deterministik, amandemen aditif, role lain
+didelegasikan) dan test stage memakai driver itu. Review memperbaiki routing berdasarkan object Task
+(bukan name/spec yang dikutip di percakapan). Verifikasi: tests/pipeline/test_fake_ui_ux_and_metrics.py;
+unit/stage/telemetry lulus pada regresi dan recheck reviewer; 1065 kasus backend unik terverifikasi.
+Catatan regresi pelaksana M–P: tests/pipeline, agents, domain, workers, persistence, release — 964 passed, 0 failed (19 m 50 s);
+setelah perubahan eksternal pada fake_ui_ux/regression, test terkait diulang: 59 passed. tests/http dan
+browser test web tidak dijalankan oleh pelaksana. Reviewer menjalankan HTTP dalam regresi penuh,
+42 kasus browser unik serta build TypeScript/Vite (8,54 detik); semuanya terverifikasi pada tree final.
 
 **Acceptance criteria:** role `ui-ux` muncul di `pipeline/metrics.py` dan laporan biaya/waktu per role.
 

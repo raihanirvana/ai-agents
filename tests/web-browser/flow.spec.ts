@@ -70,7 +70,7 @@ test("brief to proposal, discussion, edits, accept/reject, batch approval and re
   // Discuss: ask the PO to revise one ticket; first proposal is rejected, the second accepted.
   await page.locator(".created").getByRole("button", { name: /Menu kopi/ }).click();
   await expect(page.getByRole("heading", { name: /Menu kopi/, level: 2 })).toBeVisible();
-  await expect(page.getByText("Menu menampilkan minuman")).toBeVisible();
+  await expect(page.locator(".uac").getByText("Menu menampilkan minuman")).toBeVisible();
 
   await script(request, [revision(["Menu menampilkan minuman", "Menu menampilkan harga"], "Tambah harga")]);
   await page.getByLabel("Minta PO merevisi tiket ini").fill("Tambahkan kriteria harga");
@@ -101,7 +101,7 @@ test("brief to proposal, discussion, edits, accept/reject, batch approval and re
   await page.getByLabel("Mode UAC-1").selectOption("manual");
   await page.getByRole("button", { name: "Simpan sebagai versi baru" }).click();
   await expect(page.locator(".ticket-head").getByText("scope v3")).toBeVisible();
-  await expect(page.locator(".uac").getByText("manual")).toBeVisible();
+  await expect(page.locator(".uac").getByText("Anda saat UAT")).toBeVisible();
 
   // Drag/drop changes priority, and the order survives reload because the backend owns it.
   const before = await titles(page, "scope_review");
@@ -179,7 +179,10 @@ test("stop sends an empty body without expected_revision and the run shows as ca
   await createProject(page, "Stop run");
   await send(page, "Mulai lalu hentikan");
   await page.getByRole("tab", { name: /Aktivitas/ }).click();
-  const run = page.locator(".run").first();
+  const selected = page.locator(".run").filter({ hasText: "Product Owner" }).first();
+  await expect(selected).toHaveAttribute("data-status", /running|queued/);
+  const id = await selected.getAttribute("data-run");
+  const run = page.locator(`.run[data-run="${id}"]`);
   await expect(run).toHaveAttribute("data-status", /running|queued/);
   await expect(run.getByText("FAKE · bukan QA nyata")).toBeVisible();
 
@@ -208,7 +211,10 @@ test("office follows a real persisted team run through SSE and keeps its message
   await expect(page.getByLabel("Konteks Product Owner")).toContainText("Mulai breakdown PO untuk proyek ini");
 
   await page.getByRole("tab", { name: /Aktivitas/ }).click();
-  const active = page.locator(".run").first();
+  const selected = page.locator(".run").filter({ hasText: "Product Owner" }).first();
+  await expect(selected).toHaveAttribute("data-status", /running|queued/);
+  const id = await selected.getAttribute("data-run");
+  const active = page.locator(`.run[data-run="${id}"]`);
   await expect(active).toHaveAttribute("data-status", /running|queued/);
   await active.getByRole("button", { name: "Stop", exact: true }).click();
   await active.getByRole("button", { name: "Ya, hentikan run" }).click();

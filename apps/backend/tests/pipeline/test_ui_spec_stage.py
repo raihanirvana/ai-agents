@@ -554,3 +554,19 @@ def test_spec_amendment_with_no_tl_contract_preserves_technical_controls(agent_e
     assert contract['revision'] == 2
     assert next(c for c in contract['controls'] if c['testid'] == 'catalog-panel')['purpose'] == container['purpose']
     assert len(env.provider.requests) == 4
+
+
+def test_labelled_fake_ui_ux_driver_runs_the_real_stage(agent_env, tmp_path):
+    from app.pipeline.fake_ui_ux import FakeUiUxDriver
+    env = agent_env
+    runtime, _, scheduler = setup(env, tmp_path, SpecDriver())
+    enable_ui_ux(env)
+    driver = FakeUiUxDriver(fallback=[plan_without_contract()])
+    env.provider._replies = driver
+    ticket = env.approved_ticket()
+    job = finish(env, runtime, scheduler, 'ui_spec')
+    assert job.result['ui_spec_revision'] == 1 and driver.requests == 1
+    assert spec_messages(env, ticket)[0].body.startswith('FAKE UI/UX spec')
+    tl = finish(env, runtime, scheduler, 'technical_plan')
+    controls = {c['testid'] for c in latest_contract(runtime, env, ticket)['controls']}
+    assert tl.result['ui_spec_revision'] == 1 and {'add-item', 'item-row'} <= controls

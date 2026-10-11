@@ -1,7 +1,7 @@
 /** DEV-008 public DTOs. JSON timestamps are ISO UTC strings; IDs are opaque strings. */
 import type * as Body from "./requests";
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-export type Role = "po" | "technical-lead" | "developer" | "qa";
+export type Role = "po" | "ui-ux" | "technical-lead" | "developer" | "qa";
 export type Phase = Body.Phase;
 export type Revision = Body.Revision;
 export type Empty = Body.Empty;
@@ -91,6 +91,23 @@ export interface Candidate {
   verifications: Verification[];
 }
 export interface Board { project: Project; tickets: Ticket[]; runs: Run[]; preview: Preview | null; releases: Release[]; cursor: number }
+export interface UiSpecComponent {
+  testid: string; purpose: string; role?: string | null; name_key?: string | null; label_key?: string | null;
+  text_key?: string | null; repeated?: boolean; scope_testid?: string | null;
+}
+export interface UiSpec {
+  kind: "ui_spec"; revision: number; summary: string;
+  tokens: { direction: string; colors: { name: string; value: string }[];
+    fonts: { role: "display" | "body" | "mono"; family: string; fallback: string }[];
+    spacing_px: number[]; radius: { name: string; px: number }[] };
+  screens: { id: string; purpose: string; components: UiSpecComponent[] }[];
+  copy: { key: string; text: string }[];
+  states: { screen: string; kind: "empty" | "error" | "success" | "loading"; copy_key: string; testid?: string | null }[];
+  feedback: { action_testid: string; outcome: "success" | "error" | "confirm";
+    kind: "inline" | "toast" | "native_confirm" | "native_alert"; copy_key: string; target_testid?: string | null }[];
+}
+/** Latest UI/UX output for the ticket's current scope; spec is null for no_ui_change. */
+export interface TicketUiSpec { fake?: boolean; revision: number; no_ui_change: boolean; summary: string; spec: UiSpec | null }
 export interface QaDecisionDiagnosis {
   fault: string; summary: string; supervisor_derived?: string | null;
   withheld_application?: { artifact_id: string; fault: string; summary: string; validator_issues: string[];
@@ -98,6 +115,7 @@ export interface QaDecisionDiagnosis {
       reason: string; source_path?: string }[] } | null;
 }
 export interface TicketDetail {
+  ui_spec?: TicketUiSpec | null;
   qa_resolution?: { eligible: boolean; reason?: string; candidate_id?: string; verification_id?: string;
     target_artifact_id?: string; target_digest?: string; diagnosis_artifact_id?: string;
     evidence_ids?: string[]; criteria?: Criterion[]; diagnosis?: QaDecisionDiagnosis;

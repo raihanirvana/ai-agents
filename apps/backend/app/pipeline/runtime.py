@@ -1182,10 +1182,24 @@ class PipelineRuntime:
                                   + ', '.join(gaps))
             else:
                 proof.update(status='incomplete', infrastructure_failure=True, error='Accepted base could not be built for comparison')
+        regression = None
+        if proof['status'] == 'passed':
+            # Accepted journeys of earlier tickets are a mandatory gate (DEV-024).
+            regression = self._regression_gate(ctx, identity, candidate, target, site, baseline)
+            if regression is not None:
+                proof['regression'] = regression
+                if regression['status'] == 'failed':
+                    proof.update(status='failed', error='Regression gate: accepted journeys broke: '
+                                 + ', '.join(regression['failed'][:10]))
+                elif regression['status'] == 'incomplete':
+                    proof.update(status='incomplete', infrastructure_failure=True,
+                                 error='Regression gate execution incomplete: ' + str(regression.get('error') or '')[:300])
         if self.fake and proof['status'] == 'passed':
             proof['status'], proof['infrastructure_failure'] = 'incomplete', True
             proof['error'] = 'FAKE provider: harness result cannot count as product QA pass'
         failure_kind = classify_failure(proof) if proof['status'] != 'passed' else None
+        if regression is not None and regression['status'] == 'failed':
+            failure_kind = 'regression'
         proof['failure_kind'] = failure_kind
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
@@ -1230,6 +1244,15 @@ class PipelineRuntime:
             if proof['status'] == 'passed':
                 bind_service(ctx.queue, s).complete(ctx.lease, {'verification_id': v.id, 'evidence_artifact_ids': attachments,
                     'qa_status': 'passed', 'pipeline_completion': {'job_id': identity['job_id'], 'generation': identity['generation']}})
+        if failure_kind == 'regression':
+            lines = [f"{test} (#{regression['owners'][test]['number']} {regression['owners'][test]['test_id']}): "
+                     f"{regression['errors'].get(test, '')}" for test in regression['failed'][:10]]
+            return self._reject(ctx, identity, candidate,
+                'Regression gate failed: journeys accepted for earlier tickets no longer pass on this candidate.\n'
+                + '\n'.join(lines) + '\nRestore the accepted behaviour. Report intended changes to the user '
+                'with this pinned evidence; do not delete or rewrite accepted regression journeys.',
+                verification_id=v.id, evidence_artifact_ids=attachments, qa_status='failed',
+                failure_kind='regression', regression_failed=regression['failed'])
         if proof['status'] == 'failed' or (proof['status'] == 'incomplete' and failure_kind == 'test_contract'):
             pending = {'verification_id': v.id, 'evidence_artifact_ids': attachments,
                 'qa_status': proof['status'], 'failure_kind': failure_kind, 'diagnosis_required': True,
@@ -1246,6 +1269,90 @@ class PipelineRuntime:
              'failure_kind': failure_kind},
             error=proof.get('error') or ('Incomplete harness execution' if proof['status'] == 'incomplete' else ''),
             retryable=failure_kind == 'infrastructure')
+
+    def _regression_gate(self, ctx, identity, candidate, target, site, baseline):
+        """Run every accepted journey; only persisted user decisions exclude tests.
+
+        Changed controls and failures reproduced on the base are diagnostics. They do
+        not waive mandatory journeys. Preserve the suite, source pins and full runner
+        receipt in the candidate's authoritative acceptance artifact.
+        """
+        from .contracts import digest_of, validate_report
+        from .regression import regression_entries, regression_suite, subset, changed_controls, touches
+        from app.domain.types import DomainError
+        from app.persistence import ArtifactUnavailable
+        try:
+            with self.db.read() as s:
+                entries = regression_entries(s, self.store, identity['ticket_id'])
+        except (DomainError, ArtifactUnavailable, ValueError, KeyError, TypeError) as exc:
+            return {'status': 'incomplete', 'error': 'Accepted regression source unavailable: ' + str(exc)[:300]}
+        if not entries:
+            return None
+        suite, legacy, owners = regression_suite(entries)
+        if not suite.tests:
+            # Still pin the exact decisions that excluded every accepted journey.
+            return {'status': 'waived', 'test_ids': [], 'suite': suite.model_dump(), 'suite_digest': suite.digest,
+                    'entries': [{k: v for k, v in e.items() if k != 'tests'} for e in entries],
+                    'reason': 'All source journeys excluded by validated persisted user QA decisions.'}
+        ctx.log(f'Regression gate: {len(suite.tests)} accepted journeys from {len(entries)} tickets.')
+        proof = self.workspace.harness.run(ctx, site, candidate.target_digest, suite, target['node_image_id'],
+            expected_runner=target['runner'], diagnostics=False, legacy_test_ids=legacy)
+        proof.pop('diagnostics', None)
+        summary = {'test_ids': [t.id for t in suite.tests], 'invocation_id': proof.get('invocation_id'),
+                   'counts': proof.get('counts'), 'suite': suite.model_dump(), 'suite_digest': suite.digest,
+                   'legacy_test_ids': legacy, 'execution': proof,
+                   'entries': [{k: v for k, v in e.items() if k != 'tests'} for e in entries]}
+
+        def admitted(receipt, plan, digest):
+            report = receipt.get('report')
+            invocation = receipt.get('invocation_id')
+            commands = receipt.get('commands')
+            checked = validate_report(report, invocation_id=receipt.get('invocation_id'),
+                                      target_digest=digest, suite=plan)
+            if (not isinstance(invocation, str) or not invocation
+                    or receipt.get('infrastructure_failure') is not False or checked['status'] == 'incomplete'
+                    or receipt.get('status') != checked['status'] or receipt.get('counts') != checked['counts']
+                    or receipt.get('runner') != target['runner'] or (report or {}).get('smoke_passed') is not True
+                    or type(receipt.get('exit_code')) is not int
+                    or not isinstance(commands, list) or len(commands) != 1 or not isinstance(commands[0], dict)
+                    or commands[0].get('argv') != ['isolated-browser-runner', invocation]
+                    or type(commands[0].get('exit_code')) is not int
+                    or commands[0]['exit_code'] != receipt['exit_code']
+                    or (checked['status'] == 'passed' and receipt.get('exit_code') != 0)):
+                return False
+            return True
+
+        if not admitted(proof, suite, candidate.target_digest):
+            return {**summary, 'status': 'incomplete', 'error': proof.get('error') or 'Regression runner receipt incomplete or mismatched'}
+        rows = proof['report']['tests']
+        failed = [row['id'] for row in rows if row['status'] == 'failed']
+        if not failed:
+            return {**summary, 'status': 'passed', 'failed': []}
+        changed = changed_controls(target.get('ui_contract'), self._inherited_ui_controls(identity, log=ctx.log))
+        by_id = {test.id: test for test in suite.tests}
+        changed_tests = sorted(test for test in failed if changed and touches(by_id[test], changed))
+        base_failures = []
+        if baseline.get('status') == 'built' and baseline.get('site'):
+            from app.workspace import fsutil
+            again = subset(suite, failed)
+            base_identity = {'base_sha': candidate.base_sha,
+                'build_digest': baseline.get('build_digest') or fsutil.sha256_tree(
+                    baseline['site'], fsutil.scan_tree(baseline['site'])),
+                'suite_digest': again.digest, 'runner': target['runner'], 'node_image_id': target['node_image_id'],
+                **{key: target.get(key) for key in ('config_digest', 'toolchain_digest', 'fixture_digest', 'migration_digest')}}
+            base_digest = digest_of(base_identity)
+            base_proof = self.workspace.harness.run(ctx, baseline['site'], base_digest, again,
+                target['node_image_id'], expected_runner=target['runner'], diagnostics=False,
+                legacy_test_ids=[test for test in legacy if test in failed])
+            summary['base_execution'] = {'target': base_identity, 'suite': again.model_dump(), 'execution': base_proof}
+            if admitted(base_proof, again, base_digest):
+                base_failures = sorted(row['id'] for row in base_proof['report']['tests'] if row['status'] == 'failed')
+        if changed_tests or base_failures:
+            ctx.log('Regression diagnostics (mandatory tests remain failed): ' + ', '.join(changed_tests + base_failures)[:500])
+        return {**summary, 'status': 'failed', 'failed': failed,
+                'changed_control_test_ids': changed_tests, 'base_failures': base_failures,
+                'owners': {test: owners[test] for test in failed},
+                'errors': {row['id']: str(row.get('error', ''))[:300] for row in rows if row['id'] in failed}}
 
     def _diagnose(self, ctx, identity):
         """One durable diagnosis of failed evidence, with no model authority to pass QA."""

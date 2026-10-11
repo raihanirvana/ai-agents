@@ -114,7 +114,7 @@ function Scene({ agents, selected, onSelect, animate }: {
       <planeGeometry args={[12, 8]} /><meshStandardMaterial color="#dce9e3" />
     </mesh>
     <OfficeFurniture />
-    {agents.map((agent, index) => <AgentStation key={agent.role} agent={agent} index={index}
+    {agents.map((agent, index) => <AgentStation key={agent.role} agent={agent} index={index} count={agents.length}
       selected={selected === agent.role} onSelect={() => onSelect(agent)} animate={animate} />)}
   </>;
 }
@@ -129,10 +129,11 @@ function OfficeFurniture() {
   </>;
 }
 
-function AgentStation({ agent, index, selected, onSelect, animate }: {
-  agent: OfficeAgent; index: number; selected: boolean; onSelect: () => void; animate: boolean;
+function AgentStation({ agent, index, count, selected, onSelect, animate }: {
+  agent: OfficeAgent; index: number; count: number; selected: boolean; onSelect: () => void; animate: boolean;
 }) {
-  const x = (index - 1.5) * 2.3;
+  // Keep every desk between the side walls (x = ±4.42) as roles are added.
+  const x = (index - (count - 1) / 2) * Math.min(2.3, 7 / Math.max(1, count - 1));
   const color = COLORS[agent.state];
   return <group position={[x, 0, 0]}>
     <mesh position={[0, 0.65, -0.7]} castShadow><boxGeometry args={[1.5, 0.12, 0.85]} /><meshStandardMaterial color="#8b6954" /></mesh>

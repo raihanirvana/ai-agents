@@ -19,7 +19,7 @@ export const RUN_STATUS_LABEL: Record<Run["status"], string> = {
 export const ACTIVE_RUN = new Set<Run["status"]>(["queued", "running", "waiting_input", "waiting_quota"]);
 
 export const ROLE_LABEL: Record<string, string> = {
-  po: "Product Owner", "technical-lead": "Technical Lead", developer: "Developer", qa: "QA",
+  po: "Product Owner", "ui-ux": "UI/UX", "technical-lead": "Technical Lead", developer: "Developer", qa: "QA",
 };
 
 export function senderLabel(sender: string): string {
