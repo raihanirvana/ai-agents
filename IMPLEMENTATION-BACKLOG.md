@@ -3239,13 +3239,39 @@ akses workspace baca saja, NEEDS_APPROVED_SCOPE, migration bila CHECK constraint
 
 ### Catatan pengerjaan
 
-Status: TODO. Rencana langkah F–H.
+Status: DONE (2026-10-12). Review: REVIEWED oleh Codex. Rencana langkah F–H.
+Review F–H: perketat amandemen agar screen/state/feedback lama tetap; batasi pemulihan
+checkpoint ke revisi dan siklus yang sesuai; periksa handoff saat QA dan Developer
+berjalan bersamaan serta izin perubahan token dari UAC. File utama:
+`app/pipeline/{runtime,scheduler}.py`, `tests/pipeline/test_ui_spec_stage.py`.
+Hasil: stage `ui_spec` di LIGHT_STAGES/lane interactive, `wanted` ui_spec → ui-ux, eligibility scope sama
+seperti planning. `_ui_spec`: konteks UAC approved, UiSpec warisan (`_inherited_ui_spec`, urutan approval
+UAT), source UI baseline (helper bersama dengan TL, TL tetap tanpa .css); output UiSpec/NoUiChange/
+Clarification divalidasi di putaran repair (revisi 1, struktur komponen warisan, aditif saat amandemen);
+token warisan dipulihkan kecuali UAC meminta perubahan visual eksplisit; pesan intent `ui_spec` per scope_version.
+Scheduler: `ui_spec → technical_plan → (qa_plan ∥ development)` bila `pipeline.ui_ux` true (default proyek
+baru di setup); scope yang sudah mulai planning tanpa UI/UX tidak disisipi. `request_spec_amendment` untuk
+QA dan Developer (checkpoint disimpan); UI/UX revisi +1 → TL amandemen kontrak (`ui_spec_revision`, boleh
+tanpa kontrol baru) → QA plan ulang → development key `:spec-rN` dengan `resume_checkpoint`.
+TL menerima `ui_spec` sebagai konteks dan mencatat `ui_spec_revision`; penurunan kontrak penuh di DEV-022.
+Verifikasi implementer: `tests/pipeline/test_ui_spec_stage.py` 7 passed (urutan, no_ui_change, legacy, amandemen QA
+dengan repair aditif, warisan token/struktur, perubahan token oleh UAC visual, amandemen Developer + resume).
+Review memperbaiki F-01–F-05: screen/state/feedback dan penempatan komponen pada amandemen tetap;
+token tidak berubah hanya karena UAC menyebut tampilan/tema atau melarang perubahan;
+request QA paralel menghentikan turn Developer dan menyimpan draft; checkpoint tidak menimpa
+kandidat pada repair berikutnya; batas 200 komponen hanya pada konteks, bukan validasi warisan.
+Hasil aktual: lima grup regresi 866 passed + dua failure stub workspace yang belum memuat `ui_spec`.
+Stub diperbarui; recheck tree final stage UI/UX + tunggu QA 29 passed (25 + 4), termasuk tiga kasus
+tambahan setelah collection run besar. Total 871 kasus unik terverifikasi sesudah recheck;
+tidak ada failure tersisa. Rincian perintah, AC, limits dan handoff: [review DEV-021](docs/reviews/DEV-021-review.md).
+Fix/recheck oleh reviewer yang sama; bukan independent review kedua. Model/driver fake;
+tidak ada klaim QA/UAT nyata. Flag proyek demo tidak diubah. DEV-022 berikutnya tetap TODO.
 
 **Scope:** stage `ui_spec` lane interactive (LIGHT_STAGES), mapping `ui_spec → ui-ux`,
 task `_ui_spec`, scheduler `ui_spec → technical_plan → (qa_plan ∥ development)`, amandemen
 spesifikasi dari QA/Developer ke UI/UX.
-Integrasi berikutnya harus mengganti guard `threads.UNWIRED_REPLY_ROLES` dengan routing
-UI/UX yang sudah didukung runtime; registrasi role saja tidak cukup untuk mengaktifkan reply.
+Generic reply UI/UX tetap diblokir oleh `threads.UNWIRED_REPLY_ROLES`; request amandemen sekarang
+memakai routing stage `ui_spec` khusus. Guard baru boleh dibuka ketika reply generic didukung runtime.
 
 **Acceptance criteria:**
 

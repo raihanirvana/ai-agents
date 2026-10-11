@@ -25,9 +25,9 @@ TOOL_POLICY: dict[str, frozenset[str]] = {
     "technical-lead": frozenset({"read_repo", "propose_decision", "plan_dependencies", "review_candidate",
                                  "answer_message", "send_message"}),
     "developer": frozenset({"read_file", "read_files", "patch_file", "write_file", "edit_file", "edit_file_batch", "run_command", "run_checks", "inspect_diff", "submit_candidate",
-                            "send_message", "request_decision"}),
+                            "send_message", "request_decision", "request_spec_amendment"}),
     "qa": frozenset({"read_criteria", "propose_tests", "request_test_run", "inspect_app", "report_bug",
-                     "send_message", "request_input", "request_contract_amendment"}),
+                     "send_message", "request_input", "request_contract_amendment", "request_spec_amendment"}),
     # Reads approved scope, baseline UI source and the pinned design reference; proposes a
     # UiSpec. No writes, commits or approvals (docs/decisions/ui-ux.md).
     "ui-ux": frozenset({"read_criteria", "read_repo", "read_design_reference", "propose_ui_spec",
@@ -36,7 +36,7 @@ TOOL_POLICY: dict[str, frozenset[str]] = {
 # Allowed by policy but implemented by later tickets (workspace/Hermes/QA harness, DEV-010): they fail explicitly.
 NOT_WIRED = frozenset({"read_repo", "review_candidate", "read_file", "read_files", "patch_file", "write_file", "edit_file", "edit_file_batch", "run_command", "inspect_diff",
                        "run_checks", "submit_candidate", "propose_tests", "request_test_run", "inspect_app", "report_bug",
-                       "request_contract_amendment", "propose_ui_spec"})
+                       "request_contract_amendment", "propose_ui_spec", "request_spec_amendment"})
 FORBIDDEN_ARGS = frozenset({"actor", "role", "user", "sender", "project_id", "job_id", "generation", "lease",
                             "lease_owner", "attempt", "scope_version", "ticket_id_override"})
 SOURCE_TOOLS = frozenset({"read_file", "read_files", "read_repo", "inspect_app", "patch_file",

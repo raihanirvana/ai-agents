@@ -12,6 +12,7 @@ from app.workers.runtime import WaitingForInput, reap_recorded_processes
 from .relay import ProductAdmission
 from .files import allocate_directory
 from .transcript import TranscriptProjection
+from .handoff import StageHandoff
 from app.agents.tools import SOURCE_TOOLS
 
 class RelayContextError(RuntimeError):
@@ -105,6 +106,9 @@ class HermesDriver:
                 except WaitingForInput as exc:
                     waiting.append(exc)
                     return {'status': 'waiting_input'}
+                except StageHandoff as exc:
+                    waiting.append(exc)
+                    return {'status': 'stage_handoff', 'submitted': True}
             return call
         relay = Relay(admission, ctx.lease.job_id, ctx.lease.generation, config.model, provider._key,
                       {name: wrapped(name, handler) for name, handler in tools.items()},

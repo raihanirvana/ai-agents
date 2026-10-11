@@ -20,7 +20,7 @@ def runtime(db, suite=None):
         if suite is None:
             raise ValueError('no persisted QA suite for current scope')
         return suite
-    rt.workspace = SimpleNamespace(suite=read_suite)
+    rt.workspace = SimpleNamespace(suite=read_suite, ui_spec=lambda identity: None)
     return rt
 
 

@@ -168,7 +168,9 @@ class ProductWorkspace:
             provenance={'created_by': 'product-job-lease', 'job_id': identity['job_id']})
         candidate, rebased, obsolete_checkpoint = None, False, None
         with self.db.read() as s:
-            checkpoint = s.get(Job, identity['job_id']).runtime_ref.get('pipeline_checkpoint')
+            job_ref = s.get(Job, identity['job_id']).runtime_ref
+            # A development job after a UI spec amendment resumes the requester's checkpoint.
+            checkpoint = job_ref.get('pipeline_checkpoint') or job_ref.get('payload', {}).get('resume_checkpoint')
             if checkpoint:
                 saved = json.loads(self.store.read_bytes(s, checkpoint))
                 if any(saved.get(k) != identity[k] for k in ('project_id', 'ticket_id', 'scope_version')):
@@ -312,6 +314,14 @@ class ProductWorkspace:
             version = s.query(TicketVersion).filter_by(ticket_id=identity['ticket_id'], version=identity['scope_version']).one()
             suite.check_criteria(version.uac)
             return suite, row.attachment_ids[-1]
+
+    def ui_spec(self, identity):
+        """Latest UiSpec for the exact approved scope (None for no_ui_change or before the stage)."""
+        from app.agents.ui_spec import UiSpec
+        with self.db.read() as s:
+            row = self.latest_intent(s, identity, 'ui_spec')
+            value = row.meta.get('spec') if row else None
+            return UiSpec.model_validate(value) if value else None
 
     def ui_contract(self, identity):
         """Latest plan for the exact approved scope; never borrow from another ticket/version."""

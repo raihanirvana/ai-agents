@@ -1,7 +1,9 @@
 """Lead plan -> Hermes developer -> lead review -> trusted QA. Approval stays in Workflow."""
 import json
+import re
 import threading
 import uuid
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from sqlalchemy import select
@@ -20,6 +22,7 @@ from .relay import reconcile_accounting
 from .hermes import RelayContextError
 from .workspace import FencedWorkspace, unpack_tree, cleanup_workspace
 from .files import allocate_directory, cleanup_directory
+from .handoff import StageHandoff
 
 
 WORDING_FIELDS = ('name', 'label', 'text')
@@ -99,11 +102,11 @@ class PipelineRuntime:
         role, task = identity['role'], ctx.job['runtime_ref'].get('payload', {}).get('task')
         if identity['fake'] != self.fake or bool(self.structured.client.provider_for(role).fake) != self.fake:
             return Outcome('failed', error='provider and pipeline fake labels disagree')
-        wanted = {'technical_plan': 'technical-lead', 'qa_plan': 'qa', 'implement': 'developer',
+        wanted = {'ui_spec': 'ui-ux', 'technical_plan': 'technical-lead', 'qa_plan': 'qa', 'implement': 'developer',
                   'review': 'technical-lead', 'verify': 'qa', 'diagnose': 'qa', 'revalidate_dependency': 'qa'}
         if wanted.get(task) != role:
             return Outcome('failed', error='pipeline task/role mismatch')
-        if task in ('technical_plan', 'qa_plan'):
+        if task in ('ui_spec', 'technical_plan', 'qa_plan'):
             with self.db.read() as s:
                 t = s.get(Ticket, identity['ticket_id'])
                 if not self.workflow._eligible(s, t):
@@ -172,31 +175,15 @@ class PipelineRuntime:
                 if saved and not saved.meta['plan'].get('needs_user'):
                     return Outcome('succeeded', {'plan_message_id': saved.id,
                         'ui_contract_revision': saved.meta['plan']['ui_contract']['revision'],
+                        'ui_spec_revision': saved.meta.get('ui_spec_revision', 0),
                         'needs_user': False, 'authoritative': False, 'fake': self.fake})
         manifest, base = self.workspace.configuration(identity)
-        broker = WorkspaceSupervisor(self.workspace.root).broker(identity['project_id'])
-        files = broker._bare('ls-tree', '-r', '--name-only', base).decode().splitlines()
-        from app.workspace.errors import WorkspaceError
-        source, remaining, unavailable = {}, 12000, []
-        for path in files:
-            if (not path.endswith(('.html', '.js', '.jsx', '.ts', '.tsx')) or
-                    set(Path(path).parts).intersection(('tests', 'test', '__tests__', 'node_modules')) or
-                    Path(path).stem.endswith(('.test', '.spec'))):
-                continue
-            try:
-                raw = broker.read_committed_file(base, path, max_bytes=256 * 1024)
-            except (WorkspaceError, ValueError):
-                unavailable.append(path)
-                continue
-            if raw is None:
-                unavailable.append(path)
-                continue
-            source[path] = raw.decode(errors='replace')[:remaining]
-            remaining -= len(source[path])
-            if remaining <= 0:
-                break
+        files, source, unavailable = self._baseline_ui_source(identity, base)
         amendment = ctx.job['runtime_ref'].get('payload', {}).get('contract_amendment')
         previous_contract = self.workspace.ui_contract(identity) if amendment else None
+        # The UI/UX spec is the source for copy and visuals (DEV-021); deriving the
+        # contract from it and restricting TL to technical controls is DEV-022.
+        ui_spec = self.workspace.ui_spec(identity)
         # Accepted upstream controls are supervisor-owned; TL can only add to them.
         inherited = self._inherited_ui_controls(identity, log=ctx.log)
         pinned = [c.model_dump() for c in previous_contract.controls] if previous_contract is not None else []
@@ -228,12 +215,17 @@ class PipelineRuntime:
                 if merged is not None and not any(after.get(k) != v for k, v in before.items()):
                     after = {c.testid: c.model_dump() for c in merged.controls}
                 changed = sorted(key for key, value in before.items() if after.get(key) != value)
-                if changed or len(after) <= len(before):
+                # A spec-driven revision may add only copy/states; it still never changes controls.
+                spec_driven = bool((amendment or {}).get('ui_spec_revision'))
+                if changed or (len(after) <= len(before) and not spec_driven):
                     raise InvalidOutput(['Amendment is additive: retain all previous controls/identities and add '
                         'the missing controls.' + (' Changed or removed: ' + ', '.join(changed[:20]) if changed else
                         ' No new control was added.')])
         output, meta, snapshot = self._ask(ctx, identity,
             {'name': 'technical_plan', 'contract_amendment': amendment,
+             **({'ui_spec': ui_spec.model_dump(), 'ui_spec_policy': 'Approved-scope UI/UX spec: use its testids, '
+                 'roles and copy verbatim for ui_contract controls; do not write new copy or visual style.'}
+                if ui_spec else {}),
              **({'inherited_ui_controls': inherited[:300], 'inherited_ui_controls_policy': 'These controls already '
                  'exist in the accepted app. List the ones this ticket uses by the same testid; omit the rest. The '
                  'supervisor restores their accepted role/scope_testid/dynamic_text and adds their scope parents. '
@@ -262,7 +254,8 @@ class PipelineRuntime:
         with self.db.write() as s:
             ctx.queue.verify_identity(s, identity)
             message = self.workspace._post(s, identity, key, output.summary, [snapshot.artifact_id], 'technical_plan',
-                plan=output.model_dump(), authoritative=False, amendment_request_job_id=request_id)
+                plan=output.model_dump(), authoritative=False, amendment_request_job_id=request_id,
+                ui_spec_revision=ui_spec.revision if ui_spec else 0)
         decisions = [self.structured.threads.propose_decision(identity, title=d.title, rationale=d.rationale,
                      key=key + ':decision:' + str(i)) for i, d in enumerate(output.decisions)]
         if output.needs_user:
@@ -270,7 +263,198 @@ class PipelineRuntime:
                 {'plan_message_id': message.id}, key)
         return self.structured._result(meta, plan_message_id=message.id, decision_proposal_ids=decisions,
                                        needs_user=False, authoritative=False,
-                                       ui_contract_revision=output.ui_contract.revision if output.ui_contract else 1)
+                                       ui_contract_revision=output.ui_contract.revision if output.ui_contract else 1,
+                                       ui_spec_revision=ui_spec.revision if ui_spec else 0)
+
+    def _baseline_ui_source(self, identity, base, budget=12000, extensions=('.html', '.js', '.jsx', '.ts', '.tsx')):
+        """Accepted-base UI files as data (no tests/dependencies), bounded by characters."""
+        from app.workspace import WorkspaceSupervisor
+        from app.workspace.errors import WorkspaceError
+        broker = WorkspaceSupervisor(self.workspace.root).broker(identity['project_id'])
+        files = broker._bare('ls-tree', '-r', '--name-only', base).decode().splitlines()
+        source, remaining, unavailable = {}, budget, []
+        for path in files:
+            if (not path.endswith(extensions) or
+                    set(Path(path).parts).intersection(('tests', 'test', '__tests__', 'node_modules')) or
+                    Path(path).stem.endswith(('.test', '.spec'))):
+                continue
+            try:
+                raw = broker.read_committed_file(base, path, max_bytes=256 * 1024)
+            except (WorkspaceError, ValueError):
+                unavailable.append(path)
+                continue
+            if raw is None:
+                unavailable.append(path)
+                continue
+            source[path] = raw.decode(errors='replace')[:remaining]
+            remaining -= len(source[path])
+            if remaining <= 0:
+                break
+        return files, source, unavailable
+
+    @staticmethod
+    def _requests_visual_change(criteria):
+        # Displaying content (including a book's "tema") does not authorize a redesign.
+        # Require a visual subject and an explicit change/use instruction in the same UAC.
+        subject = r'\b(?:warna|tema|font|huruf|tampilan|desain|gaya visual|color|colour|theme|typeface|branding|spacing|radius)\b'
+        request = r'\b(?:ubah|mengubah|diubah|berubah|ganti|mengganti|diganti|gunakan|menggunakan|berwarna|change|changes|changed|replace|switch|use|uses|set)\b'
+        negated = r'\b(?:tidak|jangan|tanpa|not|never|without)\s+(?:\w+\s+){0,2}' + request
+        for criterion in criteria:
+            for clause in re.split(r'[.;!?]', criterion.get('text', '')):
+                if (re.search(subject, clause, re.I) and re.search(request, clause, re.I) and
+                        not re.search(negated, clause, re.I)):
+                    return True
+        return False
+
+    def _inherited_ui_spec(self, identity, log=None):
+        """Specs of accepted tickets in UAT-approval order: latest tokens; union of components/copy."""
+        from sqlalchemy import func
+        from app.agents.ui_spec import UiSpec
+        from app.persistence.models import Approval, Message
+        tokens, components, copy, skipped = None, {}, {}, []
+        with self.db.read() as s:
+            ticket = s.get(Ticket, identity['ticket_id'])
+            accepted_at = (select(func.max(Approval.created_at)).where(Approval.type == 'uat',
+                           Approval.candidate_id == Candidate.id).correlate(Candidate).scalar_subquery())
+            rows = s.scalars(select(Candidate).where(Candidate.project_id == ticket.project_id,
+                Candidate.ticket_id != ticket.id, Candidate.status == 'accepted')
+                .order_by(func.coalesce(accepted_at, Candidate.updated_at), Candidate.id))
+            for candidate in rows:
+                row = self.workspace.latest_intent(s, {'ticket_id': candidate.ticket_id,
+                    'scope_version': candidate.scope_version}, 'ui_spec')
+                value = row.meta.get('spec') if row else None
+                if not value:
+                    continue
+                try:
+                    spec = UiSpec.model_validate(value)
+                except ValueError:
+                    skipped.append(candidate.ticket_id)
+                    continue
+                tokens = spec.tokens.model_dump()
+                for component in spec.components:
+                    components.pop(component.testid, None)
+                    components[component.testid] = component.model_dump()
+                for key, text in spec.copy_map().items():
+                    copy.pop(key, None)
+                    copy[key] = text
+        if skipped and log is not None:
+            log('Inherited UI specs skipped (invalid under current schema): ' + ', '.join(skipped[:10]))
+        if tokens is None:
+            return None
+        # Context excerpts are bounded below; supervisor validation must retain
+        # every accepted identity, including controls omitted from that excerpt.
+        return {'tokens': tokens, 'components': list(components.values()),
+                'copy': [{'key': k, 'text': v} for k, v in copy.items()]}
+
+    def _ui_spec(self, ctx, identity):
+        """UI/UX spec for the approved scope, or no_ui_change. Amendments are additive (+1)."""
+        from app.agents.outputs import Clarification
+        from app.agents.ui_spec import UiSpec, NoUiChange
+        payload = ctx.job['runtime_ref'].get('payload', {})
+        amendment = payload.get('spec_amendment')
+        with self.db.read() as s:
+            saved = s.get(Job, identity['job_id']).runtime_ref.get('pipeline_ui_spec')
+            criteria = s.query(TicketVersion).filter_by(ticket_id=identity['ticket_id'],
+                                                         version=identity['scope_version']).one().uac
+        if saved:
+            return Outcome('succeeded', {**saved, 'fake': self.fake})
+        previous = self.workspace.ui_spec(identity) if amendment else None
+        if amendment and (previous is None or previous.revision != amendment['revision']):
+            raise InvalidOutput(['Spec amendment refers to an obsolete UI spec revision.'])
+        inherited = self._inherited_ui_spec(identity, log=ctx.log) if previous is None else None
+        tokens_open = self._requests_visual_change(criteria)
+        manifest, base = self.workspace.configuration(identity)
+        files, source, unavailable = self._baseline_ui_source(
+            identity, base, extensions=('.html', '.css', '.js', '.jsx', '.ts', '.tsx'))
+
+        def rules(output):
+            """Raised inside the repair turn so UI/UX fixes them in this job."""
+            if isinstance(output, Clarification):
+                return
+            if isinstance(output, NoUiChange):
+                if amendment:
+                    raise InvalidOutput(['A requested spec amendment cannot be answered with no_ui_change.'])
+                return
+            if previous is not None:
+                if output.revision != previous.revision + 1:
+                    raise InvalidOutput([f'Spec amendment must use revision {previous.revision + 1}.'])
+                before = {c.testid: c.model_dump() for c in previous.components}
+                after = {c.testid: c.model_dump() for c in output.components}
+                old_copy, new_copy = previous.copy_map(), output.copy_map()
+                changed = sorted(k for k, v in before.items() if after.get(k) != v)
+                changed += sorted('copy:' + k for k, v in old_copy.items() if new_copy.get(k) != v)
+                old_screens = {screen.id: screen for screen in previous.screens}
+                new_screens = {screen.id: screen for screen in output.screens}
+                for screen_id, screen in old_screens.items():
+                    new_screen = new_screens.get(screen_id)
+                    if (new_screen is None or screen.purpose != new_screen.purpose or
+                            not {c.testid for c in screen.components}.issubset(
+                                {c.testid for c in new_screen.components})):
+                        changed.append('screen:' + screen_id)
+                for field in ('states', 'feedback'):
+                    old_items = Counter(item.model_dump_json() for item in getattr(previous, field))
+                    new_items = Counter(item.model_dump_json() for item in getattr(output, field))
+                    if old_items - new_items:
+                        changed.append(field)
+                if output.tokens != previous.tokens:
+                    changed.append('tokens')
+                grew = (len(after) > len(before) or len(new_copy) > len(old_copy) or
+                        len(output.states) > len(previous.states) or len(output.feedback) > len(previous.feedback))
+                if changed or not grew:
+                    raise InvalidOutput(['Spec amendment is additive: keep every previous component, copy text, '
+                        'screen, state, feedback and token unchanged and add what was requested.' +
+                        (' Changed or removed: ' + ', '.join(changed[:20]) if changed else ' Nothing was added.')])
+                return
+            if output.revision != 1:
+                raise InvalidOutput(['A new UI spec starts at revision 1.'])
+            if inherited:
+                accepted = {c['testid']: c for c in inherited['components']}
+                conflicts = sorted(c.testid for c in output.components if c.testid in accepted and any(
+                    c.model_dump().get(f) != accepted[c.testid].get(f) for f in ('role', 'repeated', 'scope_testid')))
+                if conflicts:
+                    raise InvalidOutput(['Inherited components keep their accepted role/repeated/scope: '
+                        + json.dumps({key: {f: accepted[key].get(f) for f in ('role', 'repeated', 'scope_testid')}
+                                      for key in conflicts[:20]})])
+
+        inherited_context = ({**inherited, 'components': inherited['components'][-200:],
+            'copy': inherited['copy'][-300:],
+            'omitted_components': max(0, len(inherited['components']) - 200),
+            'omitted_copy': max(0, len(inherited['copy']) - 300)} if inherited else None)
+
+        task = {'name': 'ui_spec', 'spec_amendment': amendment,
+                'previous_ui_spec': previous.model_dump() if previous else None,
+                **({'inherited_ui_spec': inherited_context, 'inherited_ui_spec_policy': 'Accepted app design: keep its '
+                    'tokens' + (' unless the approved UAC asks for a visual change' if tokens_open else
+                    ' exactly (the UAC does not ask for a visual change)') + '; reuse its testids with the same '
+                    'role/repeated/scope; reuse copy keys for the same text.'} if inherited else {}),
+                'ticket_id': identity['ticket_id'], 'source_files': files[:400], 'baseline_ui_source': source,
+                'baseline_ui_source_unavailable': unavailable,
+                'instructions': 'Return one UiSpec (or no_ui_change when this approved scope changes no UI). '
+                    'Use the summarized frontend-design principles in your role instructions.'}
+        from typing import Union
+        output, meta, snapshot = self._ask(ctx, identity, task, Union[UiSpec, NoUiChange, Clarification],
+            check=rules, context_limits=replace(self.structured.builder.limits,
+                total_tokens=max(32768, self.structured.builder.limits.total_tokens)))
+        if isinstance(output, Clarification):
+            ctx.request_input(output.as_text(), {}, 'ui-spec-clarify:' + identity['root_job_id'] + ':'
+                              + str(identity['generation']))
+        rules(output)  # Backstop for outputs checkpointed before the rule ran in _ask.
+        if (isinstance(output, UiSpec) and inherited and not tokens_open and previous is None
+                and output.tokens.model_dump() != inherited['tokens']):
+            ctx.log('Inherited design tokens kept: the approved UAC does not ask for a visual change.')
+            output = UiSpec.model_validate({**output.model_dump(), 'tokens': inherited['tokens']})
+        is_spec = isinstance(output, UiSpec)
+        revision = output.revision if is_spec else 0
+        with self.db.write() as s:
+            ctx.queue.verify_identity(s, identity)
+            message = self.workspace._post(s, identity, 'ui-spec:' + identity['root_job_id'] + ':' + str(revision),
+                output.summary if is_spec else 'No UI change: ' + output.reason, [snapshot.artifact_id], 'ui_spec',
+                spec=output.model_dump() if is_spec else None, no_ui_change=not is_spec,
+                ui_spec_revision=revision, amendment_request_job_id=payload.get('amendment_request_job_id'))
+            result = {'ui_spec_revision': revision, 'no_ui_change': not is_spec, 'ui_spec_message_id': message.id}
+            job = s.get(Job, identity['job_id'])
+            job.runtime_ref = {**job.runtime_ref, 'pipeline_ui_spec': result}
+        return Outcome('succeeded', {**result, 'fake': self.fake, 'model': meta.get('model')})
 
     def _onboarding_context(self, project_id):
         from app.persistence.models import Project
@@ -301,6 +485,9 @@ class PipelineRuntime:
         if requested:
             return Outcome('succeeded', {'contract_amendment': requested, 'fake': self.fake,
                 'ui_contract_revision': requested['revision']})
+        if job_ref.get('pipeline_spec_amendment'):
+            return Outcome('succeeded', {'spec_amendment': job_ref['pipeline_spec_amendment'], 'fake': self.fake,
+                'ui_contract_revision': ui_contract.revision if ui_contract else 1})
         manifest, base = self.workspace.configuration(identity)
         from app.workspace import WorkspaceSupervisor
         from app.workspace.errors import WorkspaceError
@@ -352,6 +539,8 @@ class PipelineRuntime:
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
         def propose(ctx_, current, args):
+            if result.get('spec_amendment'):
+                raise ValueError('a UI spec amendment was already requested; UI/UX must revise the spec first')
             if result.get('contract_amendment'):
                 raise ValueError('contract amendment was already requested; TL must revise the contract first')
             if set(args) != {'plan'}:
@@ -407,6 +596,8 @@ class PipelineRuntime:
                 raise ValueError('request_contract_amendment requires a concrete reason, 12..2000 characters')
             if result.get('suite_artifact_id'):
                 raise ValueError('suite was already submitted')
+            if result.get('spec_amendment'):
+                raise ValueError('a UI spec amendment was already requested in this job')
             if ui_contract is None:
                 raise ValueError('historical contract-less plans need a new technical plan')
             request = {'reason': args['reason'], 'revision': ui_contract.revision}
@@ -430,9 +621,19 @@ class PipelineRuntime:
             if raw is None:
                 raise ValueError('file is unavailable in the pinned accepted base')
             return {'content': raw.decode(errors='replace')}
+        def request_spec(c, current, args):
+            if set(args) != {'reason'}:
+                raise ValueError('request_spec_amendment requires only reason')
+            if result.get('suite_artifact_id') or result.get('contract_amendment'):
+                raise ValueError('this QA planning job already produced a suite or contract amendment')
+            result['spec_amendment'] = self._record_spec_amendment(ctx, current, args['reason'], 'qa')
+            return {'submitted': True, 'spec_amendment_requested': True}
         facade._handlers.update({'propose_tests': propose, 'inspect_app': inspect,
-                                 'request_contract_amendment': request_amendment})
+                                 'request_contract_amendment': request_amendment,
+                                 'request_spec_amendment': request_spec})
         parameters = {'request_contract_amendment': {'reason': {'type': 'string', 'minLength': 12, 'maxLength': 2000}},
+                      **({'request_spec_amendment': {'reason': {'type': 'string', 'minLength': 12, 'maxLength': 2000}}}
+                         if self.workspace.ui_spec(identity) is not None else {}),
                       'propose_tests': {'plan': tool_schema(QaPlan)}, 'read_criteria': {}, 'inspect_app': {'path': {'type': 'string'}},
                       'request_input': {'question': {'type': 'string'}}}
         self.driver.run(ctx, identity, snapshot, self._tools(ctx, facade, parameters), parameters)
@@ -494,6 +695,8 @@ class PipelineRuntime:
                 while True:
                     ctx._check()
                     ctx.queue.verify(ctx.lease)
+                    if self._pending_spec_amendment(identity):
+                        raise StageHandoff()
                     try:
                         return self.workspace.suite(identity)
                     except ValueError:
@@ -514,6 +717,10 @@ class PipelineRuntime:
 
     def _implement(self, ctx, identity):
         from .bootstrap import bootstrap_contract
+        with self.db.read() as s:
+            pending = s.get(Job, identity['job_id']).runtime_ref.get('pipeline_spec_amendment')
+        if pending:  # retried after requesting a UI spec amendment: the request stands
+            return Outcome('succeeded', {'spec_amendment': pending, 'fake': self.fake})
         sup, started, manifest = self.workspace.start(ctx)
         try:
             suite, _ = self.workspace.suite(identity)
@@ -571,6 +778,9 @@ class PipelineRuntime:
                 index['context_trimmed'] = True
         facade = ToolFacade(self.db, self.workflow, self.structured.threads)
         result = {}
+        def handoff_if_needed():
+            if not result.get('spec_amendment') and self._pending_spec_amendment(identity):
+                raise StageHandoff()
         def read(c, i, a):
             if set(a) != {'path'}:
                 raise ValueError('read_file is read-only and accepts only {"path":"relative/file"}. '
@@ -606,6 +816,7 @@ class PipelineRuntime:
             return response
         submit_lock = threading.Lock()
         def submit(c, i, a):
+            handoff_if_needed()
             submission = CandidateSubmission.model_validate(a)
             # A tool-timeout retry must never run a second submission concurrently
             # in the same workspace; it waits for the first and returns its result.
@@ -614,6 +825,9 @@ class PipelineRuntime:
                         'next': 'An earlier submit_candidate call is still running. Call submit_candidate '
                                 'again later with the same arguments; do not edit files meanwhile.'}
             try:
+                if result.get('spec_amendment'):
+                    return {'submitted': False, 'failure_kind': 'spec_amendment_pending',
+                            'next': 'A UI spec amendment is pending; stop now. Work resumes from the checkpoint.'}
                 if result:
                     return {**result, 'submitted': True}
                 if self._await_qa_plan(ctx, i, timeout_s=self.SUBMIT_QA_PLAN_WAIT_S) is None:
@@ -655,14 +869,28 @@ class PipelineRuntime:
             checkpoint = self.workspace.save_checkpoint(ctx, sup, started)
             self.structured.threads.ask(ctx, 'technical-lead', a['question'],
                 key='pipeline-decision:' + i['root_job_id'] + ':' + checkpoint, checkpoint={'artifact_id': checkpoint})
+        def request_spec(c, i, a):
+            if set(a) != {'reason'}:
+                raise ValueError('request_spec_amendment requires only reason')
+            with submit_lock:
+                if result.get('candidate_id'):
+                    raise ValueError('a candidate was already submitted')
+                # Work so far is checkpointed; the next development job resumes from it.
+                checkpoint = self.workspace.save_checkpoint(ctx, sup, started)
+                result['spec_amendment'] = self._record_spec_amendment(ctx, i, a['reason'], 'developer',
+                                                                       checkpoint_artifact_id=checkpoint)
+            return {'submitted': True, 'next': 'Stop now. Development resumes from this checkpoint after the '
+                    'UI spec, technical contract and QA plan are revised.'}
         facade._handlers.update({'read_file': read, 'patch_file': patch, 'run_command': command, 'run_checks': run_checks,
             'inspect_diff': lambda c, i, a: {'diff': sup.inspect_diff(started.ref, started.credential)},
-            'submit_candidate': submit, 'request_decision': decision})
+            'submit_candidate': submit, 'request_decision': decision, 'request_spec_amendment': request_spec})
         parameters = {'read_file': {'path': {'type': 'string'}}, 'patch_file': {'path': {'type': 'string'},
             'content': {'type': ['string', 'null'], 'description': 'Full new file contents; null deletes this file.'}},
             'run_command': {'phase': {'type': 'string', 'enum': ['bootstrap', 'install', 'test', 'build']}},
             'run_checks': {}, 'inspect_diff': {},
-            'submit_candidate': tool_schema(CandidateSubmission)['properties'], 'request_decision': {'question': {'type': 'string'}}}
+            'submit_candidate': tool_schema(CandidateSubmission)['properties'], 'request_decision': {'question': {'type': 'string'}},
+            **({'request_spec_amendment': {'reason': {'type': 'string', 'minLength': 12, 'maxLength': 2000}}}
+               if self.workspace.ui_spec(identity) is not None else {})}
         parameters['submit_candidate']['test_concerns']['default'] = []
         if not self.fake:
             from .source_tools import SourceTools
@@ -673,7 +901,26 @@ class PipelineRuntime:
             parameters.update(source.parameters)
         # Fake foundation drivers retain their legacy tool contract; real Hermes
         # exposes only the explicit write/edit surface above.
-        self.driver.run(ctx, identity, snapshot, self._tools(ctx, facade, parameters), parameters)
+        tools = self._tools(ctx, facade, parameters)
+        def fenced_tool(name, handler):
+            def call(args):
+                if result.get('spec_amendment') and name != 'submit_candidate':
+                    raise StageHandoff()
+                handoff_if_needed()
+                return handler(args)
+            return call
+        try:
+            handoff_if_needed()
+            self.driver.run(ctx, identity, snapshot,
+                            {name: fenced_tool(name, handler) for name, handler in tools.items()}, parameters)
+            # A provider can finish without another tool call after QA requests an amendment.
+            handoff_if_needed()
+        except StageHandoff:
+            if not result.get('spec_amendment'):
+                pending = self._pending_spec_amendment(identity)
+                checkpoint = self.workspace.save_source_checkpoint(ctx, sup, started)
+                result['spec_amendment'] = self._record_spec_amendment(ctx, identity, pending['reason'],
+                    'developer', checkpoint_artifact_id=checkpoint)
         return Outcome('succeeded', result) if result else Outcome('failed', error='developer finished without a broker candidate')
 
     def _candidate(self, identity):
@@ -1149,6 +1396,43 @@ class PipelineRuntime:
         if skipped and log is not None:
             log('Inherited UI controls skipped (invalid under current schema): ' + ', '.join(skipped[:20]))
         return list(controls.values())
+
+    def _pending_spec_amendment(self, identity):
+        """A persisted request must pause concurrent development before any submission."""
+        spec = self.workspace.ui_spec(identity)
+        if spec is None:
+            return None
+        with self.db.read() as s:
+            jobs = s.scalars(select(Job).where(Job.ticket_id == identity['ticket_id'],
+                Job.scope_version == identity['scope_version'], Job.stage.in_(('qa_plan', 'development')),
+                Job.status.in_(('running', 'succeeded'))).order_by(Job.created_at.desc(), Job.id.desc()))
+            for job in jobs:
+                request = job.runtime_ref.get('pipeline_spec_amendment')
+                if request and request['revision'] == spec.revision:
+                    return request
+        return None
+
+    def _record_spec_amendment(self, ctx, identity, reason, requested_by, **extra):
+        """Persist one idempotent request for an additive UI spec revision (QA or Developer)."""
+        if not isinstance(reason, str) or not 12 <= len(reason) <= 2000:
+            raise ValueError('request_spec_amendment requires a concrete reason, 12..2000 characters')
+        spec = self.workspace.ui_spec(identity)
+        if spec is None:
+            raise ValueError('this scope has no UI spec to amend')
+        request = {'reason': reason, 'revision': spec.revision, 'requested_by': requested_by, **extra}
+        with self.db.write() as s:
+            ctx.queue.verify_identity(s, identity)
+            job = s.get(Job, identity['job_id'])
+            prior = job.runtime_ref.get('pipeline_spec_amendment')
+            if prior is not None:
+                if {k: prior.get(k) for k in ('reason', 'revision', 'requested_by')} != {
+                        k: request[k] for k in ('reason', 'revision', 'requested_by')}:
+                    raise ValueError('this job already requested another UI spec amendment')
+                return prior
+            self.workspace._post(s, identity, 'ui-spec-amendment:' + identity['root_job_id'], reason, [],
+                                 'ui_spec_amendment', request=request)
+            job.runtime_ref = {**job.runtime_ref, 'pipeline_spec_amendment': request}
+        return request
 
     @staticmethod
     def _user_retry(ctx):

@@ -103,7 +103,8 @@ class NewProjectSetup:
                 project = s.get(Project, identity['project_id'])
                 if project.mode != 'new' or project.workflow.get('accepted_tip') != expected_base:
                     raise ValueError('project base changed during setup')
-                pipeline = project.workflow.get('pipeline') or {'manifest': manifest.to_dict()}
+                # New reference projects run the UI/UX spec stage (docs/decisions/ui-ux.md).
+                pipeline = project.workflow.get('pipeline') or {'manifest': manifest.to_dict(), 'ui_ux': True}
                 apply_change(s, Project, project.id, expected_revision=project.revision,
                     values={'workflow': {**project.workflow, 'accepted_tip': base, 'pipeline': pipeline,
                         'onboarding': 'ready', 'onboarding_detail': {'job_id': identity['root_job_id'],

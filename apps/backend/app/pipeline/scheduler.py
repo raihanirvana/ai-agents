@@ -54,7 +54,8 @@ class PipelineScheduler:
             return None
         active = [j for j in jobs if j.status in ACTIVE]
         revalidation, amendment = None, None
-        contract_revision = 1
+        spec_request, spec_replan, resume = None, None, None
+        contract_revision, spec_revision = 1, 0
         if t.blocker:
             from .dependency_revalidation import pending_contract
             revalidation = pending_contract(s, t, p)
@@ -72,7 +73,27 @@ class PipelineScheduler:
             qa_done = any(j.status == 'succeeded' and j.result.get('suite_artifact_id') and
                           j.result.get('ui_contract_revision', 1) == contract_revision and
                           j.runtime_ref.get('payload', {}).get('task') == 'qa_plan' for j in jobs)
-            if requests:
+            # UI/UX runs first for projects that enabled it (docs/decisions/ui-ux.md).
+            # Scopes that already started planning without it keep the earlier order.
+            specs = [j for j in jobs if j.status == 'succeeded' and
+                     j.runtime_ref.get('payload', {}).get('task') == 'ui_spec']
+            spec_revision = max((j.result.get('ui_spec_revision', 0) for j in specs), default=0)
+            ui_ux = ((p.workflow.get('pipeline') or {}).get('ui_ux') is True and
+                     not (any(j.stage == 'technical_plan' for j in jobs) and
+                          not any(j.stage == 'ui_spec' for j in jobs)))
+            spec_requests = [j for j in jobs if j.status == 'succeeded' and spec_revision and
+                             (j.result or {}).get('spec_amendment', {}).get('revision') == spec_revision]
+            planned_spec = max((j.result.get('ui_spec_revision', 0) for j in plans), default=0)
+            if ui_ux and not specs:
+                stage, role, task = 'ui_spec', 'ui-ux', 'ui_spec'
+            elif ui_ux and spec_requests:
+                spec_request = spec_requests[-1]
+                stage, role, task = 'ui_spec', 'ui-ux', 'ui_spec'
+            elif ui_ux and plans and spec_revision > planned_spec:
+                # The spec was amended: TL revises the contract additively from it.
+                spec_replan = next(j for j in reversed(specs) if j.result.get('ui_spec_revision') == spec_revision)
+                stage, role, task = 'technical_plan', 'technical-lead', 'technical_plan'
+            elif requests:
                 amendment = requests[-1]
                 stage, role, task = 'technical_plan', 'technical-lead', 'technical_plan'
             elif not plans:
@@ -86,22 +107,49 @@ class PipelineScheduler:
                 if not qa_done and current_qa and current_qa[-1].status in ('failed', 'stopped', 'cancelled'):
                     return None
                 stage, role, task = 'development', 'developer', 'implement'
+                last_development = next((j for j in reversed(jobs) if j.status == 'succeeded' and
+                                         j.stage == 'development'), None)
+                if last_development is not None:
+                    request = (last_development.result or {}).get('spec_amendment', {})
+                    if (request.get('checkpoint_artifact_id') and request.get('revision', 0) < spec_revision and
+                            last_development.runtime_ref.get('payload', {}).get('repair_cycle', 0) ==
+                            t.workflow.get('repair_cycles', 0)):
+                        # Further QA-only amendments retain this draft. Once development
+                        # submits a candidate, later repairs start from that candidate.
+                        resume = last_development
         else:
             stage = t.phase
             role, task = ("technical-lead", "review") if stage == "technical_review" else ("qa", "verify")
         cycle = t.workflow.get("repair_cycles", 0) if stage == "development" else 0
         candidate = t.workflow.get("candidate_id") if stage in ("technical_review", "qa") else None
         key = f"pipeline:{t.id}:v{t.current_version}:{stage}:{cycle}:{candidate or '-'}"
-        legacy_key = key
         suite_repaired = False
         payload = {"task": task, "candidate_id": candidate}
+        if stage == 'development':
+            payload['repair_cycle'] = cycle
         if stage == 'qa_plan':
             payload['ui_contract_revision'] = contract_revision
+        if spec_request is not None:
+            payload['spec_amendment'] = spec_request.result['spec_amendment']
+            payload['amendment_request_job_id'] = spec_request.id
+            key += ':spec-amendment-' + spec_request.id
+        if spec_replan is not None:
+            payload['contract_amendment'] = {'revision': contract_revision, 'ui_spec_revision': spec_revision,
+                'reason': 'UI spec amended to revision ' + str(spec_revision) + '; add its new controls.'}
+            payload['amendment_request_job_id'] = spec_replan.id
+            key += ':spec-r' + str(spec_revision)
+        if stage == 'development' and spec_revision > 1:
+            key += ':spec-r' + str(spec_revision)
+            if resume is not None:
+                payload['resume_checkpoint'] = resume.result['spec_amendment']['checkpoint_artifact_id']
         # Source-only planning and one fenced developer may overlap. Every
         # other stage stays serialized, including review, verify and cleanup.
         companions = ('development',) if stage in ('technical_plan', 'qa_plan') else ('qa_plan',) if stage == 'development' else ()
+        if stage == 'ui_spec':
+            companions = ()  # the spec precedes (or, when amended, pauses) every other stage
         if any(j.stage not in companions for j in active):
             return None
+        legacy_key = key
         if amendment is not None:
             payload['contract_amendment'] = amendment.result['contract_amendment']
             payload['amendment_request_job_id'] = amendment.id
@@ -152,7 +200,7 @@ class PipelineScheduler:
         caps = ({k: v for k, v in pool[-1].limits.items() if k != "budget_key"} if pool else
                 {**project_limits(p, self.limits), **p.workflow['pipeline'].get('budget_limits', {})})
         return dict(project_id=t.project_id, ticket_id=t.id, expected_scope=t.current_version,
-                    lane="interactive" if stage in ('technical_plan', 'technical_review', 'qa_plan') or
+                    lane="interactive" if stage in ('ui_spec', 'technical_plan', 'technical_review', 'qa_plan') or
                         payload.get('task') == 'diagnose' else "execution",
                     role=role, stage=stage, runtime=self.runtime, idempotency_key=key, limits=caps,
                     budget_pool=BUDGET_POOL, payload=payload, actor="scheduler:pipeline")

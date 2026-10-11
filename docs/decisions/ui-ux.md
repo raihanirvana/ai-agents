@@ -36,6 +36,38 @@ UI/UX tidak menulis kode, tidak mengubah scope/UAC, dan tidak memberi approval.
   seperti amandemen kontrak QA → TL: revisi naik tepat satu, hanya menambah, dan
   tidak mengubah scope/approval/budget.
 
+## Implementasi stage (DEV-021)
+
+- Aktif per proyek lewat `workflow.pipeline.ui_ux = true`. Proyek baru dari setup
+  referensi otomatis aktif; proyek lama dan scope yang sudah mulai technical plan
+  tanpa UI/UX tetap memakai urutan lama, sehingga tidak ada tiket berjalan yang
+  disisipi stage baru.
+- Job `ui_spec` (role `ui-ux`, lane interactive, LIGHT_STAGES) memakai structured
+  output `UiSpec | NoUiChange | Clarification` dengan putaran repair untuk aturan
+  tambahan. Hasil disimpan sebagai pesan intent `ui_spec` per scope_version
+  (`spec` null untuk `no_ui_change`); job menyimpan hasilnya untuk retry idempotent.
+- Warisan: token tiket accepted terbaru (urutan approval UAT), gabungan komponen dan
+  copy. Komponen warisan mempertahankan role/repeated/scope.
+  Validasi supervisor mencakup seluruh identitas accepted; excerpt untuk model
+  dibatasi ke 200 komponen dan 300 copy terbaru, dengan jumlah omission tercatat.
+  Token warisan dipulihkan supervisor kecuali UAC secara eksplisit meminta
+  perubahan/pemakaian token visual.
+  Deteksi sementara memakai kata visual dan kata perubahan pada klausa UAC yang
+  sama; kata tampilan/tema sendiri atau larangan perubahan tidak membuka token.
+- Amandemen: QA (qa_plan) atau Developer (implement) memanggil
+  `request_spec_amendment(reason)`. UI/UX membuat revisi +1 yang hanya menambah
+  (screen, penempatan komponen, copy, state, feedback dan token lama tetap); TL lalu
+  menjalankan amandemen kontrak dari revisi itu (boleh tanpa kontrol baru, tetap
+  tidak mengubah kontrol lama); QA
+  merencanakan ulang; Developer melanjutkan dari checkpoint yang disimpan saat meminta.
+  Bila QA meminta saat Developer berjalan, supervisor menghentikan turn Developer
+  pada tool/wait berikutnya, menyimpan snapshot sumber, dan menyerahkan alur ke
+  UI/UX. Amandemen QA berikutnya tetap mempertahankan draft yang belum disubmit;
+  sesudah ada kandidat atau siklus repair berganti, checkpoint amandemen lama
+  tidak dipakai lagi. Repair menggunakan kandidat terakhir sesuai alur yang ada.
+- `propose_ui_spec` tetap nama tool di policy untuk runtime tool-loop; stage ini
+  memakai structured output yang divalidasi dengan schema yang sama.
+
 ## Approval copy
 
 Copy **tidak** memerlukan approval terpisah. UiSpec ditampilkan di halaman tiket
