@@ -46,10 +46,16 @@ def test_unknown_input_is_not_dynamic_vocabulary():
         contract(action_locators='testid').check_suite(suite('testid=list >> has_text="Generated" >> testid=delete'))
 
 
-@pytest.mark.parametrize('selector', ['testid=list >> testid=delete',
-                                      'testid=list >> testid=delete >> nth=0'])
-def test_declared_parent_child_testid_needs_no_dynamic_text_filter(selector):
-    contract(action_locators='testid').check_suite(suite(selector))
+def test_action_in_repeated_row_needs_original_input_or_bounded_position():
+    strict = contract(action_locators='testid')
+    # The pair alone matches every row: strict mode violation once two records exist.
+    with pytest.raises(ValueError, match='repeated row'):
+        strict.check_suite(suite('testid=list >> testid=delete'))
+    strict.check_suite(suite('testid=list >> has_text="Seed" >> testid=delete'))
+    strict.check_suite(suite('testid=list >> testid=delete >> nth=0'))
+    # Assertions may still address the pair, and pinned historical contracts keep their vocabulary.
+    strict.check_suite(suite('testid=list >> testid=delete', action='assert_visible'))
+    contract().check_suite(suite('testid=list >> testid=delete'))
 
 
 @pytest.mark.parametrize('selector', ['testid=select >> testid=delete',

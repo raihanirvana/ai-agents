@@ -91,18 +91,26 @@ class Step(Contract):
     file: UploadFixture | None = None
     download: DownloadExpectation | None = None
     dialog: DialogExpectation | None = None
+    uac_id: str | None = Field(default=None, pattern=ID,
+        description='assert_* only: the approved criterion (from this test\'s uac) this assertion proves.')
+    uac_quote: str | None = Field(default=None, min_length=3, max_length=300,
+        description='assert_* only: exact contiguous substring of that criterion text naming the checked outcome.')
 
     @model_serializer(mode='wrap')
     def legacy_serialization(self, handler):
         # Adding optional DSL fields must not change persisted legacy suite digests.
         document = handler(self)
-        for field in ('select_by', 'attribute', 'file', 'download', 'dialog'):
+        for field in ('select_by', 'attribute', 'file', 'download', 'dialog', 'uac_id', 'uac_quote'):
             if document.get(field) is None:
                 document.pop(field, None)
         return document
 
     @model_validator(mode="after")
     def arguments(self):
+        if (self.uac_id is not None or self.uac_quote is not None) and not self.action.startswith('assert_'):
+            raise ValueError('uac_id/uac_quote are only valid on assert_* steps')
+        if (self.uac_id is None) != (self.uac_quote is None):
+            raise ValueError('uac_id and uac_quote are provided together')
         for field, action in (('select_by', 'select_option'), ('attribute', 'assert_attribute'),
                               ('file', 'upload_file'), ('download', 'assert_download'), ('dialog', 'click_dialog')):
             if getattr(self, field) is not None and self.action != action:
@@ -236,6 +244,38 @@ class QaPlan(Contract):
             row['steps'] = [step.model_dump() for key in test.fixture_ids for step in fixtures[key].steps] + row['steps']
             row.pop('fixture_ids', None)
         return QaPlan.model_validate(document)
+
+    @property
+    def uac_quoted(self):
+        """Suites planned under the citation policy; legacy suites carry no quotes."""
+        return any(step.uac_quote for test in self.tests for step in test.steps)
+
+    def check_uac_quotes(self, criteria):
+        """Every assertion cites the approved criterion it proves (exact quote, witness pattern).
+
+        Not proof of semantics, but an assertion of an extra assumption cannot cite one."""
+        texts = {c['id']: c['text'] for c in criteria}
+        automated = {c['id'] for c in criteria if c.get('mode', 'automated') == 'automated'}
+        cited = set()
+        for test in self.tests:
+            for index, step in enumerate(test.steps):
+                if not step.action.startswith('assert_'):
+                    continue
+                where = f'test {test.id}, step {index}'
+                if step.uac_id is None:
+                    raise ValueError(f'{where}: {step.action} needs uac_id and uac_quote citing the approved '
+                                     'criterion it proves; an assertion no criterion requires does not belong in the suite.')
+                if step.uac_id not in test.uac:
+                    raise ValueError(f'{where}: uac_id {step.uac_id} is not one of this test\'s uac {test.uac}')
+                quote = step.uac_quote.strip()
+                if len(quote) < min(8, len(texts.get(step.uac_id, '').strip())) or quote not in texts.get(step.uac_id, ''):
+                    raise ValueError(f'{where}: uac_quote must be an exact substring (at least 8 characters) of '
+                                     f'{step.uac_id}: {texts.get(step.uac_id, "")!r}. Quote the outcome this assertion '
+                                     'checks; if no wording fits, the assertion is outside the approved criterion.')
+                cited.add(step.uac_id)
+        missing = sorted(automated - cited)
+        if missing:
+            raise ValueError('every automated criterion needs at least one assertion citing it: ' + ', '.join(missing))
 
     def check_criteria(self, criteria):
         known = {c["id"] for c in criteria}

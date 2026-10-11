@@ -163,3 +163,23 @@ def test_withheld_application_claim_is_shown_and_pinned_with_the_decision(world)
     assert decided.phase == 'uat'
     with world.db.read() as s:
         assert model_id in s.scalar(select(QaWaiver)).evidence_artifact_ids
+
+
+def test_panel_offers_one_more_revision_only_for_a_failed_test_contract_run(world):
+    from .test_qa_manual_resolution import inconclusive
+    from tests.persistence import factories as f
+    t, c, v, args = inconclusive(world, fault='test')
+    with world.db.read() as s:
+        assert 'revision_retry' not in available(s, world.store, world.ticket(t.id))  # no failed QA run yet
+    with world.db.write() as s:
+        job = f.job(s, world.project, world.ticket(t.id), stage='qa', status='failed',
+                    result={'failure_kind': 'test_contract', 'user_decision_required': True})
+    with world.db.read() as s:
+        offer = available(s, world.store, world.ticket(t.id))
+    assert offer['eligible'] is True
+    assert offer['revision_retry'] == {'run_id': job.id, 'run_revision': job.revision}
+    with world.db.write() as s:
+        f.job(s, world.project, world.ticket(t.id), stage='qa', status='failed',
+              result={'failure_kind': 'infrastructure'})
+    with world.db.read() as s:
+        assert 'revision_retry' not in available(s, world.store, world.ticket(t.id))

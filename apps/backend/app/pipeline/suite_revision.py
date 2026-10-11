@@ -39,6 +39,9 @@ def revise_suite(original, proof, proposal, criteria, source, ui_contract=None):
         updated = QaPlan.model_validate(document).materialize_fixtures()
         mapping_ids = set(replacements)
     updated.check_criteria(criteria)
+    if original.uac_quoted:
+        # A cited suite stays cited: changed or added assertions must quote approved criteria too.
+        updated.check_uac_quotes(criteria)
     updated.check_selector_contracts()
     updated.check_selection_contracts()
     updated.check_csv_expectations()

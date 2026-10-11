@@ -331,6 +331,10 @@ function QaResolution({ detail }: { detail: TicketDetail }) {
           evidence_ids: resolution.evidence_ids!, manual_uac_ids: [...owned], reason: reason.trim(),
         });
       }} />
+    {resolution.revision_retry && <p className="muted">Atau biarkan QA mencoba satu revisi test lagi:{" "}
+      <ConfirmButton label="Coba revisi lagi" confirmLabel="Ya, izinkan satu revisi lagi"
+        onConfirm={async () => { await command<"retry">(`/runs/${resolution.revision_retry!.run_id}/retry`,
+          { expected_revision: resolution.revision_retry!.run_revision }); }} /></p>}
   </section>;
 }
 

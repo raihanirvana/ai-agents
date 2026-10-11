@@ -22,6 +22,22 @@ from .workspace import FencedWorkspace, unpack_tree, cleanup_workspace
 from .files import allocate_directory, cleanup_directory
 
 
+def merge_inherited_contract(contract, inherited):
+    """Supervisor merge: accepted upstream controls verbatim, then TL's new controls.
+
+    Returns (merged UiContract, testids TL tried to redefine). Never flattens scopes."""
+    from app.agents.ui_contract import UiContract
+    upstream = {c['testid']: c for c in inherited}
+    own = {c['testid']: c for c in (control.model_dump() for control in contract.controls)}
+    replaced = sorted(k for k, c in own.items() if k in upstream and c != upstream[k])
+    controls = [*inherited, *(c for k, c in own.items() if k not in upstream)]
+    try:
+        return UiContract.model_validate({**contract.model_dump(), 'controls': controls}), replaced
+    except ValueError as exc:
+        raise InvalidOutput(['ui_contract cannot be merged with inherited accepted controls: '
+                             + str(exc)[:400]]) from exc
+
+
 class PipelineRuntime:
     def __init__(self, structured, workspace, driver):
         self.structured, self.workspace, self.driver = structured, workspace, driver
@@ -143,6 +159,10 @@ class PipelineRuntime:
                 break
         amendment = ctx.job['runtime_ref'].get('payload', {}).get('contract_amendment')
         previous_contract = self.workspace.ui_contract(identity) if amendment else None
+        # Accepted upstream controls are supervisor-owned; TL can only add to them.
+        inherited = [] if previous_contract is not None else self._inherited_ui_controls(identity)
+        def merged_contract(contract):
+            return merge_inherited_contract(contract, inherited)
         if amendment and (previous_contract is None or previous_contract.revision != amendment['revision']):
             raise InvalidOutput(['Contract amendment refers to an obsolete revision; use the current plan.'])
         def plan_rules(output):
@@ -151,6 +171,8 @@ class PipelineRuntime:
                 return
             if output.ui_contract is None and not self.fake:
                 raise InvalidOutput(['New technical plans require ui_contract with literal testids and semantic locators.'])
+            if inherited and output.ui_contract is not None:
+                merged_contract(output.ui_contract)
             if previous_contract is not None:
                 if output.needs_user:
                     raise InvalidOutput(['Instrumentation amendment must not change scope or create an approval decision.'])
@@ -166,6 +188,9 @@ class PipelineRuntime:
                         ' No new control was added.')])
         output, meta, snapshot = self._ask(ctx, identity,
             {'name': 'technical_plan', 'contract_amendment': amendment,
+             **({'inherited_ui_controls': inherited, 'inherited_ui_controls_policy': 'Supervisor keeps these accepted upstream controls exactly '
+                 '(scope_testid, dynamic_text included) and merges your contract into them. Reuse their testids; '
+                 'add only new controls. Do not redefine or flatten them.'} if inherited else {}),
              'previous_ui_contract': previous_contract.model_dump() if previous_contract else None, 'ticket_id': identity['ticket_id'], 'source_files': files,
              'baseline_ui_source': source, 'baseline_ui_source_unavailable': unavailable,
              'runner_manifest': manifest.to_dict(),
@@ -178,6 +203,10 @@ class PipelineRuntime:
         if isinstance(output, Clarification):
             ctx.request_input(output.as_text(), {}, 'pipeline-clarify:' + identity['root_job_id'] + ':' + str(identity['generation']))
         plan_rules(output)  # Backstop for outputs checkpointed before this rule ran in _ask.
+        if inherited and output.ui_contract is not None:
+            output.ui_contract, replaced = merged_contract(output.ui_contract)
+            if replaced:
+                ctx.log('Inherited accepted UI controls kept over TL redefinitions: ' + ', '.join(replaced[:20]))
         if output.ui_contract is not None:
             from app.agents.ui_contract import UiContract
             output.ui_contract = UiContract.model_validate({**output.ui_contract.model_dump(), 'action_locators': 'testid'})
@@ -250,7 +279,9 @@ class PipelineRuntime:
         snapshot = planning_builder.build(identity, task={
             'name': 'qa_plan', 'instruction': 'Plan from approved UAC, technical plan and supplied source. '
                 'Acceptance assertions must check the outcome or restriction required by approved UAC, '
-                'not an extra assumption or incidental UI state. Summarize the UAC-to-outcome mapping. '
+                'not an extra assumption or incidental UI state. Every assert_* step sets uac_id and uac_quote, '
+                'an exact substring of that criterion text; every automated criterion is cited at least once. '
+                'Summarize the UAC-to-outcome mapping. '
                 'Use declared testid locators for actions. If a required control is missing, call request_contract_amendment with concrete UAC/control details. Otherwise submit one validated QaPlan through propose_tests; this task does not execute or pass QA.',
             'source_files': source_files, 'baseline_ui_source': baseline_ui,
             'ui_contract': ui_contract.model_dump() if ui_contract else None,
@@ -279,6 +310,10 @@ class PipelineRuntime:
                 if current_revision != (ui_contract.revision if ui_contract else 1):
                     raise ValueError('UI contract changed during QA planning; a fresh plan is required')
                 version = s.query(TicketVersion).filter_by(ticket_id=current['ticket_id'], version=current['scope_version']).one()
+                if not self.fake or suite.uac_quoted:
+                    # New real plans: every assertion cites its criterion. Fake foundation
+                    # drivers keep their legacy plan contract unless they opt in.
+                    suite.check_uac_quotes(version.uac)
                 readiness = preflight(suite, version.uac, current['scope_version'], new_plan=True)
                 receipt = self.store.put_json(s, project_id=current['project_id'], kind='report', name='qa-preflight.json',
                     document={**readiness, 'authored_suite_digest': authored.digest,
@@ -998,7 +1033,8 @@ class PipelineRuntime:
             return self._reject(ctx, identity, candidate, 'QA diagnosed an application defect: ' + output.summary + '\n' + detail,
                 verification_id=verification_id, evidence_artifact_ids=attachments, qa_status='failed',
                 failure_kind='application', diagnosis_artifact_id=diagnosis.id)
-        if output.fault == 'test':
+        if output.fault in ('test', 'unknown'):
+            # One bounded revision attempt; a failure leaves this diagnosis for a user decision.
             return self._revise_suite(ctx, identity, candidate, target, suite, proof,
                 verification_id, attachments, criteria, source, diagnosis=output.model_dump())
         return Outcome('failed', {'verification_id': verification_id, 'evidence_artifact_ids': attachments,
@@ -1006,6 +1042,34 @@ class PipelineRuntime:
             'diagnosis_artifact_id': diagnosis.id, 'diagnosis_fault': output.fault},
             error='QA diagnosis: ' + output.summary + '. A corrected suite/runner and fresh evidence are required; '
                   'application repair was not requested.')
+
+    def _inherited_ui_controls(self, identity):
+        """Controls pinned by accepted dependency targets, first definition wins on conflict."""
+        from app.persistence.models import Dependency
+        controls, seen = [], {}
+        with self.db.read() as s:
+            rows = s.scalars(select(Dependency).where(Dependency.ticket_id == identity['ticket_id'],
+                Dependency.accepted_candidate_id.is_not(None)).order_by(Dependency.created_at, Dependency.id))
+            for dependency in rows:
+                candidate = s.get(Candidate, dependency.accepted_candidate_id)
+                if candidate is None or not candidate.target_artifact_id:
+                    continue
+                try:
+                    target = json.loads(self.store.read_bytes(s, candidate.target_artifact_id))
+                except Exception:
+                    continue  # Unavailable evidence: nothing to inherit, TL plans normally.
+                for control in (target.get('ui_contract') or {}).get('controls', []):
+                    if control['testid'] not in seen:
+                        seen[control['testid']] = control
+                        controls.append(control)
+        known = set(seen)
+        # Keep scopes intact: a control whose parent was not inherited would dangle.
+        return [c for c in controls if not c.get('scope_testid') or c['scope_testid'] in known]
+
+    @staticmethod
+    def _user_retry(ctx):
+        """An explicit user retry of a failed QA run authorizes one more suite revision."""
+        return bool((ctx.job.get('runtime_ref') or {}).get('retry_authorization'))
 
     def _revise_coverage_gap(self, ctx, identity, candidate, target, suite, proof,
                              verification_id, attachments, criteria, source, undecided):
@@ -1064,9 +1128,8 @@ class PipelineRuntime:
         from app.persistence.models import Message
         from .contracts import digest_of
         from .test_concerns import pinned_concerns, qualify_concerns
-        from .qa_repair import MAX_SUITE_REPAIRS
-        count = target.get('suite_repair_count', 0)
-        if type(count) is not int or not 0 <= count < MAX_SUITE_REPAIRS:
+        from .qa_repair import suite_repair_allowed
+        if not suite_repair_allowed(target.get('suite_repair_count', 0), user_authorized=self._user_retry(ctx)):
             return None, None
         from sqlalchemy import func
         from app.persistence.messages import not_runtime_log
@@ -1126,12 +1189,12 @@ class PipelineRuntime:
         """One model proposal surface for selector/action/setup and proven coverage defects."""
         from app.agents.ui_contract import UiContract
         from .suite_revision import revise_suite, MAX_CHANGED_STEPS, MAX_CHANGED_PER_TEST
-        from .qa_repair import MAX_SUITE_REPAIRS, baseline_coverage_gaps, passed_setup_prefixes
-        count = target.get('suite_repair_count', 0)
-        if type(count) is not int or not 0 <= count < MAX_SUITE_REPAIRS:
+        from .qa_repair import suite_repair_allowed, baseline_coverage_gaps, passed_setup_prefixes
+        if not suite_repair_allowed(target.get('suite_repair_count', 0), user_authorized=self._user_retry(ctx)):
             return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id,
-                'evidence_artifact_ids': attachments}, retryable=False,
-                error='QA suite repair limit reached; review the suite/evidence. Application repair was not requested.')
+                'evidence_artifact_ids': attachments, 'user_decision_required': True}, retryable=False,
+                error='Automatic QA suite revision already used; take over the inconclusive criteria in the QA '
+                      'decision panel or retry this QA run to authorize one more revision.')
         contract = UiContract.model_validate(target['ui_contract']) if target.get('ui_contract') else None
         witness_hints = []
         for finding in (diagnosis or {}).get('findings', []):
@@ -1207,6 +1270,7 @@ class PipelineRuntime:
                 'must reuse an original value from this same test with the same action and selection mode, '
                 'not data from another test. Restore only the prerequisites needed for the approved journey. '
                 'Explicitly copy id/uac/purpose from unchangeable_test_fields into each replacement test; '
+                'keep uac_id/uac_quote on every preserved assertion; '
                 'do not omit purpose because its schema default may differ from the original test. '
                 'original_insertable_inputs lists permissible same-test values. Source excerpt hints are '
                 'literal source data, not proof of semantic relevance; choose a relevant exact witness. '
@@ -1248,6 +1312,14 @@ class PipelineRuntime:
             selectors = {step.selector for test in suite.tests for step in test.steps if step.selector}
             selectors.update(locator for choices in scoped_choices.values() for locator in choices['locators'])
             selectors.update(locator for choices in positional_choices.values() for locator in choices)
+            if contract:
+                # Declared controls absent from the original suite (e.g. the feature action a
+                # coverage gap needs) must stay expressible; check_suite still bounds actions.
+                affected_inputs = {value for test in suite.tests if test.id in affected_ids for step in test.steps
+                                   if step.action in ('fill', 'select_option')
+                                   for value in (step.value if isinstance(step.value, list) else [step.value])
+                                   if isinstance(value, str)}
+                selectors.update(contract.selectors(affected_inputs))
             revision_contract = bounded_revision_contract(selectors) if contract else QaSuiteRevision
             # One bounded validator feedback opportunity in the same job/budget.
             for attempt in range(2):

@@ -51,6 +51,14 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ### Efisiensi planning, pilihan QA dan stabilitas sandbox — 11 Oktober 2026
 
+Tindak lanjut review demo perpustakaan (IN_PROGRESS, belum direview): model QA
+lokal → DeepSeek V4.1 Flash; satu revisi suite otomatis lalu panel keputusan
+user (retry eksplisit membuka satu revisi lagi, maks 3); aksi baris berulang
+wajib has_text/nth; assertion QA baru wajib uac_id + kutipan persis UAC;
+kontrol UI dependency accepted diwariskan supervisor; kosakata revisi kini
+memuat kontrol kontrak (memperbaiki test_coverage_repair yang gagal di 6183c1d).
+Detail: akhir audit library-live-efficiency-2026-10-11.md. Demo ulang belum.
+
 Tindak lanjut permintaan user “QA hanya test sesuai UAC”: IN_PROGRESS sebelum
 edit pada pekerjaan QA aktif; rencana memperketat soul/instruksi, policy dan
 task planning/diagnosis tanpa alur komunikasi PO baru atau perubahan scope.

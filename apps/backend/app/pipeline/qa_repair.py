@@ -4,7 +4,15 @@ import json
 
 from .contracts import QaPlan
 
-MAX_SUITE_REPAIRS = 2
+MAX_SUITE_REPAIRS = 3  # Absolute cap per candidate, including user-authorized retries.
+AUTO_SUITE_REPAIRS = 1  # Without a user decision: one automatic revision, then the decision panel.
+
+
+def suite_repair_allowed(count, *, user_authorized):
+    """One automatic revision; each further one needs an explicit user retry of the QA run."""
+    if type(count) is not int or count < 0:
+        return False
+    return count < (MAX_SUITE_REPAIRS if user_authorized else AUTO_SUITE_REPAIRS)
 
 
 def baseline_coverage_gaps(suite, proof):

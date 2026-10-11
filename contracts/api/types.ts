@@ -100,7 +100,8 @@ export interface QaDecisionDiagnosis {
 export interface TicketDetail {
   qa_resolution?: { eligible: boolean; reason?: string; candidate_id?: string; verification_id?: string;
     target_artifact_id?: string; target_digest?: string; diagnosis_artifact_id?: string;
-    evidence_ids?: string[]; criteria?: Criterion[]; diagnosis?: QaDecisionDiagnosis } | null;
+    evidence_ids?: string[]; criteria?: Criterion[]; diagnosis?: QaDecisionDiagnosis;
+    revision_retry?: { run_id: string; run_revision: number } } | null;
   verification_plan?: { profile: "lightweight"; scope_version: number;
     status: "not_planned" | "planned" | "legacy"; test_count: number | null;
     criteria: (Criterion & { test_ids: string[] })[] };

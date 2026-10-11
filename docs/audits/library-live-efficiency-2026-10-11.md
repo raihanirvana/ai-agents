@@ -392,3 +392,26 @@ Verifikasi benchmark: CLI read-only `app.pipeline.metrics` untuk kedua project,
 query status/timestamp/limits DB, dan archived rollover checksums. Tidak ada
 benchmark sintetis, provider call baru, approval, retry, atau tes tambahan yang
 dijalankan saat pengambilan snapshot final ini.
+
+## Tindak lanjut review QA demo perpustakaan — 11 Oktober 2026
+
+Status IN_PROGRESS / NOT_REVIEWED. Dikerjakan implementer; belum commit/push,
+worker belum di-restart, belum ada demo ulang. Bukan independent review.
+
+| Rekomendasi | Perubahan | Bukti |
+| --- | --- | --- |
+| 3. Model QA | `agents/models.json` lokal (gitignored): role qa memakai `deepseek/deepseek-v4.1-flash` via OpenRouter, fallback `z-ai/glm-5.3-flash`, stream, reasoning low, timeout 120 dtk, sama dengan TL. Berlaku setelah worker restart; kualitas/biaya belum diukur. | `ModelRegistry.from_dict` memuat konfigurasi |
+| 4. Satu repair otomatis lalu keputusan user | `suite_repair_allowed`: 1 revisi otomatis per kandidat; tiap revisi tambahan hanya lewat retry run eksplisit user, batas keras 3. Diagnosis `unknown` juga mendapat satu revisi. Gagal → job non-retryable `user_decision_required`; panel menampilkan "Ambil alih" dan "Coba revisi lagi" (retry run QA terakhir yang gagal test_contract). | `test_one_automatic_revision_then_user_authorized_retries_up_to_the_cap`, `test_panel_offers_one_more_revision_only_for_a_failed_test_contract_run` |
+| 2a. Aksi parent/child pada baris berulang | Kontrak kebijakan baru (`action_locators`): aksi di dalam kontrol `dynamic_text` wajib `has_text` dari input asli tes itu atau `nth=` terbatas; pasangan parent/child saja ditolak dengan pesan perbaikan. Assertion dan kontrak historis tidak berubah. | `test_action_in_repeated_row_needs_original_input_or_bounded_position` |
+| 1. Kutipan UAC per assertion | `Step.uac_id`/`uac_quote` (hanya assert_*, tidak diserialisasi bila kosong → digest suite lama tetap). `QaPlan.check_uac_quotes`: uac_id di test.uac, kutipan substring persis ≥ 8 karakter, setiap UAC otomatis dikutip. Wajib untuk plan QA nyata baru; revisi suite yang sudah berkutipan wajib tetap berkutipan. Fake driver tetap kontrak lama kecuali memakai kutipan. Bonus "hapus assertion lama tanpa kutipan" belum dikerjakan. | 6 test di `test_qa_library_demo_followups.py` (termasuk kasus #2 "tombol Pinjam enabled") |
+| 2b. Pewarisan kontrak oleh supervisor | `_inherited_ui_controls`: kontrol `ui_contract` dari target kandidat accepted tiket dependency (scope/dynamic_text utuh). `merge_inherited_contract` setelah jawaban TL: kontrol warisan verbatim + kontrol baru TL; redefinisi TL atas testid warisan diabaikan dan dicatat; merge yang tidak valid kembali ke TL di putaran repair. | 3 test merge/warisan |
+| Temuan saat verifikasi | Kosakata selector terbatas revisi (6183c1d) tidak memuat kontrol kontrak yang belum dipakai suite, sehingga revisi coverage gap tidak bisa menambah aksi fitur (`test_coverage_repair` gagal di HEAD). Kini kosakata menyertakan `contract.selectors(input tes terdampak)`. | `tests/pipeline/test_coverage_repair.py` 20 passed |
+
+Keterbatasan: kutipan membuktikan rujukan teks, bukan makna assertion; kutipan
+generik masih mungkin. Warisan hanya dari dependency eksplisit yang accepted,
+bukan semua tiket accepted proyek. Perlu demo ulang terukur (biaya QA, jumlah
+retry, keputusan user) sebelum menilai apakah profil manual sebaiknya default.
+
+Verifikasi: `tests/pipeline tests/domain tests/agents tests/workers tests/persistence`
+762 passed (termasuk 2 test coverage repair yang gagal di HEAD 6183c1d);
+`tsc --noEmit` web lulus. tests/http tidak dijalankan (venv tanpa httpx2).

@@ -114,6 +114,8 @@ class UiContract(BaseModel):
 
     def check_suite(self, suite):
         suite = suite.materialize_fixtures()
+        # dynamic_text containers are repeated records (rows/cards) in this vocabulary.
+        repeated = {c.testid for c in self.controls if c.dynamic_text}
         for test in suite.tests:
             inputs = {value for s in test.steps if s.action in ('fill', 'select_option')
                       for value in (s.value if isinstance(s.value, list) else [s.value])
@@ -133,3 +135,12 @@ class UiContract(BaseModel):
                     raise ValueError(f'test {test.id}, step {index}: locator is outside ui_contract: {selector}. '
                                      'Use a declared exact role/name, associated label, text or testid; '
                                      'dynamic text must come from original fill/select input within a declared container.')
+                if ('action_locators' in self.model_fields_set and not step.action.startswith('assert_')
+                        and base == selector):
+                    parent = base.split(' >> ', 1)[0] if ' >> ' in base else None
+                    if (parent and parent.startswith('testid=') and parent[7:] in repeated
+                            and not base.startswith(parent + ' >> has_text=')):
+                        raise ValueError(f'test {test.id}, step {index}: {parent} is a repeated row; an action inside '
+                            'it must select one row with has_text from this test\'s original input '
+                            f'(e.g. {parent} >> has_text="<original input>" >> ...) or a bounded nth=. '
+                            'A parent/child pair alone matches every row.')

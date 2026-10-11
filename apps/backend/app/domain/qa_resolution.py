@@ -161,6 +161,19 @@ def validate_persisted(s, store, candidate, verification_id):
     return qualified['verification']
 
 
+def _revision_retry(s, store, ticket, candidate):
+    """The failed QA run a user may retry to authorize one more suite revision (not a decision)."""
+    from app.pipeline.qa_repair import suite_repair_allowed
+    job = s.scalar(select(Job).where(Job.ticket_id == ticket.id, Job.scope_version == candidate.scope_version,
+        Job.stage == 'qa').order_by(Job.created_at.desc(), Job.id.desc()).limit(1))
+    if job is None or job.status != 'failed' or (job.result or {}).get('failure_kind') != 'test_contract':
+        return {}
+    target = evidence.document(s, store, candidate.target_artifact_id)
+    if not suite_repair_allowed(target.get('suite_repair_count', 0), user_authorized=True):
+        return {}
+    return {'revision_retry': {'run_id': job.id, 'run_revision': job.revision}}
+
+
 def available(s, store, ticket):
     """Public candidate for a user decision; never an authorization itself."""
     c = s.get(Candidate, ticket.workflow.get('candidate_id')) if ticket.workflow.get('candidate_id') else None
@@ -180,7 +193,8 @@ def available(s, store, ticket):
         q = qualify(s, store, c, v.id, a.id)
     except (Invalid, Conflict, ValueError, ArtifactUnavailable, KeyError, TypeError) as exc:
         return {'eligible': False, 'reason': str(exc)}
-    return {'eligible': True, 'candidate_id': c.id, 'verification_id': v.id,
+    retry = _revision_retry(s, store, ticket, c)
+    return {'eligible': True, 'candidate_id': c.id, 'verification_id': v.id, **retry,
             'target_artifact_id': c.target_artifact_id, 'target_digest': c.target_digest,
             'diagnosis_artifact_id': a.id, 'evidence_ids': q['evidence_ids'], 'criteria': q['criteria'],
             'diagnosis': q['diagnosis']}
