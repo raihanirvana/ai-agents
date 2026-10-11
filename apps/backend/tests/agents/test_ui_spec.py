@@ -71,6 +71,32 @@ def test_output_union_accepts_no_ui_change():
     assert isinstance(adapter.validate_python(SPEC), UiSpec)
 
 
+def test_invalid_spec_reports_all_component_errors_without_other_output_branches():
+    from app.agents.outputs import InvalidOutput, parse_output
+    document = spec()
+    document['screens'][0]['components'][0]['role'] = 'label'
+    document['screens'][0]['components'][1]['role'] = 'input'
+    with pytest.raises(InvalidOutput) as failure:
+        parse_output(json.dumps(document), UiSpecOutput)
+    errors = failure.value.errors
+    assert len(errors) == 2
+    assert 'components.0' in errors[0] and "'label'" in errors[0]
+    assert 'components.1' in errors[1] and "'input'" in errors[1]
+    assert all('ARIA role' in error and 'textbox' in error for error in errors)
+    assert 'NoUiChange' not in str(failure.value)
+
+
+def test_invalid_spec_copy_does_not_suggest_switching_to_no_ui_change():
+    from app.agents.outputs import InvalidOutput, parse_output
+    document = spec()
+    document['screens'][0]['components'][5]['name_key'] = 'book.added'
+    with pytest.raises(InvalidOutput) as failure:
+        parse_output(json.dumps(document), UiSpecOutput)
+    assert len(failure.value.errors) == 1
+    assert 'must be static text' in str(failure.value)
+    assert 'NoUiChange' not in str(failure.value)
+
+
 def broken(mutate):
     document = copylib.deepcopy(SPEC)
     mutate(document)

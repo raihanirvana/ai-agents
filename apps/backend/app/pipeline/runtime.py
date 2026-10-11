@@ -463,8 +463,10 @@ class PipelineRuntime:
                 'baseline_ui_source_unavailable': unavailable,
                 'instructions': 'Return one UiSpec (or no_ui_change when this approved scope changes no UI). '
                     'Use the summarized frontend-design principles in your role instructions.'}
-        from typing import Union
-        output, meta, snapshot = self._ask(ctx, identity, task, Union[UiSpec, NoUiChange, Clarification],
+        from typing import Annotated, Union
+        from pydantic import Field
+        contract = Annotated[Union[UiSpec, NoUiChange, Clarification], Field(discriminator='kind')]
+        output, meta, snapshot = self._ask(ctx, identity, task, contract,
             check=rules, context_limits=replace(self.structured.builder.limits,
                 total_tokens=max(32768, self.structured.builder.limits.total_tokens)))
         if isinstance(output, Clarification):

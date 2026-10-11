@@ -4,6 +4,7 @@ Product DB/Git/scheduler with the labelled fake provider and fake drivers; no mo
 QA pass or UAT evidence is produced. Real Docker is used only for workspace setup.
 """
 import copy
+import json
 
 import pytest
 from sqlalchemy import select
@@ -98,6 +99,28 @@ def test_no_ui_change_goes_straight_to_the_technical_plan(agent_env, tmp_path):
     assert spec_messages(env, ticket)[0].meta['spec'] is None
     tl = finish(env, runtime, scheduler, 'technical_plan')
     assert tl.result['ui_spec_revision'] == 0 and 'ui_spec_policy' not in str(env.provider.requests[-1])
+
+
+@pytest.mark.parametrize('fault', ['role', 'placeholder'])
+def test_ui_spec_repair_focuses_on_the_selected_output_kind(agent_env, tmp_path, fault):
+    env = agent_env
+    runtime, _, scheduler = setup(env, tmp_path, SpecDriver())
+    enable_ui_ux(env)
+    invalid = spec()
+    if fault == 'role':
+        invalid['screens'][0]['components'][0]['role'] = 'label'
+    else:
+        invalid['screens'][0]['components'][5]['name_key'] = 'book.added'
+    env.script(invalid, spec())
+    ticket = env.approved_ticket()
+    job = finish(env, runtime, scheduler, 'ui_spec')
+    assert job.status == 'succeeded' and job.usage['model_calls'] == 2
+    assert len(spec_messages(env, ticket)) == 1
+    task = json.loads(env.provider.requests[0].user.split('## Task\n', 1)[1].split('\n## Run', 1)[0])
+    assert task['output_schema']['discriminator']['propertyName'] == 'kind'
+    repair = env.provider.requests[1].user.split('## Your previous answer was rejected', 1)[1]
+    assert 'NoUiChange' not in repair and 'Clarification' not in repair
+    assert ('unsupported UI role' if fault == 'role' else 'must be static text') in repair
 
 
 def test_projects_without_ui_ux_and_scopes_already_planned_keep_the_earlier_order(agent_env, tmp_path):

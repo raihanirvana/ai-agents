@@ -3434,7 +3434,31 @@ browser test web tidak dijalankan oleh pelaksana. Reviewer menjalankan HTTP dala
 
 ### Catatan pengerjaan
 
-Status: TODO. Rencana langkah Q.
+Status: IN_PROGRESS. Rencana langkah Q.
+
+12 Oktober 2026: pengguna meminta menjalankan dan menguji demo dari awal. Siapkan
+proyek Mini Perpustakaan baru dengan tiga tiket (katalog, pinjam/kembali,
+pencarian/statistik), UI/UX aktif, provider nyata dari konfigurasi lokal, serta
+catatan biaya/waktu/repair/amandemen. Pertahankan proyek dan evidence lama.
+Scope, UAT, dan release tetap menunggu keputusan pengguna pada target yang nyata.
+Hasil dan perbandingan benchmark dicatat setelah eksekusi; belum ada klaim lulus.
+
+Proyek demo: `7947f5bdc1c44c7c85556d94b06f9a54`, baseline kode `0493e22`.
+API/worker sudah dimuat ulang, setup dan prefetch succeeded, UI/UX aktif.
+PO nyata berhasil satu call (6.236 token, USD 0,00280275); tiga scope v1 kemudian
+disetujui pengguna di web. Browser Chromium memverifikasi create/chat/board dan
+label UI/UX di kantor tanpa pageerror. Observer metrik read-only aktif, maksimal
+enam jam. Catatan kondisi/provider/cache serta bukti:
+`docs/audits/library-uiux-demo-2026-10-12.md`; data privat di
+`data/demo-library-uiux-2026-10-12/`. QA planning berjalan; QA/UAT belum lulus.
+
+Intervensi demo: UiSpec ditolak (accessible name memakai placeholder, lalu role
+tidak valid), sementara union tanpa discriminator menambahkan error branch lain.
+Fix: pilih output lewat kind, beri arahan ARIA role pada schema/validator/instruksi.
+Aturan role dan copy tetap ketat. Regresi schema/stage/role: 99 passed, 36,63 s.
+Retry operator setelah worker idle dimuat ulang mempertahankan scope/usage;
+UiSpec revisi 1 dan TL succeeded, tiket #1 Development dengan QA planning paralel.
+Histori gagal dan biaya intervensi tetap masuk benchmark; DEV-027 tetap IN_PROGRESS.
 
 **Acceptance criteria:** Mini Perpustakaan dengan workload sama; bandingkan dengan 11 Oktober:
 tiket lulus QA percobaan pertama, biaya QA + UI/UX, repair, keputusan user, amandemen, waktu

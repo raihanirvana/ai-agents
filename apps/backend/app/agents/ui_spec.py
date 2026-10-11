@@ -7,7 +7,7 @@ test's own original input. Not an approval and not QA evidence.
 See docs/decisions/ui-ux.md.
 """
 import re
-from typing import Literal, Union
+from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -77,7 +77,10 @@ class CopyEntry(_Spec):
 class SpecComponent(_Spec):
     testid: str = Field(pattern=TESTID)
     purpose: str = Field(min_length=1, max_length=240)
-    role: str | None = Field(default=None, max_length=30, json_schema_extra={'enum': [*ROLES, None]})
+    role: str | None = Field(default=None, max_length=30,
+        description='Supported ARIA role from the enum, never an HTML tag or a custom component name; '
+                    'use paragraph/generic for text containers, or null with label_key/text_key',
+        json_schema_extra={'enum': [*ROLES, None]})
     name_key: str | None = Field(default=None, pattern=KEY, description='Copy key of the accessible name (needs role)')
     label_key: str | None = Field(default=None, pattern=KEY, description='Copy key of the associated visible label')
     text_key: str | None = Field(default=None, pattern=KEY, description='Copy key of literal visible text')
@@ -87,7 +90,9 @@ class SpecComponent(_Spec):
     @model_validator(mode='after')
     def identity(self):
         if self.role is not None and self.role not in ROLES:
-            raise ValueError('unsupported UI role')
+            raise ValueError(f'unsupported UI role {self.role!r}; use an ARIA role from the enum, '
+                             'such as button, textbox, heading, list, listitem, paragraph, status, alert '
+                             'or generic; HTML tags/custom component names are not roles')
         if self.name_key is not None and self.role is None:
             raise ValueError('accessible name requires a role')
         if not (self.role or self.label_key or self.text_key):
@@ -223,7 +228,7 @@ class NoUiChange(_Spec):
     reason: str = Field(min_length=1, max_length=600)
 
 
-UiSpecOutput = Union[UiSpec, NoUiChange]
+UiSpecOutput = Annotated[Union[UiSpec, NoUiChange], Field(discriminator='kind')]
 
 
 def add_technical_controls(spec, technical, *, accepted=(), revision=None):

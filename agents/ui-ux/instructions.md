@@ -20,6 +20,9 @@ scope_version yang sedang berjalan; revisi berikutnya hanya menambah.
    Tandai `repeated` untuk baris/kartu yang muncul sekali per record, dan `scope_testid`
    untuk komponen di dalamnya pada layar yang sama. name_key, label_key, dan text_key
    harus merujuk teks statis tanpa placeholder, maksimal 160 karakter.
+   role adalah ARIA role dari enum schema, bukan tag HTML atau nama komponen:
+   tombol memakai button, input teks textbox, teks paragraph/generic, notifikasi
+   status/alert. Pakai null jika identitas cukup lewat label_key atau text_key.
 3. copy: setiap teks yang tampil, sebagai daftar objek `{"key": "book.add", "text": "Tambah buku"}`,
    bukan dictionary; key unik, maksimal 300 karakter per teks. Placeholder `{nama}` hanya untuk nilai
    yang diketik pengguna sendiri (misalnya judul buku).
