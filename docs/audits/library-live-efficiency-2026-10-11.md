@@ -443,3 +443,11 @@ Status IN_PROGRESS / NOT_REVIEWED; belum commit/push/restart/demo ulang.
 
 Keterbatasan: revisi suite hanya dapat memakai kosakata yang dipin pada target;
 kontrol accepted baru yang tidak dipin saat planning memerlukan plan ulang.
+
+## Perbaikan review 5446242 — pin kosakata warisan
+
+| Temuan | Perubahan | Bukti |
+| --- | --- | --- |
+| 🔴 Kontrol warisan yang dipakai via text/role/label tidak dipin (submit gagal) | `UiContract.control_selectors` memecah kosakata per kontrol; `used_accepted_controls` mempin kontrol warisan bila salah satu locator-nya (dengan input test) dipakai suite: testid, `[data-testid=]`, role/name, label, text, atau has_text baris berulang, beserta parent scope. Saat planning, suite dicek ulang terhadap kosakata yang dipin; bila gagal, semua kontrol accepted (maks 300) dipin, sehingga planning dan submit memakai kosakata yang sama. | `test_inherited_controls_used_through_any_locator_form_are_pinned_and_pass_submit` (5 bentuk locator, termasuk `text="Katalog Buku"`) |
+| Validasi gabungan kosakata | `with_vocabulary` memeriksa testid unik, scope terdeklarasi dan tanpa siklus. | `test_vocabulary_union_is_checked_for_scope_integrity` (2) |
+| Static check hanya kontrak tiket | Tidak diubah; tetap keterbatasan (kontrol setup warisan yang dihapus tiket ini baru ketahuan di browser). | — |

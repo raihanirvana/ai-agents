@@ -51,6 +51,10 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ### Efisiensi planning, pilihan QA dan stabilitas sandbox — 11 Oktober 2026
 
+Perbaikan review 5446242: kontrol warisan dipin berdasarkan semua bentuk locator
+(text/role/label/[data-testid]/has_text), dengan cek ulang saat planning, sehingga
+submit tidak lagi menolak suite QA yang valid. Gabungan kosakata divalidasi.
+
 Perbaikan review fce7c25 (IN_PROGRESS): amandemen TL memulihkan struktur kontrol
 warisan; QA dapat memakai kontrol accepted-app untuk setup tanpa amandemen
 (dipin di plan/target); kontrol warisan tidak valid dilewati; urutan warisan

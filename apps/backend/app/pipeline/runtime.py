@@ -363,6 +363,12 @@ class PipelineRuntime:
             if ui_contract is not None:
                 vocabulary.check_suite(suite, strict_rows=True)
                 pinned_vocabulary = used_accepted_controls(suite, ui_contract, accepted_controls)
+                try:
+                    # Submit/revision/repair use exactly this pinned vocabulary; prove it suffices.
+                    with_vocabulary(ui_contract, pinned_vocabulary).check_suite(suite, strict_rows=True)
+                except ValueError:
+                    own = {c.testid for c in ui_contract.controls}
+                    pinned_vocabulary = [c for c in accepted_controls if c['testid'] not in own][:300]
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, current)
                 latest = self.workspace.latest_intent(s, current, 'technical_plan')

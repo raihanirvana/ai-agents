@@ -216,3 +216,46 @@ def test_qa_vocabulary_includes_pinned_accepted_setup_controls():
     assert [c['testid'] for c in pinned] == ['add-book-form', 'add-title']
     with_vocabulary(ticket, pinned).check_suite(setup_suite(), strict_rows=True)
     assert with_vocabulary(ticket, []) is ticket
+
+
+CATALOG = {'testid': 'catalog-title', 'role': 'heading', 'name': 'Katalog Buku', 'text': 'Katalog Buku',
+           'purpose': 'page title'}
+ADD_BUTTON = {'testid': 'add-book-button', 'role': 'button', 'name': 'Tambah', 'purpose': 'add a book'}
+SEARCH = {'testid': 'search', 'label': 'Cari buku', 'purpose': 'search'}
+STATUS_IN_ROW = {'testid': 'book-status', 'role': 'status', 'purpose': 'availability', 'scope_testid': 'book-item'}
+
+
+@pytest.mark.parametrize('locator, expected', [
+    ('text="Katalog Buku"', ['catalog-title']),
+    ('role=heading[name="Katalog Buku"]', ['catalog-title']),
+    ('label="Cari buku"', ['search']),
+    ('[data-testid="catalog-title"]', ['catalog-title']),
+    ('testid=book-item >> has_text="Laskar" >> testid=book-status', ['book-item', 'book-status']),
+])
+def test_inherited_controls_used_through_any_locator_form_are_pinned_and_pass_submit(locator, expected):
+    """Regression: planning accepted text="Katalog Buku" but submit rejected it (not pinned)."""
+    from app.agents.ui_contract import with_vocabulary, used_accepted_controls
+    ticket = UiContract.model_validate({'action_locators': 'testid', 'controls': [
+        {'testid': 'borrow', 'role': 'button', 'name': 'Pinjam', 'purpose': 'borrow'}]})
+    accepted = [c.model_dump() for c in contract(CATALOG, ADD_BUTTON, SEARCH, ROW, STATUS_IN_ROW).controls]
+    suite = QaPlan.model_validate({'kind': 'qa_plan', 'summary': 's', 'tests': [{'id': 't1', 'uac': ['UAC-4'], 'steps': [
+        {'action': 'fill', 'selector': 'testid=search', 'value': 'Laskar'},
+        {'action': 'click', 'selector': 'testid=add-book-button'},
+        {'action': 'click', 'selector': 'testid=borrow'},
+        {'action': 'assert_visible', 'selector': locator}]}]})
+    with_vocabulary(ticket, accepted).check_suite(suite, strict_rows=True)  # planning
+    pinned = used_accepted_controls(suite, ticket, accepted)
+    assert set(expected) <= {c['testid'] for c in pinned}
+    assert 'add-book-button' in {c['testid'] for c in pinned}
+    with_vocabulary(ticket, pinned).check_suite(suite)  # submit/revision/repair vocabulary
+
+
+@pytest.mark.parametrize('extra, match', [
+    ([{'testid': 'x', 'role': 'button', 'name': 'X', 'purpose': 'x', 'scope_testid': 'missing'}], 'undeclared'),
+    ([{'testid': 'a', 'role': 'group', 'purpose': 'a', 'scope_testid': 'b'},
+      {'testid': 'b', 'role': 'group', 'purpose': 'b', 'scope_testid': 'a'}], 'cyclic'),
+])
+def test_vocabulary_union_is_checked_for_scope_integrity(extra, match):
+    from app.agents.ui_contract import with_vocabulary
+    with pytest.raises(ValueError, match=match):
+        with_vocabulary(contract(ROW), extra)

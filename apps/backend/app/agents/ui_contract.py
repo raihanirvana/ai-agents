@@ -76,40 +76,47 @@ class UiContract(BaseModel):
         """Exact vocabulary plus scoped literal text derived only from original inputs."""
         result = set()
         for control in self.controls:
-            root = 'testid=' + control.testid
-            result.update((root, '[data-testid=' + json.dumps(control.testid) + ']'))
-            prefix = ('testid=' + control.scope_testid + ' >> ') if control.scope_testid else ''
-            # Match the declared parent/child testid pair, as the runner already does.
-            # Requiring a text filter here falsely reports an existing child as missing.
-            if control.scope_testid:
-                result.add(prefix + root)
-            if control.role:
-                role = 'role=' + control.role
-                if control.name is not None:
-                    role += '[name=' + json.dumps(control.name, ensure_ascii=False) + ']'
-                result.add(prefix + role)
-            for kind in ('label', 'text'):
-                value = getattr(control, kind)
-                if value is not None:
-                    result.add(prefix + kind + '=' + json.dumps(value, ensure_ascii=False))
-            if control.dynamic_text:
+            result.update(self.control_selectors(control, inputs))
+        return result
+
+    def control_selectors(self, control, inputs=()):
+        """Every locator this one control contributes to the vocabulary."""
+        result = set()
+        root = 'testid=' + control.testid
+        result.update((root, '[data-testid=' + json.dumps(control.testid) + ']'))
+        prefix = ('testid=' + control.scope_testid + ' >> ') if control.scope_testid else ''
+        # Match the declared parent/child testid pair, as the runner already does.
+        # Requiring a text filter here falsely reports an existing child as missing.
+        if control.scope_testid:
+            result.add(prefix + root)
+        role = None
+        if control.role:
+            role = 'role=' + control.role
+            if control.name is not None:
+                role += '[name=' + json.dumps(control.name, ensure_ascii=False) + ']'
+            result.add(prefix + role)
+        for kind in ('label', 'text'):
+            value = getattr(control, kind)
+            if value is not None:
+                result.add(prefix + kind + '=' + json.dumps(value, ensure_ascii=False))
+        if control.dynamic_text:
+            for value in inputs:
+                if isinstance(value, str) and value and len(value) <= 160:
+                    result.add(root + ' >> text=' + json.dumps(value, ensure_ascii=False))
+        if control.scope_testid:
+            parent = next(c for c in self.controls if c.testid == control.scope_testid)
+            if parent.dynamic_text:
+                local = {root}
+                if role:
+                    local.add(role)
+                for kind in ('label', 'text'):
+                    value = getattr(control, kind)
+                    if value is not None:
+                        local.add(kind + '=' + json.dumps(value, ensure_ascii=False))
                 for value in inputs:
                     if isinstance(value, str) and value and len(value) <= 160:
-                        result.add(root + ' >> text=' + json.dumps(value, ensure_ascii=False))
-            if control.scope_testid:
-                parent = next(c for c in self.controls if c.testid == control.scope_testid)
-                if parent.dynamic_text:
-                    local = {root}
-                    if control.role:
-                        local.add(role)
-                    for kind in ('label', 'text'):
-                        value = getattr(control, kind)
-                        if value is not None:
-                            local.add(kind + '=' + json.dumps(value, ensure_ascii=False))
-                    for value in inputs:
-                        if isinstance(value, str) and value and len(value) <= 160:
-                            scope = 'testid=' + parent.testid + ' >> has_text=' + json.dumps(value, ensure_ascii=False) + ' >> '
-                            result.update(scope + item for item in local)
+                        scope = 'testid=' + parent.testid + ' >> has_text=' + json.dumps(value, ensure_ascii=False) + ' >> '
+                        result.update(scope + item for item in local)
         return result
 
     def in_repeated_row(self, testid):
@@ -173,27 +180,51 @@ def with_vocabulary(contract, extra_controls):
 
     The extras are existing controls QA may use (typically setup from earlier
     features). They are not new requirements for this ticket's build and are not
-    subject to the 96-control cap of a TL-authored contract."""
+    subject to the 96-control cap of a TL-authored contract. Identity and scopes of
+    the union are still checked (unique testids, declared parents, no cycles)."""
     if contract is None or not extra_controls:
         return contract
     own = {c.testid for c in contract.controls}
     extras = [UiControl.model_validate(c) for c in extra_controls if c['testid'] not in own]
     if not extras:
         return contract
-    values = {'revision': contract.revision, 'action_locators': contract.action_locators,
-              'controls': [*contract.controls, *extras]}
-    return UiContract.model_construct(_fields_set=set(contract.model_fields_set), **values)
+    controls = [*contract.controls, *extras]
+    ids = [c.testid for c in controls]
+    if len(set(ids)) != len(ids):
+        raise ValueError('UI vocabulary has duplicate testids')
+    scopes = {c.testid: c.scope_testid for c in controls}
+    for control in controls:
+        parent, seen = control.scope_testid, {control.testid}
+        while parent:
+            if parent not in scopes or parent in seen:
+                raise ValueError(f'UI vocabulary scope of {control.testid} is undeclared or cyclic')
+            seen.add(parent)
+            parent = scopes[parent]
+    return UiContract.model_construct(_fields_set=set(contract.model_fields_set), revision=contract.revision,
+                                      action_locators=contract.action_locators, controls=controls)
 
 
 def used_accepted_controls(suite, contract, accepted):
-    """Accepted controls a suite references outside the ticket contract, with scope parents."""
+    """Accepted controls a suite uses outside the ticket contract, with scope parents.
+
+    Attribution is by every locator a control contributes (testid, [data-testid],
+    role/name, label, text, scoped dynamic text), not only the testid= form."""
     own = {c.testid for c in contract.controls}
     by_id = {c['testid']: c for c in accepted if c['testid'] not in own}
+    if not by_id:
+        return []
+    vocabulary = with_vocabulary(contract, list(by_id.values()))
     used = set()
     for test in suite.materialize_fixtures().tests:
-        for step in test.steps:
-            for testid in re.findall(r'testid=([A-Za-z][A-Za-z0-9_.:-]{0,79})', step.selector or ''):
-                while testid in by_id and testid not in used:
-                    used.add(testid)
-                    testid = by_id[testid].get('scope_testid')
+        inputs = {value for s in test.steps if s.action in ('fill', 'select_option')
+                  for value in (s.value if isinstance(s.value, list) else [s.value]) if isinstance(value, str)}
+        located = {re.sub(r' >> nth=(?:[0-9]|[1-9][0-9])$', '', s.selector) for s in test.steps if s.selector}
+        for control in vocabulary.controls:
+            if control.testid in by_id and vocabulary.control_selectors(control, inputs) & located:
+                used.add(control.testid)
+    for testid in list(used):  # scope parents travel with their children
+        parent = by_id[testid].get('scope_testid')
+        while parent in by_id and parent not in used:
+            used.add(parent)
+            parent = by_id[parent].get('scope_testid')
     return [c for k, c in by_id.items() if k in used]
