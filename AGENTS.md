@@ -62,6 +62,10 @@ yang material; selesaikan pilihan implementasi rutin dengan mengacu pada tujuan 
 - Pengambilalihan QA tidak konklusif hanya lewat keputusan pengguna yang mem-pin
   target/verification/diagnosis/evidence; hasil QA asli tetap gagal. UAT dan release
   memerlukan konfirmasi manual terpisah. Lihat arsitektur §10; agent tidak memberi waiver.
+- Expected value QA hanya boleh berasal dari spesifikasi UI/UX (UiSpec: copy,
+  template diisi input asli) atau input asli test, bukan tebakan dari kalimat UAC.
+  Copy UiSpec tidak memerlukan approval terpisah; skill frontend-design dipin di
+  `agents/ui-ux/references/` dan tidak di-update otomatis. Lihat docs/decisions/ui-ux.md.
 - QA pass membutuhkan bukti eksekusi harness. Approval kandidat tidak berpindah
   otomatis setelah perubahan kode atau perubahan base.
 - Acceptance E2E memakai runner terpisah dan report authoritative yang tidak bisa

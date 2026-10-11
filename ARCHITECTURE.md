@@ -630,6 +630,17 @@ MVP tidak mencoba membuktikan kesetaraan dua build untuk memindahkan approval.
 Reset ke fixture yang didefinisikan target bukan build baru; perubahan definisi
 fixture/migration atau konfigurasi yang memengaruhi UAC memerlukan target baru.
 
+### Spesifikasi UI/UX (12 Oktober 2026)
+
+Untuk tiket dengan perubahan UI, role UI/UX menghasilkan UiSpec setelah scope
+approval dan sebelum technical plan: design token, layar/komponen (testid, role,
+label, repeated, scope), copy key → teks, state, dan feedback per aksi. UiContract
+diturunkan dari UiSpec; TL hanya menambah kontrol teknis. Developer mengimplementasikan
+spesifikasi persis; cek statis build memeriksa literal copy, testid dan token warna.
+**Expected value QA hanya boleh berasal dari UiSpec atau input asli test.** UiSpec
+bukan approval dan bukan bukti QA. Skill frontend-design adalah referensi yang dipin
+di repo, bukan dependency runtime. Detail: [docs/decisions/ui-ux.md](docs/decisions/ui-ux.md).
+
 ### Harness dan acceptance tests
 
 QA menyusun acceptance tests dari UAC dan kontrak interface terverifikasi,

@@ -67,11 +67,17 @@ mengklaim bisa menjalankan semua repo otomatis. Mobile runner adalah tahap lanju
 | PO | Klarifikasi brief, tiket, UAC, asumsi, dependency, revisi scope |
 | Technical lead | Onboarding repo, arsitektur, rencana teknis, code review |
 | Developer | Implementasi, commit, cara menjalankan, handoff ke review |
+| UI/UX | Spesifikasi UI per tiket (UiSpec): design token, layar/komponen, copy, state, feedback aksi |
 | QA | Test cases dari UAC, analisis hasil harness, bug report, pemetaan bukti |
 | Pengguna | Menyetujui scope, UAT per tiket, menerima fitur, keputusan release |
 
 Orchestrator menjalankan aturan antrean, dependency, retry, dan handoff.
 Keputusan status dan hak persetujuan ditegakkan backend, bukan hanya prompt.
+
+UI/UX berjalan setelah scope di-approve dan sebelum technical lead, dan dilewati
+untuk tiket tanpa perubahan UI. Expected value QA hanya boleh berasal dari
+spesifikasi UI/UX (copy, template diisi input asli) atau input asli test, bukan
+ditebak dari kalimat UAC. Keputusan: [docs/decisions/ui-ux.md](docs/decisions/ui-ux.md).
 
 Setiap peran memiliki SOUL.md, instruksi tugas, daftar tools, dan kontrak output.
 SOUL.md mengatur identitas/perilaku; ia tidak menggantikan workflow atau izin.

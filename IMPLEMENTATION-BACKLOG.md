@@ -3125,6 +3125,184 @@ preview origin, secrets, backup/restore, health checks, dan restart policy.
 **Verifikasi:** packaging smoke check dan restore data uji. Pengujian VPS aktual
 dicatat terpisah jika host/kredensial belum tersedia.
 
+## DEV-018 — Pin skill frontend-design sebagai referensi UI/UX
+
+### Catatan pengerjaan
+
+Status: DONE (2026-10-12). Review: REVIEWED (Codex, 2026-10-12).
+Catatan review A–C: [ui-ux-a-c-2026-10-12](docs/reviews/ui-ux-a-c-2026-10-12.md).
+Rencana: [ui-ux-role-2026-10-12](docs/plans/ui-ux-role-2026-10-12.md) langkah B.
+Hasil: `agents/ui-ux/references/frontend-design/{SKILL.md,LICENSE.txt,SOURCE.md}` dari `anthropics/skills`
+commit `dbd4588f9e1033efb41dad4bef2f7947c8993d44`, disalin tanpa perubahan; lisensi Apache 2.0 (LICENSE.txt
+folder). SKILL.md dibaca penuh: panduan desain/copy tanpa perintah tool/jaringan/secret; bagian yang tidak
+berlaku di pipeline (konfirmasi klien, memori, screenshot, menulis kode) dicatat di SOURCE.md beserta SHA-256.
+Tidak ada fetch runtime; loader role hanya membaca ROLES sehingga folder baru tidak memengaruhi role lain.
+
+**Tujuan:** prinsip visual UI/UX berasal dari referensi tetap yang ditinjau, bukan unduhan runtime.
+
+**Scope:** salin `skills/frontend-design` dari repo `anthropics/skills` ke
+`agents/ui-ux/references/frontend-design/` beserta LICENSE dan catatan sumber.
+
+**Acceptance criteria:**
+
+- Lisensi folder diperiksa dan disalin; catatan memuat URL repo, path, commit hash, tanggal ambil.
+- Isi dibaca penuh sebelum dipakai; temuan instruksi yang tidak relevan/berisiko dicatat.
+- Tidak ada auto-update atau fetch saat runtime; pembaruan hanya lewat commit yang direview.
+
+**Verifikasi:** diff file referensi, lisensi, dan catatan hash.
+
+## DEV-019 — Kontrak output UiSpec
+
+### Catatan pengerjaan
+
+Status: DONE (2026-10-12). Review: REVIEWED (Codex, 2026-10-12). Rencana langkah C.
+Review A–C (Codex, 2026-10-12; baseline `55aa0fe5985f40ecf7a39729140816f2b7741d6c`,
+working tree belum di-commit): perbaiki copy komponen yang lolos UiSpec tetapi melebihi batas
+UiControl, scope lintas layar, dan state yang merujuk komponen layar lain. File relevan:
+`apps/backend/app/agents/ui_spec.py`, `apps/backend/tests/agents/test_ui_spec.py`.
+Hasil: tiga temuan diperbaiki; 10 regression/boundary test ditambah (5 gagal sebelum fix).
+Parsing UiSpec kini juga memvalidasi turunan UiContract; scope dan komponen state wajib
+berada pada layar yang sesuai. Recheck: 38 test UiSpec lulus; gabungan agent/kontrak
+206 lulus dan test submission Docker 1 lulus pada run terpisah dengan PATH Git Homebrew.
+Perintah, failure environment awal, pemetaan AC dan batas review:
+[ui-ux-a-c-2026-10-12](docs/reviews/ui-ux-a-c-2026-10-12.md).
+Fix/recheck oleh reviewer yang sama; bukan independent review kedua. Tidak masuk
+wiring DEV-020 atau runtime; belum commit/push.
+Hasil: `app/agents/ui_spec.py` — `UiSpec` (tokens: arah visual, warna #RRGGBB bernama, font per role tanpa
+sintaks CSS, spacing naik ketat, radius; screens/components dengan testid/role/name_key/label_key/text_key/
+repeated/scope; `copy` sebagai daftar key → teks agar duplikat terdeteksi; states; feedback inline/toast/
+native_confirm/native_alert), `NoUiChange`, `UiSpecOutput`. Validator: key/testid/screen unik, placeholder
+`{nama}` valid, nama/label/text komponen statis, referensi copy/screen/komponen ada, scope tidak
+menggantung/berputar, native_confirm tepat untuk outcome confirm, maks 96 komponen. `to_ui_contract()`
+menurunkan UiContract (repeated → dynamic_text, wording verbatim dari copy); `add_technical_controls()`
+hanya menambah kontrol teknis tanpa wording di luar copy spesifikasi. Wiring ke TL/runtime di DEV-021/022.
+Verifikasi: `tests/agents/test_ui_spec.py` 28 passed.
+
+**Tujuan:** satu sumber kebenaran untuk token, layar, copy, state dan feedback.
+
+**Scope:** `app/agents/ui_spec.py` dan turunan `UiContract` dari `UiSpec`.
+
+**Acceptance criteria:**
+
+- Schema memuat design token (palet, font, skala spacing, radius, arah visual), layar dan
+  komponen (testid, role, label, repeated, scope), copy key → teks dengan placeholder,
+  state (kosong/error/sukses/loading), feedback per aksi (inline/toast/native_confirm/
+  native_alert + key copy), revision, serta varian `no_ui_change`.
+- Validator: key unik, placeholder valid, feedback merujuk key copy yang ada, scope tidak
+  menggantung/berputar, nilai token valid (format warna, ukuran).
+- `UiContract` diturunkan deterministik dari UiSpec; TL hanya boleh menambah kontrol teknis.
+
+**Verifikasi:** unit test schema/validator/turunan.
+
+## DEV-020 — Role ui-ux dan tool read_design_reference
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah D–E.
+
+**Scope:** `agents/ui-ux/{SOUL,instructions}.md` (ringkasan frontend-design ≤ ~3 KB,
+aturan copy Indonesia), ROLES di `souls.py`/`runspec.py`, models example/lokal,
+TOOL_POLICY (baca source/repo, `read_design_reference`, `propose_ui_spec`, `request_input`),
+akses workspace baca saja, NEEDS_APPROVED_SCOPE, migration bila CHECK constraint role/stage ada.
+
+**Acceptance criteria:**
+
+- Role terdaftar dan tidak bisa menulis source, commit, atau memberi approval.
+- `read_design_reference(name)` hanya membaca `agents/ui-ux/references/`; traversal/symlink ditolak.
+
+**Verifikasi:** unit test registry, policy tool, dan batas folder referensi.
+
+## DEV-021 — Stage ui_spec, task runtime, dan urutan scheduler
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah F–H.
+
+**Scope:** stage `ui_spec` lane interactive (LIGHT_STAGES), mapping `ui_spec → ui-ux`,
+task `_ui_spec`, scheduler `ui_spec → technical_plan → (qa_plan ∥ development)`, amandemen
+spesifikasi dari QA/Developer ke UI/UX.
+
+**Acceptance criteria:**
+
+- Konteks: UAC approved, UiSpec warisan tiket accepted (token proyek konsisten), source UI baseline.
+- Output divalidasi UiSpec dan disimpan intent `ui_spec` per scope_version; `no_ui_change` melewati UI/UX.
+- Token warisan hanya berubah bila UAC tiket ini memintanya.
+- Amandemen: revisi +1, hanya menambah, idempotent, tanpa mengubah scope/approval/budget.
+
+**Verifikasi:** test scheduler order, pewarisan spesifikasi/token, amandemen, fake driver UI/UX.
+
+## DEV-022 — TL, Developer, dan QA memakai UiSpec
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah I–K.
+
+**Acceptance criteria:**
+
+- TL menerima UiSpec, tidak menulis copy/gaya; `ui_contract` diturunkan, TL hanya menambah testid
+  teknis; instruksi TL dan `merge_inherited_contract` diperbarui.
+- Developer menerima UiSpec dan `read_design_reference`; cek statis `run_checks`/submit
+  (`ui_inventory.py`) memeriksa literal copy, testid dan token warna di bundle.
+- QA memakai UiSpec; validator expected text hanya menerima key copy (template diisi input asli)
+  atau input asli; `click_dialog` hanya untuk feedback `native_*`; runner text case-insensitive;
+  instruksi "jangan menebak" dipangkas.
+
+**Verifikasi:** test cek statis, validator expected QA, click_dialog, regresi pipeline.
+
+## DEV-023 — PO menandai perubahan UI
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah L.
+
+**Acceptance criteria:** PO menandai tiap tiket ada/tidak perubahan UI; UAC fokus perilaku,
+wording/tampilan diserahkan ke UI/UX; instruksi PO diperbarui.
+
+## DEV-024 — Suite regresi proyek sebagai gerbang
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah M.
+
+**Acceptance criteria:** setelah UAT di-approve, journey QA yang lulus dipin sebagai suite regresi
+proyek dan menjadi gerbang wajib tiket berikutnya, dengan target/evidence yang dipin.
+
+## DEV-025 — Web UI dan kontrak API untuk UI/UX
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah N.
+
+**Acceptance criteria:** label role di `format.ts`, ROLE_ORDER kantor, tampilan UiSpec di halaman
+tiket (swatch warna/font, layar, tabel copy, state), `contracts/api/types.ts` dan `openapi.json`.
+
+## DEV-026 — Telemetry role ui-ux
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah P.
+
+**Acceptance criteria:** role `ui-ux` muncul di `pipeline/metrics.py` dan laporan biaya/waktu per role.
+
+## DEV-027 — Demo terukur dengan UI/UX
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah Q.
+
+**Acceptance criteria:** Mini Perpustakaan dengan workload sama; bandingkan dengan 11 Oktober:
+tiket lulus QA percobaan pertama, biaya QA + UI/UX, repair, keputusan user, amandemen, waktu
+total, dan penilaian tampilan saat UAT.
+
+## DEV-028 — Bersih-bersih setelah UI/UX
+
+### Catatan pengerjaan
+
+Status: TODO. Rencana langkah R.
+
+**Acceptance criteria:** jalur repair QA yang tidak terpakai dihapus; profil QA default ditetapkan;
+ringkasan frontend-design dievaluasi; tiket DEV-018–DEV-027 ditutup sesuai bukti.
+
 ## Format catatan pengerjaan
 
 ### DEV-010 follow-up — pemulihan selector QA, 7 Oktober 2026
