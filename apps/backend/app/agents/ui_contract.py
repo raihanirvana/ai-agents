@@ -166,3 +166,34 @@ class UiContract(BaseModel):
                             'it must select one row with has_text from this test\'s original input '
                             f'(e.g. {parent} >> has_text="<original input>" >> ...) or a bounded nth=. '
                             'A parent/child pair alone matches every row.')
+
+
+def with_vocabulary(contract, extra_controls):
+    """QA vocabulary: this ticket's contract plus pinned accepted-app controls.
+
+    The extras are existing controls QA may use (typically setup from earlier
+    features). They are not new requirements for this ticket's build and are not
+    subject to the 96-control cap of a TL-authored contract."""
+    if contract is None or not extra_controls:
+        return contract
+    own = {c.testid for c in contract.controls}
+    extras = [UiControl.model_validate(c) for c in extra_controls if c['testid'] not in own]
+    if not extras:
+        return contract
+    values = {'revision': contract.revision, 'action_locators': contract.action_locators,
+              'controls': [*contract.controls, *extras]}
+    return UiContract.model_construct(_fields_set=set(contract.model_fields_set), **values)
+
+
+def used_accepted_controls(suite, contract, accepted):
+    """Accepted controls a suite references outside the ticket contract, with scope parents."""
+    own = {c.testid for c in contract.controls}
+    by_id = {c['testid']: c for c in accepted if c['testid'] not in own}
+    used = set()
+    for test in suite.materialize_fixtures().tests:
+        for step in test.steps:
+            for testid in re.findall(r'testid=([A-Za-z][A-Za-z0-9_.:-]{0,79})', step.selector or ''):
+                while testid in by_id and testid not in used:
+                    used.add(testid)
+                    testid = by_id[testid].get('scope_testid')
+    return [c for k, c in by_id.items() if k in used]

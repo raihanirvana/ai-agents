@@ -428,3 +428,18 @@ Status IN_PROGRESS / NOT_REVIEWED; belum commit/push/restart/demo ulang.
 | Kontrol warisan tidak bisa diubah sama sekali | name/label/text warisan boleh berubah bila kata baru muncul di teks UAC tiket ini; role/scope/dynamic_text tetap dari warisan. | `test_inherited_wording_changes_only_when_this_ticket_uac_requires_it` |
 | Celah baris berulang | `check_suite(strict_rows=True)` untuk plan baru dan revisi suite yang sudah memenuhi aturan: setiap locator yang diawali kontainer berulang atau kontrol di dalamnya wajib has_text/text dari input asli atau nth=, termasuk assertion; assert_count dikecualikan. Suite yang sudah dipin pada target aktif tidak diperketat saat submit. | `test_strict_rows_reject_every_ambiguous_row_locator` (3), `test_strict_rows_accept_one_selected_row_and_counts` |
 | Kutipan generik | Belum diperketat (tidak mendesak); tetap keterbatasan. | — |
+
+## Perbaikan review fce7c25 — warisan pada amandemen dan kosakata QA
+
+Status IN_PROGRESS / NOT_REVIEWED; belum commit/push/restart/demo ulang.
+
+| Temuan | Perubahan | Bukti |
+| --- | --- | --- |
+| 1. Amandemen tidak menerapkan warisan | Jalur amandemen juga menjalankan `merge_inherited_contract` dengan `pinned` = kontrak tiket saat ini: kontrol lama tetap verbatim (aturan aditif), kontrol warisan yang baru ditambahkan dipulihkan strukturnya (scope/dynamic_text) beserta parent-nya. | `test_amendment_restores_inherited_structure_and_keeps_its_own_controls_verbatim` |
+| 2. Setup warisan untuk QA | Kontrak tiket tetap kecil. Kosakata QA = kontrak tiket + kontrol accepted-app (`with_vocabulary`, tanpa batas 96 karena bukan output TL). Kontrol warisan yang dipakai suite (beserta parent) dipin di pesan qa_plan dan target (`ui_vocabulary_controls`), lalu dipakai submit, revisi dan repair. Static UI check tetap hanya kontrak tiket. Task QA menyertakan `accepted_app_controls` maks 300. | `test_qa_vocabulary_includes_pinned_accepted_setup_controls` |
+| 3. Kontrol warisan skema lama | `_inherited_ui_controls` memvalidasi tiap kontrol; yang tidak valid dilewati dan dicatat ke log job. | `test_inherited_controls_skip_invalid_legacy_controls` |
+| 4. Urutan "acceptance terakhir" | Urutan memakai waktu approval UAT terakhir kandidat (fallback updated_at). | `test_inherited_ui_controls_are_the_union_of_accepted_tickets` |
+| 5. Kontrol yang sudah dihapus | Tidak diubah: hanya kontrol yang disebut TL/QA yang masuk kontrak atau dipin; static check/browser menangkap kontrol yang hilang. | — |
+
+Keterbatasan: revisi suite hanya dapat memakai kosakata yang dipin pada target;
+kontrol accepted baru yang tidak dipin saat planning memerlukan plan ulang.

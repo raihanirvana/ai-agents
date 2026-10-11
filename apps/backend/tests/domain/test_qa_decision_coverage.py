@@ -210,3 +210,20 @@ def test_inherited_ui_controls_are_the_union_of_accepted_tickets(world, monkeypa
     assert controls['borrow-name-input']['scope_testid'] == 'book-item'
     own = {c['testid'] for c in rt._inherited_ui_controls({'ticket_id': second.id})}
     assert own == {'book-item', 'borrow-name-input'}  # a ticket never inherits from itself
+
+
+def test_inherited_controls_skip_invalid_legacy_controls(world, monkeypatch):
+    from app.pipeline.runtime import PipelineRuntime
+    original = type(world).target
+    def target_with_legacy(self, t, c, **override):
+        return original(self, t, c, ui_contract={'controls': [
+            {'testid': 'ok', 'role': 'button', 'name': 'OK', 'purpose': 'fine'},
+            {'testid': 'legacy', 'role': 'not-a-role', 'purpose': 'old schema'}]}, **override)
+    monkeypatch.setattr(type(world), 'target', target_with_legacy)
+    world.accepted(world.approve(world.new()))
+    other = world.approve(world.new({**SCOPE, 'title': 'Lain'}))
+    rt = object.__new__(PipelineRuntime)
+    rt.db, rt.store = world.db, world.store
+    logs = []
+    assert [c['testid'] for c in rt._inherited_ui_controls({'ticket_id': other.id}, log=logs.append)] == ['ok']
+    assert 'legacy' in logs[0]

@@ -25,19 +25,23 @@ from .files import allocate_directory, cleanup_directory
 WORDING_FIELDS = ('name', 'label', 'text')
 
 
-def merge_inherited_contract(contract, inherited, criteria_texts=()):
+def merge_inherited_contract(contract, inherited, criteria_texts=(), pinned=()):
     """Supervisor merge of accepted controls into TL's contract for this ticket.
 
     Only inherited controls TL references (plus their scope ancestors and ancestors
     of TL's new controls) are kept, so contracts stay small as a project grows. Their
     accepted structure (role, scope_testid, dynamic_text) is restored verbatim; a
     name/label/text may change only when the new wording appears in this ticket's UAC.
+    pinned (an amendment's current contract) is kept verbatim and takes precedence,
+    so an amendment stays additive while new inherited controls regain their structure.
     Returns (merged UiContract, testids whose TL redefinition was not accepted)."""
     from app.agents.ui_contract import UiContract, UiControl
+    fixed = {c['testid']: UiControl.model_validate(c).model_dump() for c in pinned}
     upstream = {c['testid']: UiControl.model_validate(c).model_dump() for c in inherited}
+    upstream = {**{k: v for k, v in upstream.items() if k not in fixed}, **fixed}
     own = {c['testid']: c for c in (control.model_dump() for control in contract.controls)}
     texts = [text for text in criteria_texts if isinstance(text, str)]
-    wanted = set(k for k in own if k in upstream)
+    wanted = set(k for k in own if k in upstream) | set(fixed)
     for control in own.values():  # ancestors of every control the ticket uses
         parent = control.get('scope_testid')
         if control['testid'] in upstream:
@@ -51,6 +55,11 @@ def merge_inherited_contract(contract, inherited, criteria_texts=()):
             continue
         mine = own.get(testid)
         merged = dict(accepted)
+        if testid in fixed:
+            if mine is not None and mine != accepted:
+                rejected.append(testid)  # the amendment check reports it; pinned stays verbatim
+            kept.append(merged)
+            continue
         if mine is not None and mine != accepted:
             changed = [f for f in mine if mine.get(f) != accepted.get(f)]
             if (all(f in WORDING_FIELDS for f in changed) and
@@ -189,12 +198,13 @@ class PipelineRuntime:
         amendment = ctx.job['runtime_ref'].get('payload', {}).get('contract_amendment')
         previous_contract = self.workspace.ui_contract(identity) if amendment else None
         # Accepted upstream controls are supervisor-owned; TL can only add to them.
-        inherited = [] if previous_contract is not None else self._inherited_ui_controls(identity)
+        inherited = self._inherited_ui_controls(identity, log=ctx.log)
+        pinned = [c.model_dump() for c in previous_contract.controls] if previous_contract is not None else []
         with self.db.read() as s:
             criteria_texts = [c.get('text', '') for c in s.query(TicketVersion).filter_by(
                 ticket_id=identity['ticket_id'], version=identity['scope_version']).one().uac]
         def merged_contract(contract):
-            return merge_inherited_contract(contract, inherited, criteria_texts)
+            return merge_inherited_contract(contract, inherited, criteria_texts, pinned)
         if amendment and (previous_contract is None or previous_contract.revision != amendment['revision']):
             raise InvalidOutput(['Contract amendment refers to an obsolete revision; use the current plan.'])
         def plan_rules(output):
@@ -203,8 +213,9 @@ class PipelineRuntime:
                 return
             if output.ui_contract is None and not self.fake:
                 raise InvalidOutput(['New technical plans require ui_contract with literal testids and semantic locators.'])
+            merged = None
             if inherited and output.ui_contract is not None:
-                merged_contract(output.ui_contract)
+                merged, _ = merged_contract(output.ui_contract)
             if previous_contract is not None:
                 if output.needs_user:
                     raise InvalidOutput(['Instrumentation amendment must not change scope or create an approval decision.'])
@@ -212,7 +223,10 @@ class PipelineRuntime:
                     raise InvalidOutput([f'Contract amendment must advance revision exactly once: '
                                          f'use revision {previous_contract.revision + 1}.'])
                 before = {c.testid: c.model_dump() for c in previous_contract.controls}
+                # TL's own wording is checked first; the merge then restores inherited structure.
                 after = {c.testid: c.model_dump() for c in output.ui_contract.controls}
+                if merged is not None and not any(after.get(k) != v for k, v in before.items()):
+                    after = {c.testid: c.model_dump() for c in merged.controls}
                 changed = sorted(key for key, value in before.items() if after.get(key) != value)
                 if changed or len(after) <= len(before):
                     raise InvalidOutput(['Amendment is additive: retain all previous controls/identities and add '
@@ -267,6 +281,11 @@ class PipelineRuntime:
 
     def _qa_plan(self, ctx, identity):
         ui_contract = self.workspace.ui_contract(identity)
+        # Accepted-app controls (e.g. setup from earlier features) are usable by QA without
+        # being part of this ticket's small contract; the ones used are pinned with the plan.
+        from app.agents.ui_contract import with_vocabulary, used_accepted_controls
+        accepted_controls = self._inherited_ui_controls(identity, log=ctx.log) if ui_contract is not None else []
+        vocabulary = with_vocabulary(ui_contract, accepted_controls)
         with self.db.read() as s:
             job_ref = s.get(Job, identity['job_id']).runtime_ref
             saved = job_ref.get('pipeline_qa_plan')
@@ -320,7 +339,12 @@ class PipelineRuntime:
                 'Use declared testid locators for actions. If a required control is missing, call request_contract_amendment with concrete UAC/control details. Otherwise submit one validated QaPlan through propose_tests; this task does not execute or pass QA.',
             'source_files': source_files, 'baseline_ui_source': baseline_ui,
             'ui_contract': ui_contract.model_dump() if ui_contract else None,
-            'ui_locators': sorted(ui_contract.selectors()) if ui_contract else [],
+            **({'accepted_app_controls': [c for c in accepted_controls
+                                          if c['testid'] not in {x.testid for x in ui_contract.controls}][:300],
+                'accepted_app_controls_policy': 'Existing controls of the accepted app. Use them for setup '
+                    '(e.g. creating prerequisite records) instead of requesting a contract amendment.'}
+               if accepted_controls else {}),
+            'ui_locators': sorted(vocabulary.selectors()) if vocabulary else [],
             'verification_policy': policy_context(),
             'baseline': {'base_sha': base, 'execution': 'deferred_until_submission'},
             'baseline_ui_source_unavailable': unavailable},
@@ -335,8 +359,10 @@ class PipelineRuntime:
             authored = QaPlan.model_validate(args['plan'])
             suite = authored.materialize_fixtures()
             suite.check_csv_expectations()
+            pinned_vocabulary = []
             if ui_contract is not None:
-                ui_contract.check_suite(suite, strict_rows=True)
+                vocabulary.check_suite(suite, strict_rows=True)
+                pinned_vocabulary = used_accepted_controls(suite, ui_contract, accepted_controls)
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, current)
                 latest = self.workspace.latest_intent(s, current, 'technical_plan')
@@ -362,7 +388,8 @@ class PipelineRuntime:
                 self.workspace._post(s, current, 'qa-plan:' + current['root_job_id'], suite.summary,
                     [snapshot.artifact_id, receipt.id, authored_row.id, artifact.id], 'qa_plan', suite_digest=suite.digest,
                     ui_contract_revision=ui_contract.revision if ui_contract else 1,
-                    verification_plan=readiness, preflight_artifact_id=receipt.id)
+                    verification_plan=readiness, preflight_artifact_id=receipt.id,
+                    **({'ui_vocabulary_controls': pinned_vocabulary} if pinned_vocabulary else {}))
                 job = s.get(Job, current['job_id'])
                 job.runtime_ref = {**job.runtime_ref, 'pipeline_qa_plan': artifact.id,
                                    'pipeline_qa_plan_revision': ui_contract.revision if ui_contract else 1}
@@ -1078,21 +1105,33 @@ class PipelineRuntime:
             error='QA diagnosis: ' + output.summary + '. A corrected suite/runner and fresh evidence are required; '
                   'application repair was not requested.')
 
-    def _inherited_ui_controls(self, identity):
+    def _inherited_ui_controls(self, identity, log=None):
         """Union of UI contracts pinned by every accepted candidate of the project (the UI
-        at the accepted tip). A later acceptance redefines a testid; dangling scopes drop."""
-        controls = {}
+        at the accepted tip), in UAT-approval order: a later acceptance redefines a testid.
+        Controls invalid under the current schema and dangling scopes are skipped."""
+        from sqlalchemy import func
+        from app.agents.ui_contract import UiControl
+        from app.persistence.models import Approval
+        controls, skipped = {}, []
         with self.db.read() as s:
             ticket = s.get(Ticket, identity['ticket_id'])
+            accepted_at = (select(func.max(Approval.created_at)).where(Approval.type == 'uat',
+                           Approval.candidate_id == Candidate.id).correlate(Candidate).scalar_subquery())
             rows = s.scalars(select(Candidate).where(Candidate.project_id == ticket.project_id,
                 Candidate.ticket_id != ticket.id, Candidate.status == 'accepted',
-                Candidate.target_artifact_id.is_not(None)).order_by(Candidate.updated_at, Candidate.id))
+                Candidate.target_artifact_id.is_not(None))
+                .order_by(func.coalesce(accepted_at, Candidate.updated_at), Candidate.id))
             for candidate in rows:
                 try:
                     target = json.loads(self.store.read_bytes(s, candidate.target_artifact_id))
                 except Exception:
                     continue  # Unavailable evidence: nothing to inherit from it.
                 for control in (target.get('ui_contract') or {}).get('controls', []):
+                    try:
+                        control = UiControl.model_validate(control).model_dump()
+                    except (ValueError, TypeError):
+                        skipped.append(str((control or {}).get('testid') if isinstance(control, dict) else control)[:80])
+                        continue  # Older schema: never crash planning over one control.
                     controls.pop(control['testid'], None)
                     controls[control['testid']] = control  # Latest acceptance wins, keeps order.
         changed = True
@@ -1101,6 +1140,8 @@ class PipelineRuntime:
             changed = bool(dangling)
             for key in dangling:
                 controls.pop(key)
+        if skipped and log is not None:
+            log('Inherited UI controls skipped (invalid under current schema): ' + ', '.join(skipped[:20]))
         return list(controls.values())
 
     @staticmethod
@@ -1232,7 +1273,9 @@ class PipelineRuntime:
                 'evidence_artifact_ids': attachments, 'user_decision_required': True}, retryable=False,
                 error='Automatic QA suite revision already used; take over the inconclusive criteria in the QA '
                       'decision panel or retry this QA run to authorize one more revision.')
-        contract = UiContract.model_validate(target['ui_contract']) if target.get('ui_contract') else None
+        from app.agents.ui_contract import with_vocabulary
+        contract = with_vocabulary(UiContract.model_validate(target['ui_contract']) if target.get('ui_contract') else None,
+                                   target.get('ui_vocabulary_controls'))
         witness_hints = []
         for finding in (diagnosis or {}).get('findings', []):
             path = finding.get('source_path')
@@ -1419,7 +1462,9 @@ class PipelineRuntime:
             repaired.check_criteria(version.uac)
             if target.get('ui_contract'):
                 from app.agents.ui_contract import UiContract
-                UiContract.model_validate(target['ui_contract']).check_suite(repaired)
+                from app.agents.ui_contract import with_vocabulary
+                with_vocabulary(UiContract.model_validate(target['ui_contract']),
+                                target.get('ui_vocabulary_controls')).check_suite(repaired)
             readiness = preflight(repaired, version.uac, t.current_version)
             suite_row = self.store.put_json(s, project_id=t.project_id, kind='report', name='qa-suite.json',
                 document=repaired.model_dump(), meta={'producer': 'qa-plan', 'fake': self.fake,
@@ -1443,7 +1488,9 @@ class PipelineRuntime:
                 'evidence and fresh candidate execution; source/build unchanged.', [*attachments, suite_row.id], 'qa_plan',
                 candidate_id=candidate.id, suite_digest=repaired.digest,
                 previous_target_artifact_id=previous.id, target_artifact_id=new_target.id,
-                verification_plan=readiness, repair_kind=repair_kind)
+                verification_plan=readiness, repair_kind=repair_kind,
+                **({'ui_vocabulary_controls': target['ui_vocabulary_controls']}
+                   if target.get('ui_vocabulary_controls') else {}))
             result = {'qa_status': 'suite_repaired' if suite_changed else 'target_refreshed',
                 'failure_kind': 'test_contract' if suite_changed else 'infrastructure',
                 'repair_kind': repair_kind,

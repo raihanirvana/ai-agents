@@ -51,6 +51,11 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ### Efisiensi planning, pilihan QA dan stabilitas sandbox — 11 Oktober 2026
 
+Perbaikan review fce7c25 (IN_PROGRESS): amandemen TL memulihkan struktur kontrol
+warisan; QA dapat memakai kontrol accepted-app untuk setup tanpa amandemen
+(dipin di plan/target); kontrol warisan tidak valid dilewati; urutan warisan
+mengikuti approval UAT. Detail: akhir audit library-live-efficiency-2026-10-11.md.
+
 Perbaikan review cd47ce8 (IN_PROGRESS, belum direview): smoke uac=[] dikecualikan
 dari kutipan UAC (profil manual tidak macet); kontrak tiket hanya memuat kontrol
 warisan yang dipakai + parent scope (batas 96 aman); warisan dari gabungan semua

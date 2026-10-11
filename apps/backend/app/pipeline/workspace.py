@@ -321,12 +321,20 @@ class ProductWorkspace:
             value = (row.meta.get('plan') or {}).get('ui_contract') if row else None
             return UiContract.model_validate(value) if value is not None else None
 
+    def ui_vocabulary_controls(self, identity):
+        """Accepted-app controls pinned with the current QA plan (not ticket requirements)."""
+        with self.db.read() as s:
+            row = self.latest_intent(s, identity, 'qa_plan')
+            return list((row.meta.get('ui_vocabulary_controls') or []) if row else [])
+
     def submit(self, ctx, sup, started, manifest, message, *, handoff='', test_concerns=None):
         identity = ctx.queue.verify(ctx.lease)
         suite, suite_id = self.suite(identity)
         ui_contract = self.ui_contract(identity)
+        vocabulary_controls = self.ui_vocabulary_controls(identity) if ui_contract is not None else []
         if ui_contract is not None:
-            ui_contract.check_suite(suite)
+            from app.agents.ui_contract import with_vocabulary
+            with_vocabulary(ui_contract, vocabulary_controls).check_suite(suite)
         # Planning no longer executes the base. Preserve baseline test coverage
         # and fingerprint evidence before publishing the independent candidate.
         self.base_build(ctx)
@@ -416,6 +424,7 @@ class ProductWorkspace:
                         'toolchain_digest': digest_of(built['toolchain']), 'config_digest': digest_of(manifest.effective_config()),
                         'fixture_digest': digest_of(manifest.fixture), 'migration_digest': digest_of(manifest.migrations),
                         'runner': runner, 'execution_manifest': manifest.to_dict(), 'node_image_id': built['toolchain']['image_id'],
+                        **({'ui_vocabulary_controls': vocabulary_controls} if vocabulary_controls else {}),
                         **({'ui_contract': ui_contract.model_dump(), 'ui_contract_digest': digest_of(ui_contract.model_dump()),
                             'ui_check_artifact_id': ui_check['artifact_id']} if ui_check else {}),
                         'gate_artifact_id': gate_artifact.id}, meta={'producer': 'builder', 'source_attempt': source_attempt})

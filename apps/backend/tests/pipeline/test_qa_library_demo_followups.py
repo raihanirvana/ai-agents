@@ -175,3 +175,44 @@ def test_strict_rows_accept_one_selected_row_and_counts():
          'value': 'Tersedia'},
         {'action': 'assert_count', 'selector': 'testid=book-item', 'value': 1},
         {'action': 'assert_visible', 'selector': 'testid=book-item >> nth=0'}), strict_rows=True)
+
+
+ADD_FORM = {'testid': 'add-book-form', 'role': 'form', 'purpose': 'add a book'}
+ADD_TITLE = {'testid': 'add-title', 'label': 'Judul', 'purpose': 'title', 'scope_testid': 'add-book-form'}
+
+
+def test_amendment_restores_inherited_structure_and_keeps_its_own_controls_verbatim():
+    previous = contract(ROW, {**BORROW, 'label': 'Nama peminjam'})
+    # Since planning, a later acceptance relabelled the borrower input.
+    inherited = [c.model_dump() for c in contract(ROW, {**BORROW, 'label': 'Nama anggota'}, ADD_FORM, ADD_TITLE).controls]
+    # QA asked for setup controls; TL adds them flat (the #3 failure class).
+    amended = UiContract.model_validate({'revision': 2, 'controls': [
+        *(c.model_dump() for c in previous.controls), {**ADD_TITLE, 'scope_testid': None}]})
+    merged, _ = merge_inherited_contract(amended, inherited, pinned=[c.model_dump() for c in previous.controls])
+    by_id = {c.testid: c for c in merged.controls}
+    assert by_id['add-title'].scope_testid == 'add-book-form' and 'add-book-form' in by_id
+    assert by_id['borrow-name-input'].label == 'Nama peminjam'  # pinned contract stays additive
+    assert merged.revision == 2
+
+
+def setup_suite():
+    return QaPlan.model_validate({'kind': 'qa_plan', 'summary': 's', 'tests': [{'id': 'borrow', 'uac': ['UAC-4'],
+        'steps': [{'action': 'fill', 'selector': 'testid=add-book-form >> testid=add-title', 'value': 'Laskar'},
+                  {'action': 'click', 'selector': 'testid=book-item >> has_text="Laskar" >> testid=borrow-name-input'},
+                  {'action': 'assert_visible', 'selector': 'testid=book-item >> has_text="Laskar" >> testid=borrow-name-input'}]}]})
+
+
+def test_qa_vocabulary_includes_pinned_accepted_setup_controls():
+    from app.agents.ui_contract import with_vocabulary, used_accepted_controls
+    ticket = UiContract.model_validate({'action_locators': 'testid', 'controls': [ROW, BORROW]})
+    accepted = [c.model_dump() for c in contract(ADD_FORM, ADD_TITLE).controls] + [
+        {'testid': f'old{i}', 'role': 'button', 'name': f'Old {i}', 'purpose': 'x'} for i in range(120)]
+    with pytest.raises(ValueError, match='outside ui_contract'):
+        ticket.check_suite(setup_suite(), strict_rows=True)  # previously: an amendment round trip
+    vocabulary = with_vocabulary(ticket, accepted)  # no 96-control cap on vocabulary
+    vocabulary.check_suite(setup_suite(), strict_rows=True)
+    assert 'action_locators' in vocabulary.model_fields_set and len(vocabulary.controls) == 124
+    pinned = used_accepted_controls(setup_suite(), ticket, accepted)
+    assert [c['testid'] for c in pinned] == ['add-book-form', 'add-title']
+    with_vocabulary(ticket, pinned).check_suite(setup_suite(), strict_rows=True)
+    assert with_vocabulary(ticket, []) is ticket
