@@ -128,7 +128,9 @@ class UiSpec(_Spec):
                               serialize_by_alias=True)
     kind: Literal['ui_spec']
     revision: int = Field(default=1, ge=1, le=1000)
-    summary: str = Field(min_length=1, max_length=1000)
+    summary: str = Field(min_length=1, max_length=1000,
+        description='Brief design summary in 1-3 sentences, at most 1000 characters including spaces; '
+                    'put design details in tokens/screens/copy/states/feedback')
     tokens: DesignTokens
     screens: list[Screen] = Field(min_length=1, max_length=12)
     copy_entries: list[CopyEntry] = Field(alias='copy', min_length=1, max_length=200)

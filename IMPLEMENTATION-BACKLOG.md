@@ -3479,6 +3479,15 @@ saat stream masih aktif. Timeout UI/UX lokal dinaikkan ke 600 s melalui konfigur
 yang sudah didukung, max_output_tokens tetap null. Worker dimuat ulang saat idle;
 retry berikutnya berjalan, approval/usage/histori dipertahankan. Usage call yang
 terputus tetap unknown jika tidak dilaporkan provider.
+Retry dengan timeout 600 s menerima stream reasoning tanpa final content dan
+tetap ditolak adapter (20.574 token, USD 0,00519387). UI/UX lokal kemudian mencoba
+`stream=false` melalui parser yang sudah tersedia; model/routing/effort/cap tetap.
+Retry non-streaming menerima output, tetapi gagal pada format JSON pertama lalu
+summary >1.000 karakter di repair (42.919 token, USD 0,008675406). Instruksi kini
+menjelaskan respons JSON langsung dan ringkasan satu–tiga kalimat maksimal 1.000
+karakter; deskripsi schema selaras, batas panjang tetap ketat. Verifikasi schema,
+role dan stage: 102 passed, 37,83 s. Worker dimuat ulang saat idle, retry
+`de94140899d14f5bbc936cc77b223934` berjalan; belum ada klaim UiSpec/QA lulus.
 
 **Acceptance criteria:** Mini Perpustakaan dengan workload sama; bandingkan dengan 11 Oktober:
 tiket lulus QA percobaan pertama, biaya QA + UI/UX, repair, keputusan user, amandemen, waktu

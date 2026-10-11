@@ -128,4 +128,25 @@ tetap unknown. Ini berbeda dari batas token/context demo, yang tetap unlimited.
 Konfigurasi lokal/gitignored UI/UX dinaikkan ke `timeout_s=600`, masih dalam
 rentang timeout yang didukung registry; `max_output_tokens=null` dipertahankan.
 Worker dimuat ulang saat idle dan retry `f4165e3f23c14ddead1a40567a5b8c19`
-berjalan tanpa menghapus histori/approval atau mengubah cap job. Hasil masih ditunggu.
+gagal: stream berakhir dengan `finish_reason=stop`, tetapi `answer_chars=0`
+dan reasoning 20.649 karakter. Usage tercatat 20.574 total token (8.471 completion,
+5.043 reasoning), reported cost USD 0,00519387, active 186,40 s. Tidak ada
+JSON final untuk divalidasi; reasoning tidak dipakai sebagai spesifikasi.
+Ini tidak membuktikan validator gagal atau membenarkan melonggarkannya.
+
+UI/UX lokal kemudian memakai `stream=false`, tetap provider/model/routing,
+reasoning effort dan batas token yang sama, agar mencoba respons JSON utuh
+melalui parser non-streaming yang sudah tersedia. [Dokumentasi OpenRouter](https://github.com/OpenRouterTeam/docs/blob/main/guides/best-practices/reasoning-tokens.mdx)
+membedakan reasoning dari final content pada respons non-streaming. Tidak ada
+perubahan protokol adapter atau pemakaian reasoning sebagai output.
+Worker dimuat ulang saat idle; retry `bfc19bcdf66d4d7da6101f9b51de9bea`
+gagal dua calls: respons pertama bukan JSON, respons repair berupa UiSpec tetapi
+summary melewati 1.000 karakter. Total 42.919 token, reported cost USD 0,008675406,
+active 215,66 s. Instruksi UI/UX kini menjelaskan respons JSON langsung sesuai
+output_schema (bukan membungkusnya dalam pemanggilan tool), dan summary satu–tiga
+kalimat maksimal 1.000 karakter. Deskripsi field summary juga memuat arahan ini.
+Batas panjang tidak dilonggarkan. Verifikasi setelah perubahan instruksi/metadata:
+`pytest tests/agents/test_ui_spec.py tests/pipeline/test_ui_spec_stage.py
+tests/agents/test_ui_ux_role.py -q --tb=short`: **102 passed, 37,83 s**.
+Worker dimuat ulang saat idle; retry `de94140899d14f5bbc936cc77b223934`
+berjalan dengan cap job tetap. Hasil masih ditunggu.

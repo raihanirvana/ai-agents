@@ -1,8 +1,13 @@
 # UI/UX task instructions
 
-Output satu UiSpec yang valid lewat propose_ui_spec, atau `no_ui_change` dengan alasan
-singkat jika tiket ini tidak mengubah tampilan atau interaksi. Spesifikasi berlaku untuk
-scope_version yang sedang berjalan; revisi berikutnya hanya menambah.
+Output satu objek JSON UiSpec yang valid sesuai `output_schema`, atau `no_ui_change`
+dengan alasan singkat jika tiket ini tidak mengubah tampilan atau interaksi. Pada stage
+ui_spec, kontrak propose_ui_spec disampaikan melalui respons JSON langsung.
+Seluruh respons berisi objek JSON tersebut. Spesifikasi berlaku untuk scope_version
+yang sedang berjalan; revisi berikutnya hanya menambah.
+
+`summary` adalah ringkasan singkat satu–tiga kalimat, maksimal 1.000 karakter termasuk
+spasi. Isi detail desain pada tokens, screens, copy, states, dan feedback sesuai schema.
 
 ## Masukan
 
