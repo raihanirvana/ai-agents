@@ -101,7 +101,7 @@ def test_no_ui_change_goes_straight_to_the_technical_plan(agent_env, tmp_path):
     assert tl.result['ui_spec_revision'] == 0 and 'ui_spec_policy' not in str(env.provider.requests[-1])
 
 
-@pytest.mark.parametrize('fault', ['role', 'placeholder'])
+@pytest.mark.parametrize('fault', ['role', 'placeholder', 'identity', 'feedback'])
 def test_ui_spec_repair_focuses_on_the_selected_output_kind(agent_env, tmp_path, fault):
     env = agent_env
     runtime, _, scheduler = setup(env, tmp_path, SpecDriver())
@@ -109,8 +109,12 @@ def test_ui_spec_repair_focuses_on_the_selected_output_kind(agent_env, tmp_path,
     invalid = spec()
     if fault == 'role':
         invalid['screens'][0]['components'][0]['role'] = 'label'
-    else:
+    elif fault == 'placeholder':
         invalid['screens'][0]['components'][5]['name_key'] = 'book.added'
+    elif fault == 'identity':
+        invalid['screens'][0]['components'][3]['role'] = None
+    else:
+        invalid['feedback'].append(dict(invalid['feedback'][0]))
     env.script(invalid, spec())
     ticket = env.approved_ticket()
     job = finish(env, runtime, scheduler, 'ui_spec')
@@ -120,7 +124,11 @@ def test_ui_spec_repair_focuses_on_the_selected_output_kind(agent_env, tmp_path,
     assert task['output_schema']['discriminator']['propertyName'] == 'kind'
     repair = env.provider.requests[1].user.split('## Your previous answer was rejected', 1)[1]
     assert 'NoUiChange' not in repair and 'Clarification' not in repair
-    assert ('unsupported UI role' if fault == 'role' else 'must be static text') in repair
+    expected = {'role': 'unsupported UI role', 'placeholder': 'must be static text',
+                'identity': 'component book-item', 'feedback': 'feedback[3]'}
+    assert expected[fault] in repair
+    previous = repair.split('## Previous rejected output (JSON-encoded text)\n', 1)[1]
+    assert json.loads(json.loads(previous)) == invalid
 
 
 def test_projects_without_ui_ux_and_scopes_already_planned_keep_the_earlier_order(agent_env, tmp_path):

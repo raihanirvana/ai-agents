@@ -23,12 +23,16 @@ scope_version yang sedang berjalan; revisi berikutnya hanya menambah.
    role adalah ARIA role dari enum schema, bukan tag HTML atau nama komponen:
    tombol memakai button, input teks textbox, teks paragraph/generic, notifikasi
    status/alert. Pakai null jika identitas cukup lewat label_key atau text_key.
+   Setiap komponen wajib punya role, label_key, atau text_key; teks dinamis tetap
+   memakai role yang sesuai, misalnya paragraph/generic.
 3. copy: setiap teks yang tampil, sebagai daftar objek `{"key": "book.add", "text": "Tambah buku"}`,
    bukan dictionary; key unik, maksimal 300 karakter per teks. Placeholder `{nama}` hanya untuk nilai
    yang diketik pengguna sendiri (misalnya judul buku).
 4. states: kosong, error, sukses, dan loading untuk layar yang relevan.
 5. feedback: setiap aksi yang mengubah data punya feedback sukses dan error; aksi destruktif
    memakai konfirmasi. Pilih inline, toast, native_confirm, atau native_alert.
+   Maksimal satu entri per pasangan (action_testid, outcome). Jangan menggandakan
+   pasangan yang sama dengan kind atau copy_key berbeda. Periksa keunikannya sebelum output.
 
 ## Prinsip visual (ringkasan referensi frontend-design yang dipin)
 

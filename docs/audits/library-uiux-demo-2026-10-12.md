@@ -98,3 +98,34 @@ palsu dari task dan scope yang belum di-approve. Worker dimuat ulang saat idle;
 retry `8bdc1ba23629478ea10320201816fb69` berjalan. Snapshot nyata
 `184096d6ebc24d7da580101dd11c26bf`: 11.655 estimated tokens, `limit_tokens=null`.
 Cap job model/tool/time/input-output tetap null, approval dan histori dipertahankan.
+
+## Tiket #1 accepted dan repair UI/UX tiket #2
+
+Retry Developer #1 succeeded. Kandidat `e331df9c34f34e458dcef0cb29a1d743`
+lulus QA pertama: verification `7a63cec5888c49b2a52657c3a8800906`,
+3 discovered/executed/passed, 0 failed/skipped. Pengguna menerima lewat UAT
+`7c2801760fa6478aa98fd8437aa4f1b1`; tiket #1 accepted. Approval ini tidak
+berasal dari observer dan tidak menggantikan approval tiket berikutnya.
+
+UI/UX #2 job `7cfcca6a6fb24131bf9d615994d32896` gagal dua calls: komponen
+tanpa role/label/text, lalu feedback ganda untuk pasangan action/outcome.
+Repair sebelumnya hanya menerima error dan schema, tanpa JSON yang ditolak.
+Runtime terstruktur sekarang menyertakan jawaban sebelumnya sebagai data JSON
+yang di-escape dan meminta koreksi field invalid dengan mempertahankan bagian
+valid. Pada mode unlimited seluruh jawaban disertakan; untuk konteks finite,
+jawaban besar tidak ditambahkan jika melewati plafon snapshot.
+
+Validator menyebut testid komponen serta setiap pasangan feedback konflik,
+indeks entri dan copy_key. Schema/instruksi UI/UX menjelaskan identitas minimum
+komponen dan satu feedback per pasangan. Validator tidak meluluskan duplikat
+atau menghapusnya diam-diam. Regresi `tests/agents` +
+`tests/pipeline/test_review_context.py` + `tests/pipeline/test_ui_spec_stage.py`:
+**276 passed, 61,70 s**, termasuk repair output lengkap di mode unlimited.
+Worker dimuat ulang saat idle; retry `919088c5b1df402caf256a2f437143ba`
+gagal karena batas waktu respons provider 120 detik, saat stream masih mengirim
+jawaban. Satu model call tercatat; token/biaya tidak dilaporkan provider dan
+tetap unknown. Ini berbeda dari batas token/context demo, yang tetap unlimited.
+Konfigurasi lokal/gitignored UI/UX dinaikkan ke `timeout_s=600`, masih dalam
+rentang timeout yang didukung registry; `max_output_tokens=null` dipertahankan.
+Worker dimuat ulang saat idle dan retry `f4165e3f23c14ddead1a40567a5b8c19`
+berjalan tanpa menghapus histori/approval atau mengubah cap job. Hasil masih ditunggu.

@@ -3450,7 +3450,8 @@ disetujui pengguna di web. Browser Chromium memverifikasi create/chat/board dan
 label UI/UX di kantor tanpa pageerror. Observer metrik read-only aktif, maksimal
 enam jam. Catatan kondisi/provider/cache serta bukti:
 `docs/audits/library-uiux-demo-2026-10-12.md`; data privat di
-`data/demo-library-uiux-2026-10-12/`. QA planning berjalan; QA/UAT belum lulus.
+`data/demo-library-uiux-2026-10-12/`. Tiket #1 sudah lulus QA 3/3 dan accepted
+melalui UAT pengguna; tiket #2 masih tahap UI/UX, #3 menunggu dependency.
 
 Intervensi demo: UiSpec ditolak (accessible name memakai placeholder, lalu role
 tidak valid), sementara union tanpa discriminator menambahkan error branch lain.
@@ -3466,6 +3467,18 @@ unlimited job sekarang meniadakan plafon total konteks aplikasi untuk semua role
 manifest limit_tokens null, tanpa mutasi builder bersama atau bypass scope.
 Regresi agents + review_context + ui_spec_stage: 271 passed, 57,86 s. Retry nyata
 Developer memakai snapshot 11.655 token dengan limit null; job kembali berjalan.
+
+UI/UX #2 gagal lagi: komponen tanpa identity, lalu feedback action/outcome
+duplikat. Repair sekarang menyertakan JSON sebelumnya sebagai untrusted data,
+pesan validator mengidentifikasi testid/indeks/pasangan/copy_key; schema dan
+instruksi memuat constraint tersebut. Tidak ada pelonggaran validator atau
+penambahan fitur visual. Regresi agents + review_context + ui_spec_stage:
+276 passed, 61,70 s; output besar tetap utuh saat unlimited, konteks finite
+tetap dihormati. Retry pertama berhenti pada deadline respons provider 120 s
+saat stream masih aktif. Timeout UI/UX lokal dinaikkan ke 600 s melalui konfigurasi
+yang sudah didukung, max_output_tokens tetap null. Worker dimuat ulang saat idle;
+retry berikutnya berjalan, approval/usage/histori dipertahankan. Usage call yang
+terputus tetap unknown jika tidak dilaporkan provider.
 
 **Acceptance criteria:** Mini Perpustakaan dengan workload sama; bandingkan dengan 11 Oktober:
 tiket lulus QA percobaan pertama, biaya QA + UI/UX, repair, keputusan user, amandemen, waktu

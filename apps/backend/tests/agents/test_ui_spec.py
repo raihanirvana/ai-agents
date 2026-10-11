@@ -97,6 +97,18 @@ def test_invalid_spec_copy_does_not_suggest_switching_to_no_ui_change():
     assert 'NoUiChange' not in str(failure.value)
 
 
+def test_duplicate_feedback_error_identifies_all_conflicting_pairs_and_copy_keys():
+    document = spec()
+    document['feedback'].append({**document['feedback'][0], 'copy_key': 'book.delete'})
+    document['feedback'].append(dict(document['feedback'][1]))
+    with pytest.raises(ValidationError) as failure:
+        UiSpec.model_validate(document)
+    message = str(failure.value)
+    for expected in ('add-book/success', 'add-book/error', 'feedback[0]', 'feedback[3]',
+                     'feedback[1]', 'feedback[4]', 'copy_key=book.added', 'copy_key=book.delete'):
+        assert expected in message
+
+
 def broken(mutate):
     document = copylib.deepcopy(SPEC)
     mutate(document)

@@ -96,7 +96,8 @@ class SpecComponent(_Spec):
         if self.name_key is not None and self.role is None:
             raise ValueError('accessible name requires a role')
         if not (self.role or self.label_key or self.text_key):
-            raise ValueError('each component needs role, label or text')
+            raise ValueError(f'component {self.testid}: each component needs role, label or text '
+                             '(role, label_key or text_key); dynamic text can use paragraph/generic role')
         return self
 
 
@@ -132,7 +133,8 @@ class UiSpec(_Spec):
     screens: list[Screen] = Field(min_length=1, max_length=12)
     copy_entries: list[CopyEntry] = Field(alias='copy', min_length=1, max_length=200)
     states: list[ScreenState] = Field(default_factory=list, max_length=96)
-    feedback: list[ActionFeedback] = Field(default_factory=list, max_length=96)
+    feedback: list[ActionFeedback] = Field(default_factory=list, max_length=96,
+        description='At most one entry per (action_testid, outcome) pair; success/error/confirm are distinct outcomes')
 
     @property
     def components(self):
@@ -203,9 +205,17 @@ class UiSpec(_Spec):
                 raise ValueError(f'{where}: only inline feedback has a target_testid')
             if (item.kind == 'native_confirm') != (item.outcome == 'confirm'):
                 raise ValueError(f'{where}: native_confirm is used exactly for confirm outcomes')
-        pairs = [(f.action_testid, f.outcome) for f in self.feedback]
-        if len(set(pairs)) != len(pairs):
-            raise ValueError('one feedback per action and outcome')
+        pairs = {}
+        for index, item in enumerate(self.feedback):
+            pairs.setdefault((item.action_testid, item.outcome), []).append(index)
+        duplicates = [(pair, indices) for pair, indices in pairs.items() if len(indices) > 1]
+        if duplicates:
+            detail = '; '.join(
+                f'{action}/{outcome}: ' + ', '.join(
+                    f'feedback[{index}] (copy_key={self.feedback[index].copy_key})' for index in indices)
+                for (action, outcome), indices in duplicates)
+            raise ValueError('one feedback per action and outcome; duplicate pairs: ' + detail +
+                             '. Keep one entry per pair; use separate entries for distinct outcomes.')
         # Every accepted spec must derive a valid contract, including the stricter
         # UiControl text limits. Keep unbound state/feedback copy at its own limit.
         self.to_ui_contract()
