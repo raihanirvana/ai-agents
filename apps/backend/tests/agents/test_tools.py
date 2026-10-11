@@ -18,15 +18,16 @@ def test_policy_has_no_approval_or_status_setting_tool():
     for role, tools in TOOL_POLICY.items():
         for tool in tools:
             assert not any(word in tool for word in ("approve", "accept", "release", "waive", "set_status", "sql")), tool
-    assert set(TOOL_POLICY) == {"po", "technical-lead", "developer", "qa"}
+    assert set(TOOL_POLICY) == {"po", "technical-lead", "developer", "qa", "ui-ux"}
     # Architecture table (section 6) is the reference for the role matrix.
     assert {"read_brief", "propose_ticket", "propose_criteria", "send_message", "request_input"} <= TOOL_POLICY["po"]
     assert {"propose_decision", "plan_dependencies", "review_candidate"} <= TOOL_POLICY["technical-lead"]
     assert {"submit_candidate", "run_command", "inspect_diff"} <= TOOL_POLICY["developer"]
     assert {"propose_tests", "report_bug", "request_test_run"} <= TOOL_POLICY["qa"]
+    assert {"read_design_reference", "propose_ui_spec"} <= TOOL_POLICY["ui-ux"]
 
 
-@pytest.mark.parametrize("role", ["po", "technical-lead", "developer", "qa"])
+@pytest.mark.parametrize("role", ["po", "technical-lead", "developer", "qa", "ui-ux"])
 def test_a_role_cannot_call_tools_of_other_roles(agent_env, role):
     env = agent_env
     ticket = env.approved_ticket()

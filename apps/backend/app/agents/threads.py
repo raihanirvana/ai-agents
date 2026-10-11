@@ -29,6 +29,9 @@ from .effects import append_effect
 
 CATEGORIES = ("clarification", "handoff", "bug", "note", "log", "reply")
 REPLY_CATEGORIES = ("clarification", "handoff", "bug")  # only these may ask for a reply
+# Registration in DEV-020 must not activate a reply task before runtime wiring.
+# DEV-021 will replace this guard when UI/UX replies/amendments can execute.
+UNWIRED_REPLY_ROLES = frozenset({"ui-ux"})
 PROPOSAL_INTENTS = ("scope_proposal", "decision_proposal", "technical_plan", "dependency_plan")
 MAX_BODY = 8000
 
@@ -76,7 +79,7 @@ class Threads:
         if role is None and allow_none:
             return None
         if role not in ROLES:
-            raise Invalid("recipient must be one of the four roles")
+            raise Invalid("recipient must be one of the agent roles")
         return role
 
     # -- directed messages -------------------------------------------------------------------------
@@ -94,6 +97,8 @@ class Threads:
         if needs_reply:
             if to_role is None or category not in REPLY_CATEGORIES:
                 raise Invalid("only a directed clarification/handoff/bug can ask for a reply")
+            if to_role in UNWIRED_REPLY_ROLES:
+                raise Invalid("UI/UX replies are not wired until DEV-021")
             if identity["stage"] == "reply" or category == "reply":
                 raise Invalid("a reply cannot trigger further work")
             if to_role == identity["role"]:
@@ -118,8 +123,10 @@ class Threads:
         return SendResult(message.id, reply, created)
 
     def _enqueue_reply(self, message_id: str, sender: dict[str, Any], to_role: str, expected: str,
-                       request_id: str | None = None) -> str:
+                       request_id: str | None = None) -> str | None:
         """One reply job per message (idempotent). It reuses the sender's scope budget and limits."""
+        if to_role in UNWIRED_REPLY_ROLES:
+            return None  # Keep pre-fix messages pending; never enqueue an unsupported task.
         with self.db.write() as s:
             origin = s.get(Job, sender["job_id"])
             if request_id and (origin.status != "waiting_input" or origin.waiting_request_id != request_id):
@@ -164,6 +171,8 @@ class Threads:
         """Ask another role and wait: persists the request + checkpoint, releases the slot, schedules the
         directed reply job, then ends this run with WaitingForInput. Resume happens only on a valid answer."""
         to_role = self._role(to_role)
+        if to_role in UNWIRED_REPLY_ROLES:
+            raise Invalid("UI/UX replies are not wired until DEV-021")
         question = self._body(question)
         identity = self.queue.verify(ctx.lease)
         if identity["stage"] == "reply" or to_role == identity["role"]:

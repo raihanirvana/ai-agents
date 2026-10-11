@@ -49,6 +49,7 @@ ROLE_OPERATIONS: dict[str, frozenset[str]] = {
                             "run_phase", "inspect_diff", "submit_candidate", "checkpoint"}),
     "qa": frozenset({"read_file", "list_files", "run_phase", "inspect_diff"}),
     "technical-lead": frozenset({"read_file", "list_files", "inspect_diff"}),
+    "ui-ux": frozenset({"read_file", "list_files"}),  # reads baseline UI source only
     "po": frozenset(),
 }
 _AGENT_AUTHOR = {"developer": ("AI Developer", "developer@localhost")}

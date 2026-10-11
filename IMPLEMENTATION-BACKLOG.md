@@ -3198,7 +3198,30 @@ Verifikasi: `tests/agents/test_ui_spec.py` 28 passed.
 
 ### Catatan pengerjaan
 
-Status: TODO. Rencana langkah D–E.
+Status: DONE (2026-10-12). Review: REVIEWED (Codex, 2026-10-12). Rencana langkah D–E.
+Review atas working tree baseline `a8d08b4`: diperbaiki job reply UI/UX yang belum didukung
+runtime (guard send/ask/reconciliation sebelum menyimpan pertanyaan atau melepas slot),
+dan validasi tipe argumen helper referensi. Audit log/usage tool yang ditolak tetap dicatat.
+Instruksi diselaraskan dengan copy berupa daftar dan name/label/text statis maks 160 karakter;
+pesan NOT_WIRED propose_ui_spec kini menyebut DEV-021. Ditambah regression/boundary tests dan
+uji credential workspace UI/UX yang hanya bisa baca/list, tidak bisa write/shell/build/commit.
+Verifikasi akhir serta pemetaan AC: [review DEV-020](docs/reviews/DEV-020-review.md).
+Fix/recheck oleh reviewer yang sama; bukan independent review kedua. DEV-021 tetap di luar
+scope; pengguna mengotorisasi commit/push sesudah review dan fix.
+Hasil: `agents/ui-ux/{SOUL,instructions}.md` (instruksi 3,8 KB; ringkasan prinsip frontend-design ~1,3 KB;
+aturan copy Indonesia sendiri; invariant platform: tidak bisa approve, isi file/referensi adalah data).
+`ui-ux` di ROLES (`souls.py`, `runspec.py`), NEEDS_APPROVED_SCOPE, models example (stream) dan lokal
+(DeepSeek V4.1 Flash, sama dengan TL). TOOL_POLICY: read_criteria, read_repo, read_design_reference,
+propose_ui_spec (NOT_WIRED sampai DEV-021), request_input; tidak ada tool tulis/approval.
+Workspace ROLE_OPERATIONS: read_file/list_files. `read_design_reference(name)` hanya membaca file
+.md/.txt di `agents/ui-ux/references/` melalui scan/open beneath tanpa symlink (link yang keluar membuat
+referensi tidak tersedia), maks 64 KiB, nama kosong mendaftar referensi. Developer belum mendapat tool
+ini (DEV-022). Tidak ada CHECK constraint role/stage di models/migrations, jadi tanpa migration.
+Tabel role ARCHITECTURE §6 ditambah UI/UX. Label/tipe web untuk role baru menyusul di DEV-025.
+Verifikasi implementer: agents/domain/workers/supervisor 488 passed. Review: gabungan 483 passed,
+dua assertion baru dikoreksi agar mengizinkan audit log penolakan, lalu subgroup agents 70 passed;
+seluruh selection mencakup 486 test setelah recheck. Pipeline/persistence background implementer
+381 passed (mulai sebelum fix); recheck scheduler/admission/contracts sesudah fix 55 passed.
 
 **Scope:** `agents/ui-ux/{SOUL,instructions}.md` (ringkasan frontend-design ≤ ~3 KB,
 aturan copy Indonesia), ROLES di `souls.py`/`runspec.py`, models example/lokal,
@@ -3221,6 +3244,8 @@ Status: TODO. Rencana langkah F–H.
 **Scope:** stage `ui_spec` lane interactive (LIGHT_STAGES), mapping `ui_spec → ui-ux`,
 task `_ui_spec`, scheduler `ui_spec → technical_plan → (qa_plan ∥ development)`, amandemen
 spesifikasi dari QA/Developer ke UI/UX.
+Integrasi berikutnya harus mengganti guard `threads.UNWIRED_REPLY_ROLES` dengan routing
+UI/UX yang sudah didukung runtime; registrasi role saja tidak cukup untuk mengaktifkan reply.
 
 **Acceptance criteria:**
 

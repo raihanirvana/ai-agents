@@ -328,6 +328,7 @@ dan memori produk tetap tanggung jawab aplikasi.
 | Lead | read_repo, propose_decision, plan_dependencies, review_candidate |
 | Developer | read/patch file, run_command, inspect_diff, submit_candidate |
 | QA | read_criteria, propose_tests, request_test_run, inspect_app, report_bug |
+| UI/UX | read_criteria, read_repo, read_design_reference (hanya `agents/ui-ux/references/`), propose_ui_spec, request_input |
 
 Tool authorization ditentukan dari identitas run backend: project, ticket,
 scope version, attempt, lease owner/generation, dan operasi yang diizinkan.

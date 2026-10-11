@@ -20,9 +20,9 @@ def copy_agents(tmp_path) -> Path:
     return target
 
 
-def test_four_roles_load_with_stable_digests():
+def test_all_roles_load_with_stable_digests():
     agents = load_agents()
-    assert tuple(agents) == ROLES and len(set(a.digest for a in agents.values())) == 4
+    assert tuple(agents) == ROLES and len(set(a.digest for a in agents.values())) == len(ROLES)
     assert load_agents()["po"].digest == agents["po"].digest
     for role, agent in agents.items():
         assert agent.soul.startswith("#") and agent.instructions.strip()

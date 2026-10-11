@@ -19,7 +19,7 @@ from .errors import AuthorizationError, WorkspaceError
 
 PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 RUN_ID = re.compile(r"^run-[0-9a-f]{12}$")
-ROLES = ("po", "technical-lead", "developer", "qa")
+ROLES = ("po", "technical-lead", "developer", "qa", "ui-ux")
 SPEC_VERSION = 1
 
 

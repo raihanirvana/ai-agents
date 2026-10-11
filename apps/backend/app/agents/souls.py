@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .redaction import Redactor
 
-ROLES = ("po", "technical-lead", "developer", "qa")
+ROLES = ("po", "technical-lead", "developer", "qa", "ui-ux")
 REPO_AGENTS_DIR = Path(__file__).resolve().parents[4] / "agents"
 MAX_FILE_BYTES = 16 * 1024
 
@@ -54,7 +54,7 @@ def _read(path: Path) -> str:
 
 
 def load_agents(root: Path | str = REPO_AGENTS_DIR) -> dict[str, AgentDefinition]:
-    """Load all four roles; any missing, empty, oversized or secret-looking file is an error."""
+    """Load every role in ROLES; any missing, empty, oversized or secret-looking file is an error."""
     root = Path(root)
     agents: dict[str, AgentDefinition] = {}
     for role in ROLES:

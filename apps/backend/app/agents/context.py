@@ -29,7 +29,7 @@ from .threads import PROPOSAL_INTENTS, Threads
 
 CHAT_KINDS = ("message", "input_request", "input_answer")
 SYSTEM_INTENTS = ("scope_decision", "decision_accepted", "decision_rejected", "repair_feedback", "rebase_request")
-NEEDS_APPROVED_SCOPE = ("technical-lead", "developer", "qa")
+NEEDS_APPROVED_SCOPE = ("technical-lead", "developer", "qa", "ui-ux")
 RUNTIME_GAP = {"layer": "runtime_transcript", "reason": "managed by the runtime, not duplicated here"}
 
 

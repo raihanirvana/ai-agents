@@ -59,6 +59,25 @@ def test_role_permissions_are_enforced_by_backend(stub_sup, manifest):
         stub_sup.run_command(qa.ref, qa.credential, ["true"])
 
 
+def test_ui_ux_workspace_is_read_only(stub_sup, manifest):
+    run = start(stub_sup, manifest, role="ui-ux")
+    # Supervisor fixture provides baseline source; the UI/UX credential only reads it.
+    (stub_sup.src_dir(run.ref) / "screen.html").write_text("<h1>Baseline</h1>")
+    assert stub_sup.list_files(run.ref, run.credential) == ["screen.html"]
+    assert stub_sup.read_file(run.ref, run.credential, "screen.html") == b"<h1>Baseline</h1>"
+    for operation in (
+        lambda: stub_sup.write_file(run.ref, run.credential, "screen.html", b"changed"),
+        lambda: stub_sup.run_command(run.ref, run.credential, ["true"]),
+        lambda: stub_sup.run_phase(run.ref, run.credential, "build"),
+        lambda: stub_sup.submit_candidate(run.ref, run.credential, "commit"),
+        lambda: stub_sup.checkpoint(run.ref, run.credential, "checkpoint"),
+    ):
+        with pytest.raises(AuthorizationError, match="may not"):
+            operation()
+    assert stub_sup.read_file(run.ref, run.credential, "screen.html") == b"<h1>Baseline</h1>"
+    assert refs(stub_sup)[ACCEPTED_REF] == run.spec.base_sha
+
+
 def test_submit_candidate_commits_on_attempt_ref_only(stub_sup, manifest):
     base = stub_sup.broker("demo").accepted_sha()
     other = start(stub_sup, manifest, ticket="T-2")

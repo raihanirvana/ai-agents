@@ -9,6 +9,7 @@
     "po": {},
     "technical-lead": {"stream": true, "fallback_models": []},
     "developer": {"fallback_models": []},
-    "qa": {}
+    "qa": {},
+    "ui-ux": {"stream": true, "fallback_models": []}
   }
 }
