@@ -3451,7 +3451,8 @@ label UI/UX di kantor tanpa pageerror. Observer metrik read-only aktif, maksimal
 enam jam. Catatan kondisi/provider/cache serta bukti:
 `docs/audits/library-uiux-demo-2026-10-12.md`; data privat di
 `data/demo-library-uiux-2026-10-12/`. Tiket #1 sudah lulus QA 3/3 dan accepted
-melalui UAT pengguna; tiket #2 masih tahap UI/UX, #3 menunggu dependency.
+melalui UAT pengguna; tiket #2 Development dengan QA planning paralel, #3
+menunggu dependency.
 
 Intervensi demo: UiSpec ditolak (accessible name memakai placeholder, lalu role
 tidak valid), sementara union tanpa discriminator menambahkan error branch lain.
@@ -3487,7 +3488,10 @@ summary >1.000 karakter di repair (42.919 token, USD 0,008675406). Instruksi kin
 menjelaskan respons JSON langsung dan ringkasan satu–tiga kalimat maksimal 1.000
 karakter; deskripsi schema selaras, batas panjang tetap ketat. Verifikasi schema,
 role dan stage: 102 passed, 37,83 s. Worker dimuat ulang saat idle, retry
-`de94140899d14f5bbc936cc77b223934` berjalan; belum ada klaim UiSpec/QA lulus.
+`de94140899d14f5bbc936cc77b223934` succeeded dalam satu call nyata (21.297 token,
+USD 0,005949): UiSpec revisi 1 tersimpan, summary 511 karakter, 23 komponen,
+7 feedback, divalidasi ulang. TL succeeded lalu Developer dan QA planning
+berjalan. Belum ada klaim QA/UAT #2 lulus; seluruh histori/unknown usage retained.
 
 **Acceptance criteria:** Mini Perpustakaan dengan workload sama; bandingkan dengan 11 Oktober:
 tiket lulus QA percobaan pertama, biaya QA + UI/UX, repair, keputusan user, amandemen, waktu

@@ -149,4 +149,12 @@ Batas panjang tidak dilonggarkan. Verifikasi setelah perubahan instruksi/metadat
 `pytest tests/agents/test_ui_spec.py tests/pipeline/test_ui_spec_stage.py
 tests/agents/test_ui_ux_role.py -q --tb=short`: **102 passed, 37,83 s**.
 Worker dimuat ulang saat idle; retry `de94140899d14f5bbc936cc77b223934`
-berjalan dengan cap job tetap. Hasil masih ditunggu.
+**succeeded** dalam satu model call nyata (`fake_provider=false`): 21.297 token,
+reported cost USD 0,005949, active 122,89 s. Message
+`ad6baf72353a4e259d79f53237abacab` menyimpan UiSpec revisi 1, summary 511
+karakter, 23 komponen dan 7 feedback; objek tersimpan divalidasi ulang berhasil.
+TL `09f72cc808b24e06ae39853a0b77a0b8` kemudian succeeded. Tiket #2 masuk
+Development: job Developer `27bdae322a204bee914f3acdde08e802` dan QA planning
+`65f938ac787b4d9797b194f9a9485640` running. Tiket #3 menunggu dependency.
+Belum ada klaim QA/UAT tiket #2 lulus; histori seluruh retry dan unknown usage
+pada stream terputus tetap masuk benchmark.
