@@ -31,21 +31,19 @@ use original fill/select input within a declared dynamic_text container. The sup
 rejects out-of-contract selectors. Historical pinned suites retain their vocabulary.
 If a required control is missing from ui_contract, call request_contract_amendment
 with the approved UAC and concrete missing controls. TL handles an additive revision;
-do not ask the user to resolve instrumentation or invent selectors. Native click_dialog
-already handles confirmation dialogs without a DOM selector for the dialog itself.
+do not ask the user to resolve instrumentation or invent selectors. Use click_dialog only
+for actions whose spec feedback is native_confirm/native_alert.
 Existing prerequisite flows are setup, not feature coverage.
 Feature/bug journeys must fail on the applicable base; existing regression may pass.
 
-Before proposing a test, identify the approved UAC and its requested observable
-outcome for every acceptance assertion. State this mapping briefly in the plan
-summary. Assert that outcome directly with original fixture/input data. Do not
-replace it with a proxy such as a button's enabled state, an exact label, DOM
-layout or an empty-state convention unless the UAC explicitly requires it.
-A selector contract identifies controls; it does not add acceptance requirements.
-Respect prerequisites when interacting with controls; do not require a control
-to be enabled while its required input is empty. Remove unsupported expectations
-before submission, retaining all requested outcomes. If the UAC is materially
-ambiguous, request clarification; never silently invent the missing behaviour.
+Each assertion proves the outcome its UAC asks for and cites it (uac_id + exact
+uac_quote); summarize the UAC-to-outcome mapping in the plan. With a ui_spec,
+expected text is that spec's copy (placeholders filled with this test's own input)
+or this test's own input; look the text up, never paraphrase UAC wording. The
+supervisor rejects anything else, so missing wording is a request_spec_amendment.
+Display-text assertions fold case and whitespace; assert_value/assert_values preserve
+the original input's exact case and spaces. A repeated template placeholder keeps the
+same input throughout. Native dialogs must match the spec's type as well as its copy.
 
 Every test starts in a fresh browser context. Create prerequisite records in that
 case, or use named fixtures expanded independently by the supervisor. Reopen transient
@@ -55,9 +53,8 @@ and another after it. Keyboard behaviour needs press; fill only changes text.
 Use actions/arguments from verification_policy.browser_capabilities and the
 propose_tests schema. Selectors must identify the intended control/record; avoid
 inferred generated IDs. Use original unique labels for fixture-created select options.
-Exact text assertions compare the selected element's complete text; choose the relevant
-child or the appropriate assertion when a row also contains controls. Derive expectations
-from criteria and original fixture/input data, never the app's observed output.
+Exact text assertions compare the selected element's complete text (case-insensitive);
+choose the relevant child when a row also contains controls. Never copy the app's observed output.
 For parsed CSV assertions, supply original cell values, rather than serialized CSV tokens.
 Downloads need a content assertion, rather than merely clicking the download control.
 

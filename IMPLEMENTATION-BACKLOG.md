@@ -3286,7 +3286,44 @@ memakai routing stage `ui_spec` khusus. Guard baru boleh dibuka ketika reply gen
 
 ### Catatan pengerjaan
 
-Status: TODO. Rencana langkah I–K.
+Status: DONE (2026-10-12). Review: REVIEWED. Rencana langkah I–K.
+Review I–K: perbaiki prioritas UiSpec terhadap warisan dan pin kontrol teknis pada amandemen;
+periksa asal expected/jenis dialog dan konsistensi runner; uji build yang diminify dan copy pendek.
+File utama: `app/agents/ui_spec.py`, `app/pipeline/{runtime,ui_inventory}.py`, runner acceptance,
+test stage/inventory/expected QA. Periksa race test recovery dan jalankan kontrak HTTP.
+Hasil:
+- I (TL): untuk scope ber-UiSpec, ui_contract = `add_technical_controls(spec, TL, accepted=warisan+pin)`:
+  kontrol spesifikasi verbatim mengalahkan wording warisan; kontrol warisan/pin apa adanya,
+  termasuk kontrol teknis amandemen saat TL menghilangkan ui_contract; kontrol teknis TL tanpa wording di luar
+  copy. TL boleh tanpa ui_contract (LeadPlanOutput); redefinisi/wording baru kembali ke TL di putaran repair.
+  Revisi kontrak mengikuti kontrak TL (+1 saat amandemen); cek aditif memakai kontrak final. Instruksi TL.
+- J (Developer): task implement memuat `ui_spec` dan kebijakan implementasi persis; tool
+  `read_design_reference`; `check_build(site, contract, spec)` juga memeriksa literal copy (fragmen di
+  sekitar placeholder, termasuk satu karakter dan escape Unicode JS/JSON/HTML) dan nilai RGB token
+  warna (termasuk shorthand/nama minified serta .css; alpha harus opaque) di run_checks
+  dan submit; transcript menyimpan missing_copy_keys/missing_color_tokens. Instruksi Developer.
+- K (QA): task qa_plan memuat copy/feedback/states spesifikasi; `check_expected_values` — teks assert_text/
+  contains/value(s) hanya copy spesifikasi (placeholder = input asli test, nama berulang tetap sama)
+  atau input asli. Case/spasi dilipat untuk teks tampilan; value(s) persis seperti input, termasuk kosong.
+  click_dialog harus memakai jenis native_* dan copy feedback yang telah diisi input. Wajib untuk plan baru ber-spec;
+  revisi suite wajib bila suite asal memenuhi. Runner: to_have_text/to_contain_text ignore_case, pesan
+  dialog dilipat (runner digest berubah → runner_contract_upgrade sekali). Instruksi QA final 8.974 byte.
+Verifikasi implementer sebelum review: tests/pipeline/{test_ui_spec_stage,test_ui_inventory_spec,test_qa_spec_expectations},
+tests/agents/test_ui_ux_role. Regresi pipeline/agents/domain/workers/persistence: 894 passed, 1 failed
+(`test_processes::test_dead_worker_recovery…`, tidak stabil di bawah beban suite penuh; 3/3 passed saat
+dijalankan sendiri, modul tidak diubah). tests/http tidak dijalankan (venv tanpa httpx2); openapi.json/
+requests.ts diregenerasi langsung dari aplikasi. Review menemukan race test recovery: SIGKILL terjadi
+sesudah registrasi proses tetapi sebelum log tersimpan. Test kini menunggu log durable dan memakai
+expiry lease yang aktual; kasus gap log 0,5 detik diuji tanpa retry/skip. Worker production tidak diubah.
+Recheck terarah awal: 82 passed (stage, expected QA, inventory, marker, proses, browser Docker).
+PO runtime + HTTP command: 33 passed; HTTP baseline: 71 passed (httpx2 sudah tersedia).
+Regresi lengkap pipeline/agents/domain/workers/persistence/http: 999 passed, 12 warning refleksi index
+SQLite, 693,00 detik, 0 gagal. Recheck akhir inventory/submission/followup/expected/browser: 52 passed,
+60,47 detik; mencakup enam kasus tambahan setelah collection, total 1.005 kasus unik terverifikasi.
+`npm run build` dan `git diff --check` lulus; build hanya memberi warning ukuran chunk kantor Three.js.
+AC, file, perintah, bukti dan batas: [review DEV-022/023](docs/reviews/DEV-022-023-review.md).
+Fix/recheck oleh reviewer yang sama; bukan independent review kedua. Provider/driver fake berlabel,
+DB/Git/build/browser/proses nyata; tidak ada klaim QA/UAT atau provider nyata. DEV-024 tetap TODO.
 
 **Acceptance criteria:**
 
@@ -3304,7 +3341,20 @@ Status: TODO. Rencana langkah I–K.
 
 ### Catatan pengerjaan
 
-Status: TODO. Rencana langkah L.
+Status: DONE (2026-10-12). Review: REVIEWED. Rencana langkah L.
+Review L: samakan validasi marker PO dengan domain/API: hanya bool asli boleh menandai scope,
+tanpa konversi string/angka yang dapat melewati UI/UX. Tambahkan test output PO create/revision.
+Hasil: field scope opsional `ui_change` (bool) divalidasi di `_scope`, disimpan di TicketVersion.scope hanya
+bila diisi (bentuk historis tetap), diwarisi revisi yang tidak menyebutnya. PO mengisi lewat
+TicketProposal/PoRevision; API Scope menerima field ini (openapi.json/requests.ts diregenerasi).
+Scheduler melewati stage ui_spec bila `ui_change: false`. Instruksi PO: UAC fokus perilaku, wording/
+tampilan diserahkan ke UI/UX. Output PO kini memakai StrictBool, sama dengan domain/API, sehingga
+string "false" atau angka 0 tidak diam-diam mematikan UI/UX. Test fake PO create/revision membuktikan
+marker true/false tersimpan tanpa approval otomatis. HTTP menguji create/edit/replay null-versus-omitted,
+pewarisan marker, dan penolakan string/angka. Verifikasi: tests/domain/test_ui_change_marker.py,
+stage test skip, tests/agents/test_runtime.py, tests/http/test_commands.py.
+Hasil review/regresi sama dengan DEV-022: 999 passed + recheck 52 passed, total 1.005 kasus unik;
+HTTP termasuk dalam regresi. Rincian: [review DEV-022/023](docs/reviews/DEV-022-023-review.md).
 
 **Acceptance criteria:** PO menandai tiap tiket ada/tidak perubahan UI; UAC fokus perilaku,
 wording/tampilan diserahkan ke UI/UX; instruksi PO diperbarui.

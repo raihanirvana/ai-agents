@@ -226,23 +226,118 @@ class NoUiChange(_Spec):
 UiSpecOutput = Union[UiSpec, NoUiChange]
 
 
-def add_technical_controls(spec, technical):
+def add_technical_controls(spec, technical, *, accepted=(), revision=None):
     """The technical lead may only add instrumentation controls to the derived contract.
 
     Derived controls stay verbatim; a technical control cannot redefine a spec testid
-    and cannot introduce wording that is not already spec copy. Returns UiContract."""
+    and cannot introduce wording that is not already spec copy. Controls identical to
+    an accepted one (inherited from the app or pinned by this ticket's previous
+    contract) keep their accepted wording. technical may be None (spec only).
+    revision defaults to the technical contract's revision. Returns UiContract."""
     derived = spec.to_ui_contract()
     own = {c.testid: c for c in derived.controls}
     copy_texts = set(spec.copy_map().values())
+    known = {c['testid']: UiControl.model_validate(c).model_dump() for c in accepted}
     added = []
-    for control in technical.controls:
+    for control in (technical.controls if technical is not None else []):
         if control.testid in own:
             if control.model_dump() != own[control.testid].model_dump():
                 raise ValueError(f'{control.testid} is defined by the UI spec; the technical plan cannot redefine it')
+            continue
+        if known.get(control.testid) == control.model_dump():
+            added.append(control)
             continue
         wording = [value for value in (control.name, control.label, control.text) if value is not None]
         if any(value not in copy_texts for value in wording):
             raise ValueError(f'technical control {control.testid} introduces wording outside the UI spec copy')
         added.append(control)
-    return UiContract(revision=max(technical.revision, derived.revision),
-                      action_locators='testid', controls=[*derived.controls, *added])
+    if revision is None:
+        revision = technical.revision if technical is not None else derived.revision
+    return UiContract(revision=revision, action_locators='testid', controls=[*derived.controls, *added])
+
+
+TEXT_ASSERTIONS = ('assert_text', 'assert_contains_text', 'assert_value', 'assert_values')
+
+
+def _fold(text):
+    return ' '.join(str(text).split()).casefold()
+
+
+def _literal(piece):
+    return ''.join(r'\s+' if part.isspace() else re.escape(part)
+                   for part in re.split(r'(\s+)', piece.casefold()) if part)
+
+
+def _rendered(template, inputs, *, folded=True):
+    """Render only original inputs; each repeated placeholder binds the same value."""
+    parts = PLACEHOLDER.split(template.strip() if folded else template)
+    if len(parts) > 1 and not inputs:
+        return None
+    choice = '(?:' + '|'.join(re.escape(_fold(v) if folded else v)
+                             for v in sorted(inputs, key=len, reverse=True)) + ')'
+    pattern, seen = [], set()
+    for index, part in enumerate(parts):
+        if index % 2:
+            group = 'input_' + part
+            pattern.append(f'(?P={group})' if part in seen else f'(?P<{group}>{choice})')
+            seen.add(part)
+        else:
+            pattern.append(_literal(part) if folded else re.escape(part))
+    return re.compile(''.join(pattern))
+
+
+def _action_testid(selector):
+    # Match the final locator, never testid-like words inside a quoted row filter.
+    match = re.search(r'(?:^| >> )testid=([A-Za-z][A-Za-z0-9_.:-]{0,79})(?: >> nth=\d{1,2})?$', selector)
+    if match:
+        return match[1]
+    match = re.fullmatch(r'\[data-testid="([A-Za-z][A-Za-z0-9_.:-]{0,79})"\](?: >> nth=\d{1,2})?', selector)
+    return match[1] if match else None
+
+
+def check_expected_values(suite, spec):
+    """QA expected values come only from spec copy (placeholders = original input) or original input.
+
+    Display text folds case/whitespace like the runner; form values stay exact.
+    click_dialog must match both the native feedback type and its copy."""
+    copy_texts = spec.copy_map()
+    native = {}
+    for item in spec.feedback:
+        if item.kind.startswith('native_'):
+            native.setdefault(item.action_testid, {}).setdefault(item.kind.removeprefix('native_'), set()).add(
+                copy_texts[item.copy_key])
+    for test in suite.materialize_fixtures().tests:
+        inputs = {value for s in test.steps if s.action in ('fill', 'select_option')
+                  for value in (s.value if isinstance(s.value, list) else [s.value]) if isinstance(value, str)}
+        folded_inputs = {_fold(value) for value in inputs}
+        patterns = [p for p in (_rendered(text, inputs) for text in copy_texts.values()) if p is not None]
+        exact_patterns = [p for p in (_rendered(text, inputs, folded=False) for text in copy_texts.values())
+                          if p is not None]
+
+        def allowed(value, *, exact=False):
+            if exact:
+                return value in inputs or any(p.fullmatch(value) for p in exact_patterns)
+            folded = _fold(value)
+            return folded in folded_inputs or any(p.fullmatch(folded) for p in patterns)
+
+        for index, step in enumerate(test.steps):
+            where = f'test {test.id}, step {index}'
+            if step.action in TEXT_ASSERTIONS:
+                values = step.value if isinstance(step.value, list) else [step.value]
+                bad = [v for v in values if isinstance(v, str) and not allowed(
+                    v, exact=step.action in ('assert_value', 'assert_values'))]
+                if bad:
+                    raise ValueError(f'{where}: expected {bad[0]!r} is neither UI spec copy (placeholders filled '
+                                     'with this test\'s own input) nor this test\'s original input. Use the exact '
+                                     'spec copy text; do not paraphrase UAC wording.')
+            if step.action == 'click_dialog':
+                feedback = native.get(_action_testid(step.selector or ''))
+                if not feedback:
+                    raise ValueError(f'{where}: click_dialog is only for actions whose UI spec feedback is '
+                                     'native_confirm or native_alert')
+                messages = feedback.get(step.dialog.type)
+                if not messages:
+                    raise ValueError(f'{where}: dialog type must match the spec native feedback for this action')
+                if not any((p := _rendered(m, inputs)) is not None and p.fullmatch(_fold(step.dialog.message))
+                           for m in messages):
+                    raise ValueError(f'{where}: dialog message must be the spec feedback copy for this action')

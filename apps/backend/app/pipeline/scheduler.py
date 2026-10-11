@@ -1,6 +1,6 @@
 """Durable stage dispatch; multiple maintenance callers share the same DB transaction/key."""
 from sqlalchemy import select
-from app.persistence.models import Project, Ticket, Job, Candidate, Artifact
+from app.persistence.models import Project, Ticket, TicketVersion, Job, Candidate, Artifact
 
 ACTIVE = ("queued", "running", "waiting_input", "waiting_quota")
 DEFAULT_LIMITS = {"model_calls": 48, "tool_calls": 120, "active_s": 1800, "output_tokens": 4096,
@@ -78,7 +78,11 @@ class PipelineScheduler:
             specs = [j for j in jobs if j.status == 'succeeded' and
                      j.runtime_ref.get('payload', {}).get('task') == 'ui_spec']
             spec_revision = max((j.result.get('ui_spec_revision', 0) for j in specs), default=0)
+            version = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id,
+                                                           TicketVersion.version == t.current_version))
+            # The PO may mark a ticket without UI change; UI/UX is then skipped entirely.
             ui_ux = ((p.workflow.get('pipeline') or {}).get('ui_ux') is True and
+                     ((version.scope or {}).get('ui_change') if version is not None else None) is not False and
                      not (any(j.stage == 'technical_plan' for j in jobs) and
                           not any(j.stage == 'ui_spec' for j in jobs)))
             spec_requests = [j for j in jobs if j.status == 'succeeded' and spec_revision and

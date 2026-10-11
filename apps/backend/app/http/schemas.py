@@ -50,6 +50,7 @@ class Scope(Body):
     dependencies: list[str] = Field(default_factory=list, max_length=100)
     reverts_candidate_id: str | None = None
     qa_profile: Literal["lightweight", "manual"] | None = None
+    ui_change: bool | None = None
 
 
 class ScopeEdit(Revision):

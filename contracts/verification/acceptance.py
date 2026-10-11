@@ -337,7 +337,10 @@ def run_step(page, step, base_url, last_download):
         try:
             loc.click()
             assert len(observed) == 1, 'Expected one native dialog from this click'
-            assert observed[0] == {k: wanted[k] for k in ('type', 'message')}, 'Native dialog type/message differs'
+            def folded(text):
+                return ' '.join(str(text).split()).casefold()
+            assert (observed[0]['type'] == wanted['type'] and
+                    folded(observed[0]['message']) == folded(wanted['message'])), 'Native dialog type/message differs'
         finally:
             page.remove_listener('dialog', handle)
     elif action == 'double_click': loc.dblclick()
@@ -362,8 +365,9 @@ def run_step(page, step, base_url, last_download):
             data = handle.read(MAX_DOWNLOAD_BYTES + 1)
         assert len(data) <= MAX_DOWNLOAD_BYTES, 'Downloaded file exceeds runner limit (1 MiB)'
         last_download = {'filename': downloaded.suggested_filename, 'data': data}
-    elif action == 'assert_text': expect(loc).to_have_text(value)
-    elif action == 'assert_contains_text': expect(loc).to_contain_text(value)
+    # Text matching ignores case: the UI spec owns wording, not capitalisation/CSS text-transform.
+    elif action == 'assert_text': expect(loc).to_have_text(value, ignore_case=True)
+    elif action == 'assert_contains_text': expect(loc).to_contain_text(value, ignore_case=True)
     elif action == 'assert_count': expect(loc).to_have_count(value)
     elif action == 'assert_visible': expect(loc).to_be_visible()
     elif action == 'assert_hidden': expect(loc).to_be_hidden()

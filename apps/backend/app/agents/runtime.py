@@ -200,7 +200,8 @@ class StructuredAgentRuntime:
         for ticket in output.creation_order():
             document = {"title": ticket.title, "description": ticket.description,
                         "uac": [c.model_dump() for c in ticket.uac],
-                        "dependencies": [key_map[k] for k in ticket.depends_on_keys] + ticket.depends_on_ticket_ids}
+                        "dependencies": [key_map[k] for k in ticket.depends_on_keys] + ticket.depends_on_ticket_ids,
+                        **({"ui_change": ticket.ui_change} if ticket.ui_change is not None else {})}
             made = self.workflow.create_ticket(ctx.actor(), document, idempotency_key=f"breakdown:{root}:{ticket.key}")
             key_map[ticket.key] = made.id
             created.append(made.id)
@@ -236,7 +237,8 @@ class StructuredAgentRuntime:
             self._clarify(ctx, identity, output)
         identity = self._fence(ctx)
         document = {"title": output.title, "description": output.description,
-                    "uac": [c.model_dump() for c in output.uac], "dependencies": output.depends_on_ticket_ids}
+                    "uac": [c.model_dump() for c in output.uac], "dependencies": output.depends_on_ticket_ids,
+                    **({"ui_change": output.ui_change} if output.ui_change is not None else {})}
         for _ in range(3):  # the ticket may have changed revision while the model was thinking
             with self.db.read() as s:
                 revision = s.get(Ticket, identity["ticket_id"]).revision

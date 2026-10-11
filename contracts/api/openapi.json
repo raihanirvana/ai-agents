@@ -13568,6 +13568,17 @@
               }
             ],
             "title": "Qa Profile"
+          },
+          "ui_change": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ui Change"
           }
         },
         "additionalProperties": false,

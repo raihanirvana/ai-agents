@@ -25,7 +25,7 @@ TOOL_POLICY: dict[str, frozenset[str]] = {
     "technical-lead": frozenset({"read_repo", "propose_decision", "plan_dependencies", "review_candidate",
                                  "answer_message", "send_message"}),
     "developer": frozenset({"read_file", "read_files", "patch_file", "write_file", "edit_file", "edit_file_batch", "run_command", "run_checks", "inspect_diff", "submit_candidate",
-                            "send_message", "request_decision", "request_spec_amendment"}),
+                            "send_message", "request_decision", "request_spec_amendment", "read_design_reference"}),
     "qa": frozenset({"read_criteria", "propose_tests", "request_test_run", "inspect_app", "report_bug",
                      "send_message", "request_input", "request_contract_amendment", "request_spec_amendment"}),
     # Reads approved scope, baseline UI source and the pinned design reference; proposes a

@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
+import pytest
 from sqlalchemy import select, func
-from app.persistence.models import ApiCommand, Ticket, Approval, Job, Message
+from app.persistence.models import ApiCommand, Ticket, TicketVersion, Approval, Job, Message
 from app.workers import JobQueue
 from .conftest import SCOPE, SECRET
 
@@ -75,3 +76,40 @@ def test_no_arbitrary_identity_or_status_commands(api):
     assert api.cmd(f"/tickets/{t.id}/priority", {"expected_revision": t.revision,
         "priority": 1, "role": "user"}).status_code == 422
     assert api.client.post("/projects", json={"name": "x"}).json()["error"]["code"] == "idempotency_required"
+
+
+@pytest.mark.parametrize('marker', [False, True])
+def test_ui_change_survives_scope_edit_and_optional_field_replay(api, marker):
+    project = api.project()
+    path = f'/projects/{project.id}/tickets'
+    body = {**SCOPE, 'ui_change': marker}
+    first = api.cmd(path, body, 'marked-scope')
+    assert first.status_code == 200, first.text
+    assert api.cmd(path, body, 'marked-scope').json() == first.json()
+    ticket = first.json()['ticket']
+    edit_path = f"/tickets/{ticket['id']}/scope-versions"
+    edit = {'expected_revision': ticket['revision'], 'document': {**SCOPE, 'title': 'Coffee v2'}}
+    revised = api.cmd(edit_path, edit, 'marked-edit')
+    assert revised.status_code == 200, revised.text
+    # Null and omission normalize to the same historical command payload.
+    assert api.cmd(edit_path, {**edit, 'document': {**edit['document'], 'ui_change': None}},
+                   'marked-edit').json() == revised.json()
+    with api.db.read() as s:
+        versions = list(s.scalars(select(TicketVersion).where(TicketVersion.ticket_id == ticket['id'])))
+        assert len(versions) == 2 and all(version.scope['ui_change'] is marker for version in versions)
+
+
+@pytest.mark.parametrize('value', ['false', 0])
+def test_http_scope_rejects_non_boolean_ui_change(api, value):
+    project = api.project()
+    result = api.cmd(f'/projects/{project.id}/tickets', {**SCOPE, 'ui_change': value})
+    assert result.status_code == 422 and count(api, Ticket) == 0
+
+
+def test_unmarked_scope_creation_replays_with_null_marker(api):
+    project = api.project()
+    path = f'/projects/{project.id}/tickets'
+    first = api.cmd(path, SCOPE, 'legacy-scope')
+    assert first.status_code == 200, first.text
+    assert api.cmd(path, {**SCOPE, 'ui_change': None}, 'legacy-scope').json() == first.json()
+    assert count(api, Ticket) == 1

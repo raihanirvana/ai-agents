@@ -112,6 +112,10 @@ def create_app(*, db=None, store=None, settings=None, login_code=None, redactor=
             data.pop('qa_profile', None)
         if isinstance(body, b.ScopeEdit) and body.document.qa_profile is None:
             data['document'].pop('qa_profile', None)
+        if isinstance(body, b.Scope) and body.ui_change is None:
+            data.pop('ui_change', None)
+        if isinstance(body, b.ScopeEdit) and body.document.ui_change is None:
+            data['document'].pop('ui_change', None)
         if isinstance(body, b.Budget) and not body.unlimited_total_tokens:
             # Keep legacy budget command payloads stable for idempotent replay.
             data.pop('unlimited_total_tokens', None)

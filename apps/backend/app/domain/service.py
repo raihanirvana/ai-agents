@@ -110,8 +110,11 @@ class Workflow:
         return None
 
     def _scope(self, s, actor, t, document):
-        if not isinstance(document, dict) or set(document) - {"title", "description", "uac", "dependencies", "reverts_candidate_id", "qa_profile"}:
-            raise Invalid("scope fields are title/description/uac/dependencies/reverts_candidate_id/qa_profile")
+        if not isinstance(document, dict) or set(document) - {"title", "description", "uac", "dependencies", "reverts_candidate_id", "qa_profile", "ui_change"}:
+            raise Invalid("scope fields are title/description/uac/dependencies/reverts_candidate_id/qa_profile/ui_change")
+        ui_change = document.get('ui_change')
+        if ui_change is not None and type(ui_change) is not bool:
+            raise Invalid('ui_change must be true, false or omitted')
         profile = document.get('qa_profile')
         if profile not in (None, 'lightweight', 'manual'):
             raise Invalid('Invalid QA profile')
@@ -121,6 +124,11 @@ class Workflow:
             previous = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id,
                                                             TicketVersion.version == t.current_version))
             profile = (previous.scope or {}).get('qa_profile') if previous is not None else None
+        if ui_change is None and t.current_version:
+            # The PO's UI-change marker also survives a revision that does not restate it.
+            previous = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == t.id,
+                                                            TicketVersion.version == t.current_version))
+            ui_change = (previous.scope or {}).get('ui_change') if previous is not None else None
         title, uac, deps = document.get("title"), document.get("uac"), document.get("dependencies", [])
         if not isinstance(title, str) or not title.strip() or not isinstance(document.get("description", ""), str):
             raise Invalid("scope title/description invalid")
@@ -144,7 +152,8 @@ class Workflow:
                 raise Invalid("revert must reference an integrated accepted candidate")
         return {"title": title.strip(), "description": document.get("description", ""),
                 "uac": uac, "dependencies": deps, "reverts_candidate_id": revert,
-                **({"qa_profile": profile} if profile else {})}
+                **({"qa_profile": profile} if profile else {}),
+                **({"ui_change": ui_change} if ui_change is not None else {})}
 
     def _dag(self, s, actor, replacement=None):
         tids = set(s.scalars(select(Ticket.id).where(Ticket.project_id == actor.project_id)))
@@ -205,7 +214,8 @@ class Workflow:
         s.add(TicketVersion(ticket_id=t.id, version=version, title=doc["title"],
             description=doc["description"], uac=doc["uac"], scope={"dependencies": doc["dependencies"],
                 "reverts_candidate_id": doc["reverts_candidate_id"],
-                **({"qa_profile": doc["qa_profile"]} if doc.get("qa_profile") else {})},
+                **({"qa_profile": doc["qa_profile"]} if doc.get("qa_profile") else {}),
+                **({"ui_change": doc["ui_change"]} if doc.get("ui_change") is not None else {})},
             content_digest=sha256_bytes(canonical_json(doc)), created_by=actor.id))
         s.flush()
         for dep in doc["dependencies"]:

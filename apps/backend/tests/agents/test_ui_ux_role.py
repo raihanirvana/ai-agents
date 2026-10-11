@@ -39,8 +39,9 @@ def test_ui_ux_reads_and_proposes_but_never_writes_or_approves():
     assert not policy & forbidden
     assert ROLE_OPERATIONS['ui-ux'] == {'read_file', 'list_files'}
     assert 'propose_ui_spec' in NOT_WIRED  # wired with the ui_spec stage (DEV-021)
-    # Developer access to the reference arrives with DEV-022, not before.
-    assert 'read_design_reference' not in TOOL_POLICY['developer']
+    # Developer reads the same pinned principles when implementing a spec (DEV-022).
+    assert 'read_design_reference' in TOOL_POLICY['developer']
+    assert not {'read_design_reference', 'propose_ui_spec'} & (TOOL_POLICY['qa'] | TOOL_POLICY['technical-lead'])
 
 
 def test_model_configuration_covers_ui_ux():
@@ -103,10 +104,16 @@ def test_facade_enforces_the_role_policy(agent_env):
         ctx.stop_resources()
     developer = env.ctx(env.job('developer', 'implement', ticket=ticket, stage='development', lane='execution'))
     try:
-        with pytest.raises(Forbidden):
-            env.tools.call(developer, 'read_design_reference', {'name': 'frontend-design/SKILL.md'})
+        result = env.tools.call(developer, 'read_design_reference', {'name': 'frontend-design/SKILL.md'})
+        assert result['content'].startswith('---\nname: frontend-design')
     finally:
         developer.stop_resources()
+    qa = env.ctx(env.job('qa', 'qa_plan', ticket=ticket, stage='qa_plan'))
+    try:
+        with pytest.raises(Forbidden):
+            env.tools.call(qa, 'read_design_reference', {'name': 'frontend-design/SKILL.md'})
+    finally:
+        qa.stop_resources()
 
 
 @pytest.mark.parametrize('tool', ['send_message', 'request_decision'])

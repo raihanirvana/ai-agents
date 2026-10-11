@@ -32,9 +32,13 @@ def po_breakdown(env, **kw):
 
 
 # --- PO ----------------------------------------------------------------------------------------------------------------
-def test_po_breakdown_creates_validated_unapproved_tickets_with_real_dependencies(agent_env):
+@pytest.mark.parametrize('ui_change', [False, True])
+def test_po_breakdown_creates_validated_unapproved_tickets_with_real_dependencies(agent_env, ui_change):
     env = agent_env
-    env.script(THREE)
+    document = json.loads(json.dumps(THREE))
+    for ticket in document['tickets']:
+        ticket['ui_change'] = ui_change
+    env.script(document)
     sup = env.supervisor()
     job = po_breakdown(env)
     done = env.finish(sup, job.id)
@@ -45,6 +49,8 @@ def test_po_breakdown_creates_validated_unapproved_tickets_with_real_dependencie
         assert s.scalar(select(func.count()).select_from(Approval)) == 0  # PO proposals are never approvals
         from app.persistence.models import Dependency
         deps = {(d.ticket_id, d.depends_on_ticket_id) for d in s.scalars(select(Dependency))}
+        from app.persistence.models import TicketVersion
+        assert all(version.scope['ui_change'] is ui_change for version in s.scalars(select(TicketVersion)))
     key_map = done.result["key_map"]
     assert deps == {(key_map["T2"], key_map["T1"]), (key_map["T3"], key_map["T2"])}
     assert done.result["approved"] is False and done.result["fake_provider"] is True and done.result["model_calls"] == 1
@@ -172,11 +178,13 @@ def test_clarification_waits_for_the_user_then_resumes_with_the_answer(agent_env
     assert done.usage["model_calls"] == 2  # usage of the first generation was kept
 
 
-def test_po_revision_is_only_a_proposal_until_the_user_accepts_it(agent_env):
+@pytest.mark.parametrize('ui_change', [False, True])
+def test_po_revision_is_only_a_proposal_until_the_user_accepts_it(agent_env, ui_change):
     env = agent_env
     ticket = env.approved_ticket()
     revision = {"kind": "revision", "summary": "Add removal", "title": "Menu", "description": "Coffee menu",
-                "uac": [{"id": "UAC-1", "text": "Add coffee"}, {"id": "UAC-2", "text": "Remove coffee"}]}
+                "uac": [{"id": "UAC-1", "text": "Add coffee"}, {"id": "UAC-2", "text": "Remove coffee"}],
+                'ui_change': ui_change}
     env.script(revision, revision)
     sup = env.supervisor()
     job = env.job("po", "revise", ticket=ticket, stage="chat", payload={"request": "users must remove items"})
@@ -188,6 +196,11 @@ def test_po_revision_is_only_a_proposal_until_the_user_accepts_it(agent_env):
     t = env.world.ticket(ticket.id)
     accepted = env.world.w.decide_proposal(env.world.user, t.id, t.revision, proposal_message.id, True)
     assert accepted.current_version == 2 and accepted.phase == "scope_review"  # accepting re-opens review
+    from app.persistence.models import TicketVersion
+    with env.db.read() as s:
+        version = s.scalar(select(TicketVersion).where(TicketVersion.ticket_id == ticket.id,
+                                                     TicketVersion.version == 2))
+        assert version.scope['ui_change'] is ui_change
 
 
 # --- technical lead ------------------------------------------------------------------------------------------------------------

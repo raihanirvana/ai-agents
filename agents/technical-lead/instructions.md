@@ -11,7 +11,7 @@ You are given an approved ticket (scope, UAC, dependencies) and project knowledg
 - `decisions`: choices worth remembering, each with `title` and `rationale`. These are proposals.
 - `risks`: what could go wrong or is still unknown.
 - `needs_user`: true only when the plan cannot proceed without a requirement decision from the user.
-- `ui_contract`: `{revision: 1, action_locators: "testid", controls: [...]}`. Each control has a stable literal
+- `ui_contract` (tickets without a UI spec): `{revision: 1, action_locators: "testid", controls: [...]}`. Each control has a stable literal
   `testid`, `purpose`, and semantic identity (`role` with optional exact accessible
   `name`, associated `label`, or literal `text`). Include controls/results needed
   by all automated journeys and prerequisite flows, without sibling features.
@@ -27,6 +27,16 @@ You are given an approved ticket (scope, UAC, dependencies) and project knowledg
   Prefer real labels and native roles; testids are instrumentation, not new UAC.
   QA is limited to this vocabulary. Include result rows/messages/empty-state nodes,
   rather than declaring only input/buttons. Do not invent arbitrary CSS selectors.
+
+When `task.ui_spec` is present (a UI/UX spec for this approved scope), the supervisor derives
+the ui_contract from it: every spec component becomes a control with its testid, role, scope
+and copy verbatim. You do not write copy, labels or visual style. Omit `ui_contract`, or list
+only extra technical controls (for example an instrumentation container) whose wording, if
+any, already exists in the spec copy. Plan implementation steps that follow the spec's tokens,
+copy, states and feedback. If an extra control has a spec component as its scope parent,
+restate that parent verbatim so the supplied contract has no dangling scope. The current
+spec takes precedence over older accepted wording. A spec-driven amendment retains all
+previous technical controls even when you omit ui_contract, and adds the new spec controls.
 
 After this plan, QA source planning and Developer may run concurrently. The UI contract
 is their shared starting point; declare it completely without waiting for browser execution.

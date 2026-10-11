@@ -111,3 +111,18 @@ Skill ini **referensi yang dipin**, bukan dependency runtime:
 - Token warisan hanya boleh berubah jika UAC tiket ini memintanya, mengikuti aturan
   pewarisan kontrol UI yang sudah ada.
 - Cek statis membuktikan keberadaan literal di bundle, bukan perilaku di browser.
+
+## Penerapan ke role lain (DEV-022/023)
+
+- TL: kontrak final = kontrol spesifikasi verbatim + kontrol warisan/pin + kontrol teknis TL tanpa
+  wording baru (`add_technical_controls`). Spesifikasi saat ini mengalahkan wording warisan;
+  amandemen mempertahankan kontrol teknis lama walaupun TL tidak menulis ui_contract.
+- Developer: menerima UiSpec dan `read_design_reference`; cek statis memeriksa testid, literal copy
+  (termasuk satu karakter dan escape Unicode JavaScript) dan nilai token warna di bundle.
+  Shorthand/nama warna hasil minify diterima jika nilai opaque RGB-nya sama; alpha berbeda ditolak.
+- QA: `check_expected_values` membatasi expected text ke copy spesifikasi (placeholder diisi input
+  asli test) atau input asli; placeholder berulang memakai input yang sama. click_dialog memakai
+  jenis native_* dan pesan sesuai feedback. Runner mencocokkan teks tampilan tanpa membedakan
+  huruf besar/kecil; assert_value(s) mempertahankan case dan spasi input persis.
+- PO: `ui_change` per tiket berupa boolean asli; `false` melewati UI/UX. UAC menjelaskan perilaku,
+  bukan wording. Marker diwarisi revisi yang menghilangkannya; kontrak scope lama tetap kompatibel.

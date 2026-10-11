@@ -10,7 +10,7 @@ import json
 import re
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator, model_serializer
 from .ui_contract import UiContract
 
 KEY = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
@@ -40,6 +40,7 @@ class TicketProposal(Contract):
     uac: list[UAC] = Field(min_length=1, max_length=20)
     depends_on_keys: list[str] = Field(default_factory=list, max_length=12)
     depends_on_ticket_ids: list[str] = Field(default_factory=list, max_length=12)
+    ui_change: StrictBool | None = Field(default=None, description='Does this ticket change screens, copy or interaction?')
 
     @field_validator("uac")
     @classmethod
@@ -111,6 +112,7 @@ class PoRevision(Contract):
     description: str = Field(default="", max_length=4000)
     uac: list[UAC] = Field(min_length=1, max_length=20)
     depends_on_ticket_ids: list[str] = Field(default_factory=list, max_length=12)
+    ui_change: StrictBool | None = Field(default=None, description='Does this ticket change screens, copy or interaction?')
 
     @field_validator("uac")
     @classmethod

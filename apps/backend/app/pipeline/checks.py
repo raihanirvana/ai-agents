@@ -63,9 +63,11 @@ class DeveloperChecks:
 
         Advisory only: submission still checks the independent candidate build,
         and neither result is browser acceptance or QA evidence."""
-        ui_contract = self.workspace.ui_contract(self.ctx.queue.verify(self.ctx.lease))
+        identity = self.ctx.queue.verify(self.ctx.lease)
+        ui_contract = self.workspace.ui_contract(identity)
         if ui_contract is None:
             return None
+        ui_spec = self.workspace.ui_spec(identity) if hasattr(self.workspace, 'ui_spec') else None
         from .ui_inventory import check_build
         from app.workspace.errors import WorkspaceError
         started = time.monotonic()
@@ -73,17 +75,21 @@ class DeveloperChecks:
         try:
             if site.is_symlink() or not site.is_dir():
                 raise ValueError(f'build output {manifest.build_output}/ is missing after build')
-            check = check_build(site, ui_contract)
+            check = check_build(site, ui_contract, ui_spec)
         except (WorkspaceError, OSError, ValueError) as exc:
             check = {'status': 'incomplete', 'missing_testids': [], 'reason': str(exc)[:400]}
         row = {'phase': 'ui_contract', 'status': 'passed' if check['status'] == 'passed' else 'failed',
                'duration_s': round(time.monotonic() - started, 3),
                'missing_testids': check.get('missing_testids', [])[:60], 'qa_pass': False}
+        for key in ('missing_copy_keys', 'missing_color_tokens'):
+            if check.get(key):
+                row[key] = check[key][:60]
         if check.get('reason'):
             row['reason'] = check['reason']
         if row['status'] != 'passed':
-            row['next'] = ('Add literal data-testid attributes to the shipped controls in missing_testids, '
-                           'then run_checks again. Do not change the contract or UAC.')
+            row['next'] = ('Ship the UI spec literally: data-testid attributes in missing_testids, copy texts for '
+                           'missing_copy_keys and color token values for missing_color_tokens. Then run_checks '
+                           'again. Do not change the spec, contract or UAC.')
         return row
 
     def _phase(self, phase):

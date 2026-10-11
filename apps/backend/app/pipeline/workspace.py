@@ -368,7 +368,7 @@ class ProductWorkspace:
             site = sup.run_dir(started.ref) / 'builds' / built['build_id'] / 'artifact'
             from app.workspace.errors import WorkspaceError
             try:
-                ui_check = check_build(site, ui_contract)
+                ui_check = check_build(site, ui_contract, self.ui_spec(identity))
             except (WorkspaceError, OSError, ValueError) as exc:
                 ui_check = {'status': 'incomplete', 'missing_testids': [], 'qa_pass': False,
                             'reason': self.redactor.redact(str(exc))[:400]}
@@ -384,8 +384,9 @@ class ProductWorkspace:
             ui_check['artifact_id'] = row.id
             if ui_check['status'] != 'passed':
                 return {'submitted': False, 'failure_kind': 'ui_contract', 'ui_check': ui_check,
-                    'next': 'Keep working in this job. Add literal data-testid attributes to the shipped controls '
-                            'listed in missing_testids, rebuild and submit again. Do not change the contract or UAC.'}
+                    'next': 'Keep working in this job. Ship the UI spec literally: data-testid attributes in '
+                            'missing_testids, copy for missing_copy_keys and color tokens for missing_color_tokens; '
+                            'rebuild and submit again. Do not change the spec, contract or UAC.'}
         gate = None
         if built:
             source = sup.run_dir(started.ref) / 'verify' / built['build_id'] / 'src'

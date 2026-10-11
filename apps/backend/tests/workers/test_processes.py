@@ -129,11 +129,16 @@ def test_cancel_revokes_and_archives_the_attempts_workspace_run(env, tmp_path):
     assert (archive / "ARCHIVE-MANIFEST.json").is_file()  # evidence kept before cleanup
 
 
-def test_dead_worker_recovery_revokes_workspace_keeps_logs_and_preserves_other_run(clocked, clock, db_path, tmp_path):
+@pytest.mark.parametrize('spawn_log_delay', [0, 0.5])
+def test_dead_worker_recovery_revokes_workspace_keeps_logs_and_preserves_other_run(clocked, clock, db_path, tmp_path,
+                                                                                spawn_log_delay):
     """SIGKILL a real supervisor, leaving its children and workspace behind."""
     from app.workspace import WorkspaceSupervisor
     from app.workspace.errors import AuthorizationError
     from app.workspace.runspec import RunRef, RunStore
+    from app.persistence.models import Message
+    from sqlalchemy import select
+    from datetime import timedelta
     from tests.workspace.conftest import NoContainerSandbox, small_manifest
 
     root = tmp_path / "workspace"
@@ -143,31 +148,47 @@ def test_dead_worker_recovery_revokes_workspace_keeps_logs_and_preserves_other_r
         generation=1, lease_id="other:1", manifest=small_manifest(), provenance={"job_id": "unrelated"})
     job = clocked.enqueue([{"workspace": "demo"}, {"spawn": 60}, {"sleep": 60}])
     code = """
-import sys, threading
+import sys, threading, time
 from pathlib import Path
 from app.persistence import Database, ArtifactStore
 from app.workers import JobQueue, Supervisor, ProviderLimiter, WorkerConfig
 from app.adapters.runtime.fake import FakeRuntime
+from app.workers.runtime import RunContext
 from app.workspace import WorkspaceSupervisor
 from tests.workspace.conftest import NoContainerSandbox, small_manifest
+# Make the registration/log gap reproducible rather than depending on host load.
+original_log = RunContext.log
+def delayed_log(self, line, **kwargs):
+    if line.startswith('spawned process group'):
+        time.sleep(float(sys.argv[4]))
+    return original_log(self, line, **kwargs)
+RunContext.log = delayed_log
 db = Database(Path(sys.argv[1]))
 ws = WorkspaceSupervisor(Path(sys.argv[3]), sandbox=NoContainerSandbox())
 sup = Supervisor(db, ArtifactStore(Path(sys.argv[2])), {'fake': FakeRuntime(ws, small_manifest())},
     queue=JobQueue(db), limiter=ProviderLimiter(), config=WorkerConfig(heartbeat_s=0.05, poll_s=0.02))
 sup.run_forever(threading.Event())
 """
-    worker = subprocess.Popen([sys.executable, "-c", code, str(db_path), str(clocked.store.root), str(root)])
-    pgid = None
+    worker = subprocess.Popen([sys.executable, "-c", code, str(db_path), str(clocked.store.root), str(root),
+                               str(spawn_log_delay)])
+    pgid, logged = None, None
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             recorded = clocked.job(job.id).runtime_ref.get("processes")
             if recorded:
                 pgid = recorded[0]["pgid"]
-                break
+                # Registration and the runtime log are separate durable writes.
+                # This test asserts preservation of a log that existed at SIGKILL.
+                with clocked.db.read() as s:
+                    logged = s.scalar(select(Message.id).where(
+                        Message.thread_id == f"job:{job.id}:g{clocked.job(job.id).lease_generation}",
+                        Message.body.endswith(f" spawned process group {pgid}")))
+                if logged:
+                    break
             assert worker.poll() is None
             time.sleep(0.02)
-        assert pgid is not None
+        assert pgid is not None and logged
         worker.kill()
         # Keep the killed worker as a zombie until recovery: it cannot execute even
         # though its PID/start time remain visible in /proc until the parent reaps it.
@@ -186,7 +207,7 @@ sup.run_forever(threading.Event())
         owned = [RunStore(path).spec() for path in (root / "demo" / "runs").glob("run-*")
                  if RunStore(path).spec().provenance.get("job_id") == job.id]
         [spec] = owned
-        clock.advance(61)
+        clock.now = clocked.job(job.id).lease_expires_at + timedelta(seconds=1)
         runtime = FakeRuntime(workspace, small_manifest())
         sup = clocked.supervisor(worker_id="replacement", runtime=runtime)
         assert sup.recover() == [job.id]

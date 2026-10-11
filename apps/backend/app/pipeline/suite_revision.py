@@ -11,7 +11,7 @@ MAX_CHANGED_STEPS = 24
 MAX_CHANGED_PER_TEST = 12
 
 
-def revise_suite(original, proof, proposal, criteria, source, ui_contract=None):
+def revise_suite(original, proof, proposal, criteria, source, ui_contract=None, *, ui_spec=None):
     if proposal.abstain:
         raise ValueError('QA abstained: evidence does not support a safe suite revision')
     if proof.get('infrastructure_failure'):
@@ -39,6 +39,15 @@ def revise_suite(original, proof, proposal, criteria, source, ui_contract=None):
         updated = QaPlan.model_validate(document).materialize_fixtures()
         mapping_ids = set(replacements)
     updated.check_criteria(criteria)
+    if ui_spec is not None:
+        from app.agents.ui_spec import check_expected_values
+        try:
+            check_expected_values(original, ui_spec)
+            spec_bound = True
+        except ValueError:
+            spec_bound = False  # Older suites are not forced to rewrite unrelated expectations.
+        if spec_bound:
+            check_expected_values(updated, ui_spec)
     if original.uac_quoted:
         # A cited suite stays cited: changed or added assertions must quote approved criteria too.
         updated.check_uac_quotes(criteria)

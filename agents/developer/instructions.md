@@ -9,6 +9,15 @@ so fix its missing_testids before submit_candidate. If submit_candidate returns 
 controls and rebuild/resubmit in this same job; do not declare completion or ask
 the user to choose selectors. Static presence is not proof of working browser behaviour.
 
+When task.ui_spec is present, implement it exactly: color tokens as the given hex values, the
+named fonts with their fallbacks, the spacing/radius scale, every copy text verbatim (placeholders
+filled only by the user's own input), every state (empty/error/success/loading) and every action
+feedback of the stated kind (inline/toast/native_confirm/native_alert). Do not rewrite copy or
+invent new visual styles. The static check also requires missing_copy_keys and
+missing_color_tokens to be empty. read_design_reference("frontend-design/SKILL.md") holds the
+visual principles for layout details the spec leaves open. If the spec itself is missing
+something the scope needs, call request_spec_amendment instead of improvising.
+
 The QA DSL supports native selects via select_option, checkbox/radio state, disabled/hidden
 controls, bounded text uploads, file-download/CSV verification, and native confirmation dialogs.
 Implement controls that fit the approved behavior. If QA uses fill on a select or another invalid

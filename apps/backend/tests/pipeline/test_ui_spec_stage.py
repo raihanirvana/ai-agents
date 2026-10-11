@@ -16,7 +16,8 @@ from tests.pipeline.test_contract_amendment import finish
 from tests.pipeline.test_product_loop import setup
 
 
-CONTROLS = [{'testid': 'add-book', 'role': 'button', 'name': 'Tambah buku', 'purpose': 'add a book'}]
+# Restates the spec-derived control verbatim, as TL may (DEV-022); any difference is refused.
+CONTROLS = [{'testid': 'add-book', 'role': 'button', 'name': 'Tambah buku', 'purpose': 'menambah buku'}]
 
 
 def plan(revision=1, controls=CONTROLS):
@@ -467,3 +468,89 @@ def test_inherited_validation_keeps_identities_beyond_the_context_excerpt(agent_
     finally:
         ctx.stop_resources()
         env.queue.finish_cleanup(ctx.lease.job_id, ctx.lease.generation)
+
+
+def plan_without_contract():
+    return {'kind': 'technical_plan', 'summary': 'Implement the catalogue', 'steps': [{'title': 'Catalogue'}]}
+
+
+def latest_contract(runtime, env, ticket):
+    with env.db.read() as s:
+        row = runtime.workspace.latest_intent(s, {'ticket_id': ticket.id, 'scope_version': 1}, 'technical_plan')
+    return row.meta['plan']['ui_contract']
+
+
+def test_contract_is_derived_from_the_spec_when_tl_writes_none(agent_env, tmp_path):
+    env = agent_env
+    runtime, _, scheduler = setup(env, tmp_path, SpecDriver())
+    enable_ui_ux(env)
+    env.script(spec(), plan_without_contract())
+    ticket = env.approved_ticket()
+    finish(env, runtime, scheduler, 'ui_spec')
+    tl = finish(env, runtime, scheduler, 'technical_plan')
+    contract = latest_contract(runtime, env, ticket)
+    assert tl.result['ui_contract_revision'] == 1 and contract['action_locators'] == 'testid'
+    assert contract['controls'] == UiSpec.model_validate(SPEC).to_ui_contract().model_dump()['controls']
+
+
+def test_tl_may_only_add_technical_controls_without_new_wording(agent_env, tmp_path):
+    env = agent_env
+    runtime, _, scheduler = setup(env, tmp_path, SpecDriver())
+    enable_ui_ux(env)
+    container = {'testid': 'catalog-panel', 'role': 'region', 'purpose': 'instrumentation container'}
+    redefined = plan(controls=[{**CONTROLS[0], 'name': 'Simpan buku'}])
+    new_wording = plan(controls=[{**container, 'role': 'button', 'name': 'Kirim'}])
+    env.script(spec(), redefined, plan(controls=[container]))
+    ticket = env.approved_ticket()
+    finish(env, runtime, scheduler, 'ui_spec')
+    finish(env, runtime, scheduler, 'technical_plan')
+    assert 'defined by the UI spec' in str(env.provider.requests[-1])  # repaired in the same TL job
+    controls = {c['testid']: c for c in latest_contract(runtime, env, ticket)['controls']}
+    assert controls['add-book']['name'] == 'Tambah buku' and 'catalog-panel' in controls
+    from app.agents.ui_contract import UiContract
+    from app.agents.ui_spec import add_technical_controls
+    with pytest.raises(ValueError, match='outside the UI spec copy'):
+        add_technical_controls(UiSpec.model_validate(SPEC), UiContract.model_validate(new_wording['ui_contract']))
+
+
+def test_po_marked_ticket_without_ui_change_skips_the_ui_ux_stage(agent_env, tmp_path):
+    env = agent_env
+    runtime, _, scheduler = setup(env, tmp_path, SpecDriver())
+    enable_ui_ux(env)
+    env.script(plan())
+    env.approved_ticket({'title': 'Simpan lokal', 'description': 'Data disimpan', 'dependencies': [],
+                         'ui_change': False, 'uac': [{'id': 'UAC-1', 'text': 'Data tetap ada setelah reload'}]})
+    tl = finish(env, runtime, scheduler, 'technical_plan')
+    assert tl.result['ui_spec_revision'] == 0
+
+
+def test_current_spec_wording_wins_over_accepted_wording_for_a_scoped_control(agent_env, tmp_path):
+    env = agent_env
+    runtime, _, scheduler = setup(env, tmp_path, SpecDriver())
+    enable_ui_ux(env)
+    parent = UiSpec.model_validate(SPEC).to_ui_contract().controls[0].model_dump()
+    runtime._inherited_ui_controls = lambda identity, log=None: [{**parent, 'name': 'Katalog lama', 'text': 'Katalog lama'}]
+    extra = {'testid': 'heading-probe', 'role': 'status', 'scope_testid': parent['testid'], 'purpose': 'instrumentation'}
+    env.script(spec(), plan(controls=[parent, extra]))
+    ticket = env.approved_ticket()
+    finish(env, runtime, scheduler, 'ui_spec')
+    finish(env, runtime, scheduler, 'technical_plan')
+    controls = {c['testid']: c for c in latest_contract(runtime, env, ticket)['controls']}
+    assert controls[parent['testid']] == parent
+    assert controls['heading-probe']['scope_testid'] == parent['testid']
+    assert len(env.provider.requests) == 2
+
+
+def test_spec_amendment_with_no_tl_contract_preserves_technical_controls(agent_env, tmp_path):
+    env = agent_env
+    runtime, _, scheduler = setup(env, tmp_path, SpecDriver())
+    enable_ui_ux(env)
+    container = {'testid': 'catalog-panel', 'role': 'region', 'purpose': 'instrumentation container'}
+    env.script(spec(), plan(controls=[container]), amended_spec(), plan_without_contract())
+    ticket = env.approved_ticket()
+    for stage in ('ui_spec', 'technical_plan', 'qa_plan', 'ui_spec', 'technical_plan'):
+        finish(env, runtime, scheduler, stage)
+    contract = latest_contract(runtime, env, ticket)
+    assert contract['revision'] == 2
+    assert next(c for c in contract['controls'] if c['testid'] == 'catalog-panel')['purpose'] == container['purpose']
+    assert len(env.provider.requests) == 4

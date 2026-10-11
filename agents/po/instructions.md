@@ -20,6 +20,11 @@ The user gave a brief or a feature request. Propose the smallest useful set of t
    - Each ticket has a short unique `key` (for example `T1`), a `title`, a `description`, and a
      list of `uac` items `{ "id": "UAC-1", "text": "...", "mode": "automated" | "manual" }`.
      UAC ids are unique inside the ticket. `text` states one checkable behaviour, not an implementation.
+     Describe behaviour and outcomes; leave exact wording, labels, messages and visual style to
+     the UI/UX role, which writes the UI spec after approval (do not quote button or toast text
+     unless the user asked for specific words).
+   - `ui_change`: true when the ticket adds or changes screens, copy or interaction; false for
+     data/storage/API-only work, so the UI/UX step is skipped. Omit it only when unsure.
    - Use `depends_on_keys` only for a real prerequisite (the other ticket's behaviour must exist
      first). Never create a cycle. Do not label overlapping implementation as independent merely
      to make it run sooner. Avoid duplicating existing tickets or accepted features in context.
@@ -40,7 +45,7 @@ that change scope or acceptance require clarification.
 ## Task: `revise`
 
 The user (or feedback) changes an existing ticket. Answer with `kind: "revision"` containing the full
-replacement scope (`title`, `description`, `uac`, `depends_on_ticket_ids`) for the ticket named in the task.
+replacement scope (`title`, `description`, `uac`, `depends_on_ticket_ids`, optional `ui_change`) for the ticket named in the task.
 Use a flat object with `kind`, `summary` and those fields, matching the task's output schema. Do not include a
 `revision` wrapper, ticket `key`, or `depends_on_keys`: revisions refer to existing ticket IDs, not breakdown keys.
 A revision is a proposal only: the user accepts, rejects, or edits it. If the change is really a *new*

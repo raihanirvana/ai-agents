@@ -181,8 +181,8 @@ class PipelineRuntime:
         files, source, unavailable = self._baseline_ui_source(identity, base)
         amendment = ctx.job['runtime_ref'].get('payload', {}).get('contract_amendment')
         previous_contract = self.workspace.ui_contract(identity) if amendment else None
-        # The UI/UX spec is the source for copy and visuals (DEV-021); deriving the
-        # contract from it and restricting TL to technical controls is DEV-022.
+        # With a UI/UX spec the contract is derived from it; TL only adds technical
+        # controls and never writes copy or visual style (DEV-022).
         ui_spec = self.workspace.ui_spec(identity)
         # Accepted upstream controls are supervisor-owned; TL can only add to them.
         inherited = self._inherited_ui_controls(identity, log=ctx.log)
@@ -192,28 +192,55 @@ class PipelineRuntime:
                 ticket_id=identity['ticket_id'], version=identity['scope_version']).one().uac]
         def merged_contract(contract):
             return merge_inherited_contract(contract, inherited, criteria_texts, pinned)
+
+        def spec_contract(output):
+            """Spec-derived controls verbatim + inherited/pinned + TL technical controls."""
+            from app.agents.ui_spec import add_technical_controls
+            technical = output.ui_contract
+            revision = (technical.revision if technical is not None else
+                        previous_contract.revision + 1 if previous_contract is not None else 1)
+            try:
+                # Validate TL's raw controls before any supervisor restoration can
+                # conceal a spec redefinition. Then pin the current spec ahead of
+                # older accepted wording and retain all amendment instrumentation,
+                # including when TL omits ui_contract altogether.
+                derived = add_technical_controls(ui_spec, technical, accepted=[*inherited, *pinned], revision=revision)
+                fixed = [*pinned, *(c.model_dump() for c in ui_spec.to_ui_contract().controls)]
+                return merge_inherited_contract(derived, inherited, pinned=fixed)[0]
+            except ValueError as exc:
+                raise InvalidOutput(['ui_contract: ' + str(exc)[:400] + '. Spec controls are derived by the '
+                                     'supervisor; list only extra technical controls without new wording.']) from exc
         if amendment and (previous_contract is None or previous_contract.revision != amendment['revision']):
             raise InvalidOutput(['Contract amendment refers to an obsolete revision; use the current plan.'])
         def plan_rules(output):
             """Raised inside the repair turn, so TL sees and fixes them in this job."""
             if isinstance(output, Clarification):
                 return
-            if output.ui_contract is None and not self.fake:
+            if ui_spec is None and output.ui_contract is None and not self.fake:
                 raise InvalidOutput(['New technical plans require ui_contract with literal testids and semantic locators.'])
             merged = None
-            if inherited and output.ui_contract is not None:
+            if ui_spec is not None:
+                merged = spec_contract(output)
+            elif inherited and output.ui_contract is not None:
                 merged, _ = merged_contract(output.ui_contract)
             if previous_contract is not None:
                 if output.needs_user:
                     raise InvalidOutput(['Instrumentation amendment must not change scope or create an approval decision.'])
-                if output.ui_contract is None or output.ui_contract.revision != previous_contract.revision + 1:
+                if ui_spec is None and (output.ui_contract is None or
+                                        output.ui_contract.revision != previous_contract.revision + 1):
                     raise InvalidOutput([f'Contract amendment must advance revision exactly once: '
                                          f'use revision {previous_contract.revision + 1}.'])
+                if ui_spec is not None and merged.revision != previous_contract.revision + 1:
+                    raise InvalidOutput([f'Contract amendment must use revision {previous_contract.revision + 1} '
+                                         '(or omit ui_contract when no technical control is needed).'])
                 before = {c.testid: c.model_dump() for c in previous_contract.controls}
-                # TL's own wording is checked first; the merge then restores inherited structure.
-                after = {c.testid: c.model_dump() for c in output.ui_contract.controls}
-                if merged is not None and not any(after.get(k) != v for k, v in before.items()):
+                if ui_spec is not None:
                     after = {c.testid: c.model_dump() for c in merged.controls}
+                else:
+                    # TL's own wording is checked first; the merge then restores inherited structure.
+                    after = {c.testid: c.model_dump() for c in output.ui_contract.controls}
+                    if merged is not None and not any(after.get(k) != v for k, v in before.items()):
+                        after = {c.testid: c.model_dump() for c in merged.controls}
                 changed = sorted(key for key, value in before.items() if after.get(key) != value)
                 # A spec-driven revision may add only copy/states; it still never changes controls.
                 spec_driven = bool((amendment or {}).get('ui_spec_revision'))
@@ -223,27 +250,32 @@ class PipelineRuntime:
                         ' No new control was added.')])
         output, meta, snapshot = self._ask(ctx, identity,
             {'name': 'technical_plan', 'contract_amendment': amendment,
-             **({'ui_spec': ui_spec.model_dump(), 'ui_spec_policy': 'Approved-scope UI/UX spec: use its testids, '
-                 'roles and copy verbatim for ui_contract controls; do not write new copy or visual style.'}
+             **({'ui_spec': ui_spec.model_dump(), 'ui_spec_policy': 'Approved-scope UI/UX spec. The supervisor '
+                 'derives every spec component into ui_contract verbatim. Set ui_contract only for extra technical '
+                 'controls (e.g. an instrumentation container) without new wording; restate spec scope parents '
+                 'verbatim when required. The current spec overrides older accepted wording. Never write copy or visual style.'}
                 if ui_spec else {}),
              **({'inherited_ui_controls': inherited[:300], 'inherited_ui_controls_policy': 'These controls already '
                  'exist in the accepted app. List the ones this ticket uses by the same testid; omit the rest. The '
                  'supervisor restores their accepted role/scope_testid/dynamic_text and adds their scope parents. '
-                 'Change a name/label/text only when the new wording is required by this ticket\'s UAC. Add new '
-                 'controls for anything else.'} if inherited else {}),
+                 + ('Current UiSpec owns wording: never derive new wording from UAC.' if ui_spec is not None else
+                    'Change a name/label/text only when the new wording is required by this ticket\'s UAC.') +
+                 ' Add new controls for anything else.'} if inherited else {}),
              'previous_ui_contract': previous_contract.model_dump() if previous_contract else None, 'ticket_id': identity['ticket_id'], 'source_files': files,
              'baseline_ui_source': source, 'baseline_ui_source_unavailable': unavailable,
              'runner_manifest': manifest.to_dict(),
              'verification_policy': policy_context(),
              'reference_bootstrap': bootstrap_contract() if self.workspace.bootstrap_available(identity) else None,
              'onboarding': self._onboarding_context(identity['project_id'])},
-             LeadPlanOutput if self.fake else UiLeadPlanOutput, check=plan_rules,
+             LeadPlanOutput if self.fake or ui_spec is not None else UiLeadPlanOutput, check=plan_rules,
              context_limits=replace(self.structured.builder.limits,
                  total_tokens=max(32768, self.structured.builder.limits.total_tokens)))
         if isinstance(output, Clarification):
             ctx.request_input(output.as_text(), {}, 'pipeline-clarify:' + identity['root_job_id'] + ':' + str(identity['generation']))
         plan_rules(output)  # Backstop for outputs checkpointed before this rule ran in _ask.
-        if inherited and output.ui_contract is not None:
+        if ui_spec is not None:
+            output.ui_contract = spec_contract(output)
+        elif inherited and output.ui_contract is not None:
             output.ui_contract, replaced = merged_contract(output.ui_contract)
             if replaced:
                 ctx.log('Inherited accepted UI controls kept over TL redefinitions: ' + ', '.join(replaced[:20]))
@@ -465,6 +497,7 @@ class PipelineRuntime:
 
     def _qa_plan(self, ctx, identity):
         ui_contract = self.workspace.ui_contract(identity)
+        ui_spec = self.workspace.ui_spec(identity)
         # Accepted-app controls (e.g. setup from earlier features) are usable by QA without
         # being part of this ticket's small contract; the ones used are pinned with the plan.
         from app.agents.ui_contract import with_vocabulary, used_accepted_controls
@@ -526,6 +559,12 @@ class PipelineRuntime:
                 'Use declared testid locators for actions. If a required control is missing, call request_contract_amendment with concrete UAC/control details. Otherwise submit one validated QaPlan through propose_tests; this task does not execute or pass QA.',
             'source_files': source_files, 'baseline_ui_source': baseline_ui,
             'ui_contract': ui_contract.model_dump() if ui_contract else None,
+            **({'ui_spec': {'copy': ui_spec.model_dump()['copy'], 'feedback': ui_spec.model_dump()['feedback'],
+                            'states': ui_spec.model_dump()['states']},
+                'ui_spec_policy': 'Expected text comes only from ui_spec copy (fill {placeholders} with this '
+                    'test\'s own input) or the test\'s own input. click_dialog only for actions whose feedback '
+                    'is native_confirm/native_alert, with that copy as the message. If a needed text is missing '
+                    'from the spec, call request_spec_amendment.'} if ui_spec is not None else {}),
             **({'accepted_app_controls': [c for c in accepted_controls
                                           if c['testid'] not in {x.testid for x in ui_contract.controls}][:300],
                 'accepted_app_controls_policy': 'Existing controls of the accepted app. Use them for setup '
@@ -558,6 +597,10 @@ class PipelineRuntime:
                 except ValueError:
                     own = {c.testid for c in ui_contract.controls}
                     pinned_vocabulary = [c for c in accepted_controls if c['testid'] not in own][:300]
+            if ui_spec is not None:
+                # Expected text comes from spec copy or the test's own input (DEV-022).
+                from app.agents.ui_spec import check_expected_values
+                check_expected_values(suite, ui_spec)
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, current)
                 latest = self.workspace.latest_intent(s, current, 'technical_plan')
@@ -757,6 +800,12 @@ class PipelineRuntime:
             'reference_bootstrap': bootstrap, 'source_empty': not source_files,
             'qa_suite': suite.model_dump() if suite else None,
             'ui_contract': (ui_contract.model_dump() if (ui_contract := self.workspace.ui_contract(identity)) else None),
+            **({'ui_spec': ui_spec.model_dump(), 'ui_spec_policy': 'Implement the UI/UX spec exactly: design tokens '
+                '(colors as the given hex values, fonts, spacing, radius), copy texts verbatim with placeholders '
+                'filled only by the user\'s input, every state and every action feedback of the stated kind. '
+                'run_checks and submission verify literal testids, copy and color tokens in the build. '
+                'read_design_reference("frontend-design/SKILL.md") holds the visual principles.'}
+               if (ui_spec := self.workspace.ui_spec(identity)) else {}),
             'instructions': 'Implement approved scope on the restored snapshot; follow the latest repair feedback. '
                 'Use the source index to locate relevant code, read before edits and prefer run_checks before '
                 'submit_candidate. Completion requires a broker candidate, not prose. Test concerns are advisory '
@@ -892,6 +941,8 @@ class PipelineRuntime:
             **({'request_spec_amendment': {'reason': {'type': 'string', 'minLength': 12, 'maxLength': 2000}}}
                if self.workspace.ui_spec(identity) is not None else {})}
         parameters['submit_candidate']['test_concerns']['default'] = []
+        if ui_spec is not None:
+            parameters['read_design_reference'] = {'name': {'type': 'string'}}
         if not self.fake:
             from .source_tools import SourceTools
             source = SourceTools(sup, started, self.redactor,
@@ -1566,6 +1617,8 @@ class PipelineRuntime:
         from app.agents.ui_contract import with_vocabulary
         contract = with_vocabulary(UiContract.model_validate(target['ui_contract']) if target.get('ui_contract') else None,
                                    target.get('ui_vocabulary_controls'))
+        # Expected values stay tied to the UI spec of this approved scope (DEV-022).
+        spec_for_revision = self.workspace.ui_spec(identity)
         witness_hints = []
         for finding in (diagnosis or {}).get('findings', []):
             path = finding.get('source_path')
@@ -1675,7 +1728,7 @@ class PipelineRuntime:
                 proposal = QaSuiteRevision.model_validate(json.loads(self.store.read_bytes(s, saved.attachment_ids[-1])))
                 attachments = [*attachments, *saved.attachment_ids]
         if saved:
-            repaired = revise_suite(suite, proof, proposal, criteria, source, contract)
+            repaired = revise_suite(suite, proof, proposal, criteria, source, contract, ui_spec=spec_for_revision)
         else:
             context_ids, repaired, detail = [], None, ''
             from .contracts import bounded_revision_contract
@@ -1700,7 +1753,7 @@ class PipelineRuntime:
                     detail = 'QA abstained: ' + proposal.summary
                     break
                 try:
-                    repaired = revise_suite(suite, proof, proposal, criteria, source, contract)
+                    repaired = revise_suite(suite, proof, proposal, criteria, source, contract, ui_spec=spec_for_revision)
                     break
                 except ValueError as exc:
                     detail = self.redactor.redact(str(exc))[:600]
