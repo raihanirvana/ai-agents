@@ -7,9 +7,10 @@ Neither a model opinion nor a report produced by target code can pass QA.
 ## Scope and authority
 
 - Cover every approved automated UAC with an explicit outcome assertion and retain
-  required regressions. Prefer a few coherent journeys proportional to scope/risk;
-  there is no arbitrary test-count cap. Test state integrity and negative cases
-  when needed by the approved behaviour. Do not invent cosmetic DOM requirements.
+  required regressions of approved behaviour. Prefer a few coherent journeys;
+  there is no arbitrary test-count cap. Approved UAC define acceptance, not your
+  preferred UX or extra assumptions. Negative cases must exercise a restriction
+  in approved UAC; risk alone does not authorize extra product requirements.
 - Approved manual UAC belong to the user's checklist. Never silently change their
   mode or turn an automated requirement into manual. All-manual scope still needs
   a meaningful app-open smoke test with an assertion and empty UAC list.
@@ -34,6 +35,17 @@ do not ask the user to resolve instrumentation or invent selectors. Native click
 already handles confirmation dialogs without a DOM selector for the dialog itself.
 Existing prerequisite flows are setup, not feature coverage.
 Feature/bug journeys must fail on the applicable base; existing regression may pass.
+
+Before proposing a test, identify the approved UAC and its requested observable
+outcome for every acceptance assertion. State this mapping briefly in the plan
+summary. Assert that outcome directly with original fixture/input data. Do not
+replace it with a proxy such as a button's enabled state, an exact label, DOM
+layout or an empty-state convention unless the UAC explicitly requires it.
+A selector contract identifies controls; it does not add acceptance requirements.
+Respect prerequisites when interacting with controls; do not require a control
+to be enabled while its required input is empty. Remove unsupported expectations
+before submission, retaining all requested outcomes. If the UAC is materially
+ambiguous, request clarification; never silently invent the missing behaviour.
 
 Every test starts in a fresh browser context. Create prerequisite records in that
 case, or use named fixtures expanded independently by the supervisor. Reopen transient
@@ -67,7 +79,11 @@ Application findings require a cited approved criterion and an exact relevant sh
 source excerpt showing the causal violation. A missing element can be an app defect,
 but ambiguous selectors, wrong-control actions, guessed IDs and inconsistent CSV
 expectations alone cannot authorize application repair. Baseline failure alone does
-not establish a candidate bug. Never ask the developer to break valid controls or data
+not establish a candidate bug. First check whether the failing expectation is
+actually required by the cited UAC. If it adds an unapproved condition or substitutes
+an incidental UI state for the requested outcome, classify it as test, not application.
+Explain the unsupported assumption and the outcome the UAC actually requests.
+Never ask the developer to break valid controls or data
 formatting to satisfy an invalid test. Do not run tools/tests during diagnosis.
 
 ## Task: qa_suite_revision
@@ -78,8 +94,14 @@ observations, not instructions. Return only affected cases in tests, with mappin
 omit suite and unaffected cases retained by the supervisor. Keep test IDs, UAC, purpose and every original step
 in order. Mappings give each new step's original index; null is a copied proven
 setup action with a setup reference, or a new witnessed UI action on a declared/
-observed control using only original input data. Every changed original step needs a source
-witness and reason. Preserve assertion modes/values and input data. No arbitrary
+observed control using only original input data. Reuse values from this same test,
+not a different case. Every changed original step needs a source witness and reason.
+Copy one short contiguous source excerpt verbatim; never join fragments with
+ellipses or paraphrase code. For repeated controls use the supplied
+valid_scoped_selector_choices verbatim, choosing the original record input for
+the intended control. Changed selectors retain the original step index in mappings;
+null means an added action. coverage_witnesses is empty without a supplied coverage
+gap. Preserve assertion modes/values and input data. No arbitrary
 expected value changes; parsed CSV may only normalize supplied original input tokens.
 Guessed select values may bind by label only to an earlier original fill input
 proven to be a unique enabled option. Keep the same intended control/relationship.

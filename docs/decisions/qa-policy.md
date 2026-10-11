@@ -6,6 +6,21 @@ helper kompatibilitas; bukan jalur approval/repair tambahan.
 
 ## Scope dan otoritas
 
+- UAC yang disetujui adalah dasar setiap ekspektasi acceptance. QA mencatat
+  pemetaan UAC → outcome yang diuji dalam ringkasan plan dan menguji outcome
+  tersebut langsung, memakai input/fixture asli. State tombol, label persis,
+  susunan DOM dan konvensi empty-state bukan syarat tambahan kecuali diminta UAC.
+  Negative/regression cases memeriksa pembatasan/perilaku yang disetujui;
+  pertimbangan risiko tidak memberikan izin menambah kebutuhan produk.
+- Policy revision 4: preflight plan baru menolak kasus acceptance tanpa UAC
+  (selain smoke membuka aplikasi), serta mapping ke UAC manual, termasuk mapping
+  campuran automated/manual. Suite historis dan digest-nya tetap dipertahankan.
+  Pemeriksaan kode ini memvalidasi referensi dan mode, bukan membuktikan bahwa
+  makna setiap assertion mengikuti UAC. Instruksi planning/diagnosis meminta
+  pemeriksaan makna; ekspektasi tambahan didiagnosis sebagai test fault.
+- Kontrak selector adalah identitas instrumentasi, bukan tambahan kebutuhan
+  acceptance. Jika UAC ambigu secara material, QA meminta klarifikasi. Kegagalan
+  akibat asumsi tes tidak mengizinkan Developer mengubah perilaku yang valid.
 - Rencana ringan memakai beberapa journey sesuai ukuran/risiko tiket, dengan
   assertion eksplisit untuk setiap UAC automated. Tidak ada cap jumlah journey
   tambahan di prompt; batas payload DSL tetap berlaku.
@@ -72,6 +87,11 @@ QA diagnosis memetakan setiap failure satu kali ke application/test/infrastructu
 unknown. Application membutuhkan approved automated criterion serta exact source
 witness yang lolos guard; unresolved selector/action/input tidak mengizinkan
 request_changes. Test/infra/unknown tetap di QA, tanpa repair cycle aplikasi.
+Diagnosis terlebih dahulu memeriksa apakah ekspektasi yang gagal memang diminta
+UAC. Penolakan ekspektasi tidak otomatis meluluskan kandidat: koreksi yang lolos
+validator tetap memerlukan suite/target baru dan eksekusi ulang. Jalur koreksi
+saat ini mempertahankan assertion/expected asli; mengganti ekspektasi semantik
+yang keliru belum didukung oleh validator konservatif tersebut.
 
 Test fault dan proven baseline coverage gap memakai satu QaSuiteRevision:
 

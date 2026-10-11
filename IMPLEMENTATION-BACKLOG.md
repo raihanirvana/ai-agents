@@ -51,6 +51,86 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ### Efisiensi planning, pilihan QA dan stabilitas sandbox — 11 Oktober 2026
 
+Tindak lanjut permintaan user “QA hanya test sesuai UAC”: IN_PROGRESS sebelum
+edit pada pekerjaan QA aktif; rencana memperketat soul/instruksi, policy dan
+task planning/diagnosis tanpa alur komunikasi PO baru atau perubahan scope.
+Hasil: QA wajib memetakan ekspektasi ke outcome UAC dan tidak menambah state
+tombol/label/DOM/UX sebagai syarat acceptance. Preflight plan baru menolak mapping
+manual (termasuk campuran) dan kasus non-smoke tanpa UAC. Referensi/mode diperiksa
+kode; makna assertion tetap pemeriksaan model, bukan jaminan semantik deterministik.
+File: agents/qa/{SOUL,instructions}.md, pipeline/{qa_policy,runtime}.py dan
+docs/decisions/qa-policy.md. Syntax AST dan git diff --check diperiksa; tidak
+menambah/menjalankan tes untuk perubahan ini. Suite/evidence lama tidak diluluskan;
+koreksi ekspektasi semantik masih dibatasi validator existing. NOT_REVIEWED.
+Pemulihan QA #2: error witness kini menjelaskan source excerpt wajib contiguous
+dan input wajib dari test yang sama; instruksi diperjelas. Worker idle restart,
+retry HTTP ab534b7492d34133b38cbc3f4d695403 running dengan seluruh limit tetap
+null/unlimited. Tidak waive/ubah expected lama atau memberi approval pengguna.
+Outcome runner dicatat pada audit live; unit tests tidak dijalankan.
+Retry menemukan bentrok key pesan penolakan antar-attempt. Receipt rejection
+dipisahkan berdasarkan job/generation; hint source exact, identitas tes dan
+input asli disediakan eksplisit tanpa melonggarkan invariant. Retry lanjutan
+43eb4a98538b453c975aafe481dfa9a7 berjalan; histori/usage tetap kumulatif.
+Suite correction berhasil; open_uat tertahan guard producer receipt cache.
+domain/evidence.py kini memvalidasi support baseline-cache exact yang dipin
+laporan verifier; qa_resolution memakai helper sama. Pass tetap membutuhkan
+laporan verifier yang cocok invocation/target/suite/counts/commands/runner.
+API/worker restart dan verify retry; unit tests belum dijalankan, sintaks/diff
+bersih. Outcome aktual dicatat pada audit live.
+Hasil real retry verify: 7bbbfe83d6614453878fc12c440682e6 passed 3/3, 0
+failed/skipped, non-fake; #2 accepted melalui UAT user:local. #3 development
+dan QA planning aktif paralel dengan budget unlimited. Tanpa manual waiver.
+QA #3: 1/2 pass; salah selector global borrow-name-input saat dua record ada.
+Diagnosis test-contract, belum ada bug aplikasi. Proposal repair memakai locator
+role/filter/has-text di luar whitelist dan mapping menghapus indeks original.
+Task repair kini menyuplai locator scoped exact dari UiContract + input original,
+serta penjelasan mapping/coverage witness; invariant tidak dilonggarkan. Syntax
+AST/diff diperiksa; pemulihan via retry akan dicatat pada audit live.
+Retry mengungkap kontrak TL #3 flat (scope_testid hilang; row tidak dynamic),
+sehingga scoped hints kosong. Instruksi TL diperketat mempertahankan scope kontrol
+prerequisite; target lama memakai disambiguasi nth=0 yang sudah didukung bila
+fixture/DOM membuktikan first record. Hints exact source dari kode shipped;
+retry lanjut unlimited, tanpa perubahan expected atau metadata target diam-diam.
+Prompt-only hints belum cukup; output partial revision memakai enum locator
+exact dan purpose wajib. Pilihan positional hanya untuk declared controls yang
+terbukti berulang dalam DOM resmi; setup unik dipertahankan. Final repair guard
+tetap memeriksa original steps/assertions/source/mapping/UAC. 53 tes kontrak/UI
+existing lulus (0,66 s); browser retry aktif unlimited. Detail audit live.
+Hasil nyata #3: QA 9070e2973c9f41a68def69986257e627 passed 2/2, non-fake,
+0 failed/skipped; phase UAT. Diff suite hanya tiga locator aksi diberi nth=0;
+semua expected/UAC/steps/source tetap. Tanpa waiver atau approval agent. Status
+demo IN_PROGRESS menunggu UAT pengguna dan laporan final; review NOT_REVIEWED.
+
+Benchmark final 11 Oktober 13:52 WIB: ketiga tiket sudah accepted melalui UAT
+pengguna, QA otomatis 3/3 tanpa keputusan manual atau return bug aplikasi.
+Developer 19.285.712 → 1.531.876 token (turun 92,06%), 452 → 79 model calls,
+active 19,21 → 8,33 menit. Seluruh role 19.538.231 → 2.313.663 token dan
+biaya tercatat USD 1,438371 → 0,268440, termasuk retry; tiga job non-Developer
+memiliki sebagian usage unknown. Rollover baru #1/#2/#3: 0/1/0. QA justru
+naik ke USD 0,160818: dua tiket perlu pemulihan kontrak/tes, seluruhnya sudah
+resolved. Budget semua job tetap null/unlimited; tidak ada job demo queued/running.
+Audit live bagian Benchmark final memuat fase, user wait, pin evidence, dan
+keterbatasan: warm cache, intervensi platform, telemetry lama unavailable.
+Demo selesai; validasi cold/warm identik, peak memory, serta review perubahan
+platform belum selesai. Status pekerjaan platform tetap IN_PROGRESS/NOT_REVIEWED.
+
+Demo provider nyata dimulai pada d2361aa, project db758f7ce3ef43a697b7410b173d31bd.
+User approve scope di web; #1 QA otomatis lulus dan UAT, #2/#3 menunggu accepted
+base. Developer #1 323.577 token/20 calls/205,35 s dibanding lama 769.631/35/107,70 s:
+lebih hemat token, belum lebih cepat. Observer CLI/rollover/outcome read-only aktif;
+laporan final menunggu demo selesai. Audit library-live-efficiency-2026-10-11.md.
+Planning #2 terbentur konteks default 8k (~8311 token wajib). Batas planning
+diselaraskan minimal 32k, 6 regresi amendment lulus; worker/retry tanpa reset
+usage. Budget demo diverifikasi null/unlimited pada semua job.
+Demo menemukan loop QA amendment: validator menolak parent/child testid yang
+sudah declared dan didukung runner. Whitelist pasangan scoped yang tepat
+diperbaiki, 12 regresi lulus; checkpoint/usage tetap, worker restart.
+Developer #2 selesai 824.425 token (lama 16.287.114). QA 2/3 pass; diagnosis
+test-contract untuk tombol Pinjam enabled tanpa nama. Manual offer sempat
+ditolak karena evidence baseline-cache; qualifier diperbaiki hanya untuk
+receipt cache exact yang dipin proof resmi, 25 regresi domain lulus. HTTP
+manual offer UAC-4 tersedia; outcome final menunggu keputusan user.
+
 Status: IN_PROGRESS. Review: NOT_REVIEWED.
 Scope disetujui pengguna: (1) QA planning lane ringan/paralel dengan development,
 (2) benchmark cold/warm beserta metrik/token/rollover dan peak memory,

@@ -18,6 +18,11 @@ You are given an approved ticket (scope, UAC, dependencies) and project knowledg
   Optional `scope_testid` references a declared container. Use `dynamic_text: true`
   only for containers that show user-entered record names/text. Existing controls
   come from supplied baseline source; planned new controls come from approved UAC.
+  For controls repeated per record, declare the record container with dynamic_text
+  and set each row control's scope_testid to that container. Preserve these
+  relationships for prerequisite controls inherited from accepted features;
+  do not flatten repeated inputs/buttons into globally unique controls. Row
+  title/author text marked dynamic is not a substitute for a scoped row container.
   Developer must ship each declared `data-testid` literally in HTML/JS build output.
   Prefer real labels and native roles; testids are instrumentation, not new UAC.
   QA is limited to this vocabulary. Include result rows/messages/empty-state nodes,

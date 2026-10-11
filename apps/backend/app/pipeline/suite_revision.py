@@ -73,7 +73,8 @@ def revise_suite(original, proof, proposal, criteria, source, ui_contract=None):
             raise ValueError('unaffected tests cannot be changed')
         mapping = maps.get(key, list(range(len(test.steps))))
         if len(mapping) != len(replacement.steps) or [i for i in mapping if i is not None] != list(range(len(test.steps))):
-            raise ValueError('every original step/assertion must remain exactly once in original order')
+            raise ValueError('every original step/assertion must remain exactly once in original order; '
+                             'changed selectors retain their original index, null means an additional step only')
         test_changed = 0
         copied_indexes = {}
         observations = next(r for r in rows if r['id'] == key)
@@ -103,16 +104,20 @@ def revise_suite(original, proof, proposal, criteria, source, ui_contract=None):
                     used_setups.add(pair)
                 else:
                     witness = witnesses.get(pair)
-                    if (witness is None or witness.original_step is not None or
-                            witness.source_excerpt not in source.get(witness.source_path, '') or
-                            after['action'] not in ('click', 'fill', 'select_option', 'press', 'check', 'uncheck',
-                                                     'hover', 'focus')):
-                        raise ValueError('inserted action requires a shipped-source witness and supported user action')
+                    if witness is None or witness.original_step is not None:
+                        raise ValueError('inserted action needs a witness with original_step=null')
+                    if witness.source_excerpt not in source.get(witness.source_path, ''):
+                        raise ValueError('inserted action source_excerpt must be one exact contiguous excerpt from '
+                                         'the supplied source_path; do not join lines with ellipses or paraphrase code')
+                    if after['action'] not in ('click', 'fill', 'select_option', 'press', 'check', 'uncheck',
+                                              'hover', 'focus'):
+                        raise ValueError('inserted action is not a supported user action')
                     # No new inputs/expectations: use an original value for this same type of action.
                     if after.get('value') is not None and not any(
                             s.action == after['action'] and s.value == after['value'] and
                             s.select_by == replacement.steps[index].select_by for s in test.steps):
-                        raise ValueError('inserted action cannot invent new input data')
+                        raise ValueError('inserted action must reuse the same action/value/select_by from an '
+                                         'original step in this test; values from other tests are not authorized')
                     if not ui_contract and after['selector'] not in observed:
                         raise ValueError('inserted legacy action needs a runner-observed locator')
                     used_witnesses.add(pair)
@@ -126,7 +131,9 @@ def revise_suite(original, proof, proposal, criteria, source, ui_contract=None):
             witness = witnesses.get(pair)
             if (witness is None or witness.original_step != origin or
                     witness.source_excerpt not in source.get(witness.source_path, '')):
-                raise ValueError('each changed original step needs an exact shipped-source witness')
+                raise ValueError(f'test {key}, new step {index} (original {origin}, {before["selector"]}): '
+                                 'each changed original step needs an exact shipped-source witness; '
+                                 'preserve unrelated steps instead of changing their selectors')
             # Assertion type, value, download/dialog expectations and every input remain immutable.
             before_without_selector = {k: v for k, v in before.items() if k != 'selector'}
             after_without_selector = {k: v for k, v in after.items() if k != 'selector'}

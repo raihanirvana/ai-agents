@@ -4,7 +4,7 @@ from .contracts import browser_capabilities
 
 def policy_context():
     return {
-        'profile': 'lightweight', 'revision': 3,
+        'profile': 'lightweight', 'revision': 4,
         'browser_capabilities': browser_capabilities(),
         'planning_rules': [
             'Use a few coherent user journeys for small tickets, usually 1..3; this is guidance, not a cap.',
@@ -14,8 +14,14 @@ def policy_context():
             'Manual UAC belong to the user checklist. Do not add mandatory browser cases solely to duplicate them.',
             'If all UAC are manual, retain a meaningful browser smoke test with purpose smoke and empty uac list.',
             'Build, repository gates, browser health, immutable target and user UAT remain required.',
-            'High-impact state mutations, access control and data loss need negative/regression cases proportional to risk.',
-            'Do not add cosmetic DOM/label requirements. Check keyboard/accessibility behaviour when required or needed for the journey.',
+            'Every acceptance assertion must check an outcome or restriction in approved UAC; '
+            'record the UAC-to-outcome mapping briefly in the summary. Negative/regression cases '
+            'verify approved behaviour, not new requirements inferred from risk.',
+            'Assert the requested outcome directly. Do not substitute button enabled state, exact labels, '
+            'DOM layout or empty-state conventions unless the UAC requires them. Selector contracts '
+            'identify controls without adding acceptance requirements; respect input prerequisites.',
+            'Keyboard/accessibility actions may support the approved journey; separate accessibility '
+            'or cosmetic assertions require an approved criterion.',
             'Detect missing runner capabilities before implementation; never silently turn approved automated UAC into manual.',
             'Before scope approval, propose manual mode for subjective/external checks with a concrete user checklist and reason.',
             'Reuse named UI fixtures; supervisor expands their setup independently before pinning each test.',
@@ -23,7 +29,8 @@ def policy_context():
             'Application diagnosis must cite approved UAC and an exact relevant shipped-source excerpt.',
             'TL declares ui_contract before QA planning. Use declared testid locators for actions and exact role/name, label, text or testid for assertions; '
             'scope dynamic records with original fixture inputs instead of guessing IDs.',
-            'A failed assertion needs diagnosis against criteria, inputs, source and runner evidence before application repair.'
+            'A failed assertion needs diagnosis against criteria, inputs, source and runner evidence before application repair. '
+            'An unsupported expectation is a test fault; do not ask Developer to satisfy it.'
         ]}
 
 
@@ -35,11 +42,14 @@ def preflight(suite, criteria, scope_version, *, new_plan=False):
         suite.check_selection_contracts()
         automated = {c['id'] for c in criteria if c.get('mode', 'automated') == 'automated'}
         for test in suite.tests:
-            if test.uac and not automated.intersection(test.uac):
+            if test.uac and not set(test.uac) <= automated:
                 raise ValueError('Approved manual UAC belong to the user checklist, not a new mandatory browser case. '
                                  'Cover automated UAC; for all-manual scope keep a meaningful smoke case with empty uac list.')
+            if not test.uac and test.purpose != 'smoke':
+                raise ValueError('Acceptance tests must cite approved automated UAC. '
+                                 'Only app-open smoke may have an empty UAC list.')
     coverage = {c['id']: [test.id for test in suite.tests if c['id'] in test.uac] for c in criteria}
-    return {'profile': 'lightweight', 'revision': 3, 'scope_version': scope_version,
+    return {'profile': 'lightweight', 'revision': 4, 'scope_version': scope_version,
             'status': 'planned', 'suite_digest': suite.digest,
             'capability_revision': browser_capabilities()['revision'],
             'test_count': len(suite.tests),

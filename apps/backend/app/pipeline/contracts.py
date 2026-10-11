@@ -5,7 +5,7 @@ import hashlib
 import io
 import json
 import re
-from pydantic import ConfigDict, Field, model_validator, model_serializer, StrictInt, StrictStr, StrictBool
+from pydantic import ConfigDict, Field, model_validator, model_serializer, StrictInt, StrictStr, StrictBool, create_model
 from app.agents.outputs import Contract, ID
 
 
@@ -508,6 +508,20 @@ class QaSuiteRevision(Contract):
     witnesses: list[RevisionWitness] = Field(default_factory=list, max_length=24)
     coverage_witnesses: list[CoverageWitness] = Field(default_factory=list, max_length=480)
     input_bindings: list[RevisionInputBinding] = Field(default_factory=list, max_length=24)
+
+
+def bounded_revision_contract(selectors):
+    """Expose a small exact selector vocabulary; final source/UAC repair guards still apply."""
+    choices = tuple(sorted(set(selectors)))
+    if not choices:
+        return QaSuiteRevision
+    step = create_model('BoundedRevisionStep', __base__=Step,
+        selector=(Literal[choices] | None, Field(default=None)))
+    test = create_model('BoundedRevisionTest', __base__=BrowserTest,
+        steps=(list[step], Field(min_length=1, max_length=30)),
+        purpose=(Literal['feature', 'bug', 'regression', 'smoke'], Field()))
+    return create_model('BoundedQaSuiteRevision', __base__=QaSuiteRevision,
+        tests=(list[test], Field(default_factory=list, max_length=24)))
 
 
 def validate_report(report, *, invocation_id, target_digest, suite: QaPlan):

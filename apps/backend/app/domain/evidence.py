@@ -72,21 +72,52 @@ def target(session, store, candidate, target_id, target_digest):
     return row
 
 
+def verification_support(session, store, rows, proof):
+    """Cache receipts are support only, and must be pinned by verifier-owned proof."""
+    baseline = proof.get('baseline') or {}
+    execution = baseline.get('execution') or {}
+    refs = {baseline.get('cache_artifact_id'): 'baseline-build',
+            execution.get('cache_artifact_id'): 'baseline-browser'}
+    refs.pop(None, None)
+    for row in rows:
+        if row.meta.get('producer') == 'verification':
+            continue
+        expected = refs.get(row.id)
+        if (row.kind != 'report' or row.meta.get('producer') != 'execution-cache' or
+                expected is None or row.meta.get('cache_kind') != expected):
+            raise Invalid('Only verification evidence and its exact pinned baseline cache receipts can qualify')
+        receipt = document(session, store, row.id)
+        if receipt.get('kind') != expected or receipt.get('key') != row.meta.get('cache_key'):
+            raise Invalid('Baseline cache receipt identity differs from its trusted metadata')
+
+
 def verification(session, store, candidate, verification_id):
     v = session.get(Verification, verification_id)
     if v is None or v.candidate_id != candidate.id or v.target_artifact_id != candidate.target_artifact_id or v.target_digest != candidate.target_digest:
         raise Conflict("verification belongs to another candidate/target")
     target(session, store, candidate, v.target_artifact_id, v.target_digest)
-    for aid in v.evidence_artifact_ids:
-        proof = artifact(session, store, candidate.project_id, aid)
-        if proof.meta.get("producer") != "verification":
-            raise Invalid("evidence must be published by verification service")
+    rows = [artifact(session, store, candidate.project_id, aid) for aid in v.evidence_artifact_ids]
     manifest = document(session, store, v.target_artifact_id)
     if v.suite_digest != manifest["runner_manifest_digest"]:
         raise Conflict("verification suite differs from pinned runner manifest")
     if v.status != 'passed':
         from .qa_resolution import validate_persisted
         return validate_persisted(session, store, candidate, v.id)
+    if any(row.meta.get('producer') != 'verification' for row in rows):
+        reports = [document(session, store, row.id) for row in rows
+                   if row.kind == 'report' and row.meta.get('producer') == 'verification']
+        reports = [proof for proof in reports if proof.get('invocation_id') == v.evidence_id
+                   and isinstance(proof.get('report'), dict)]
+        if len(reports) != 1:
+            raise Invalid('The authoritative acceptance report is unavailable or ambiguous')
+        proof = reports[0]
+        report = proof['report']
+        if (report.get('invocation_id') != v.evidence_id or report.get('target_digest') != v.target_digest
+                or report.get('suite_digest') != v.suite_digest or proof.get('status') != 'passed'
+                or proof.get('counts') != v.counts or proof.get('commands') != v.results.get('commands')
+                or proof.get('runner') != manifest.get('runner')):
+            raise Invalid('Authoritative acceptance proof differs from the pinned verification')
+        verification_support(session, store, rows, proof)
     if v.results.get("fake_provider") is not False or v.results.get("infrastructure_failure") is not False:
         raise Invalid("QA requires non-fake successful harness execution")
     counts = v.counts

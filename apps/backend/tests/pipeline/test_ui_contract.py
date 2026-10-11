@@ -44,3 +44,17 @@ def test_new_policy_allows_semantic_assertions():
 def test_unknown_input_is_not_dynamic_vocabulary():
     with pytest.raises(ValueError, match='outside ui_contract'):
         contract(action_locators='testid').check_suite(suite('testid=list >> has_text="Generated" >> testid=delete'))
+
+
+@pytest.mark.parametrize('selector', ['testid=list >> testid=delete',
+                                      'testid=list >> testid=delete >> nth=0'])
+def test_declared_parent_child_testid_needs_no_dynamic_text_filter(selector):
+    contract(action_locators='testid').check_suite(suite(selector))
+
+
+@pytest.mark.parametrize('selector', ['testid=select >> testid=delete',
+                                      'testid=list >> testid=missing',
+                                      'testid=list >> testid=select'])
+def test_scoped_testid_requires_the_declared_parent_and_child(selector):
+    with pytest.raises(ValueError, match='outside ui_contract'):
+        contract(action_locators='testid').check_suite(suite(selector))

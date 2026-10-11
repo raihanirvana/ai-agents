@@ -172,7 +172,9 @@ class PipelineRuntime:
              'verification_policy': policy_context(),
              'reference_bootstrap': bootstrap_contract() if self.workspace.bootstrap_available(identity) else None,
              'onboarding': self._onboarding_context(identity['project_id'])},
-             LeadPlanOutput if self.fake else UiLeadPlanOutput, check=plan_rules)
+             LeadPlanOutput if self.fake else UiLeadPlanOutput, check=plan_rules,
+             context_limits=replace(self.structured.builder.limits,
+                 total_tokens=max(32768, self.structured.builder.limits.total_tokens)))
         if isinstance(output, Clarification):
             ctx.request_input(output.as_text(), {}, 'pipeline-clarify:' + identity['root_job_id'] + ':' + str(identity['generation']))
         plan_rules(output)  # Backstop for outputs checkpointed before this rule ran in _ask.
@@ -247,6 +249,8 @@ class PipelineRuntime:
             limits=replace(builder.limits, total_tokens=max(32768, builder.limits.total_tokens)))
         snapshot = planning_builder.build(identity, task={
             'name': 'qa_plan', 'instruction': 'Plan from approved UAC, technical plan and supplied source. '
+                'Acceptance assertions must check the outcome or restriction required by approved UAC, '
+                'not an extra assumption or incidental UI state. Summarize the UAC-to-outcome mapping. '
                 'Use declared testid locators for actions. If a required control is missing, call request_contract_amendment with concrete UAC/control details. Otherwise submit one validated QaPlan through propose_tests; this task does not execute or pass QA.',
             'source_files': source_files, 'baseline_ui_source': baseline_ui,
             'ui_contract': ui_contract.model_dump() if ui_contract else None,
@@ -925,6 +929,8 @@ class PipelineRuntime:
             'source_complete': not unavailable and len(source) == len(eligible) and remaining > 0,
             'source_unavailable': unavailable,
             'instructions': 'Diagnose every failed test against approved criteria, original input, runner evidence and source. '
+                'First establish that the failed expectation is required by approved UAC. '
+                'An unapproved extra condition or incidental-state proxy is a test fault even when the assertion fails. '
                 'Return QaDiagnosis. Application fault requires concrete evidence that the assertion is valid and shipped '
                 'behaviour violates a criterion. Each application finding MUST include criterion_id, source_path and '
                 'source_excerpt copied exactly from supplied shipped source (12..400 characters), explaining the causal bug. '
@@ -1127,10 +1133,62 @@ class PipelineRuntime:
                 'evidence_artifact_ids': attachments}, retryable=False,
                 error='QA suite repair limit reached; review the suite/evidence. Application repair was not requested.')
         contract = UiContract.model_validate(target['ui_contract']) if target.get('ui_contract') else None
+        witness_hints = []
+        for finding in (diagnosis or {}).get('findings', []):
+            path = finding.get('source_path')
+            for excerpt in (finding.get('source_excerpt') or '').splitlines():
+                if (12 <= len(excerpt.strip()) <= 400 and excerpt in source.get(path, '')
+                        and {'source_path': path, 'source_excerpt': excerpt} not in witness_hints):
+                    witness_hints.append({'source_path': path, 'source_excerpt': excerpt})
+        affected_ids = {row['id'] for row in (proof.get('report') or {}).get('tests', [])
+                        if row.get('status') == 'failed'}
+        affected_ids.update(baseline_coverage_gaps(suite, proof))
+        scoped_choices, positional_choices = {}, {}
+        if contract:
+            from collections import Counter
+            observations_by_test = {row['id']: row for row in (proof.get('report') or {}).get('tests', [])}
+            for test in suite.tests:
+                if test.id not in affected_ids:
+                    continue
+                inputs = {value for step in test.steps if step.action in ('fill', 'select_option')
+                          for value in (step.value if isinstance(step.value, list) else [step.value])
+                          if isinstance(value, str)}
+                controls = {step.selector.rsplit(' >> ', 1)[-1] for step in test.steps if step.selector}
+                choices = sorted(locator for locator in contract.selectors(inputs)
+                                 if ' >> has_text=' in locator and locator.rsplit(' >> ', 1)[-1] in controls)
+                scoped_choices[test.id] = {'locators': choices[:96], 'truncated': len(choices) > 96}
+                allowed = contract.selectors(inputs)
+                observed_counts = Counter(item.get('selector') for item in
+                    (observations_by_test.get(test.id, {}).get('dom') or {}).get('locator_candidates', []))
+                positional_choices[test.id] = sorted({step.selector + ' >> nth=0'
+                    for step in test.steps if step.selector in allowed
+                    and observed_counts[step.selector] > 1 and not step.action.startswith('assert_')})
+                for control in contract.controls:
+                    if 'testid=' + control.testid not in controls:
+                        continue
+                    for path, content in source.items():
+                        excerpt = next((line for line in content.splitlines()
+                            if 12 <= len(line.strip()) <= 400 and
+                            ('"' + control.testid + '"' in line or "'" + control.testid + "'" in line)), None)
+                        hint = {'source_path': path, 'source_excerpt': excerpt}
+                        if excerpt and hint not in witness_hints:
+                            witness_hints.append(hint)
+                            break
         task = {'name': 'qa_suite_revision', 'candidate_id': candidate.id,
+            'selector_contract_revision': 2,
             'target_digest': candidate.target_digest, 'verification_id': verification_id,
             'suite': suite.model_dump(), 'approved_criteria': criteria, 'source': source,
             'diagnosis': diagnosis, 'observations': (proof.get('report') or {}).get('tests', []),
+            'unchangeable_test_fields': [{'id': test.id, 'uac': test.uac, 'purpose': test.purpose}
+                                        for test in suite.tests],
+            'original_insertable_inputs': {test.id: [
+                {'action': step.action, 'value': step.value, 'select_by': step.select_by}
+                for step in test.steps if step.value is not None and
+                step.action in ('fill', 'press', 'select_option')]
+                for test in suite.tests},
+            'exact_source_excerpt_hints': witness_hints[:12],
+            'valid_scoped_selector_choices': scoped_choices,
+            'first_record_selector_choices': positional_choices,
             'ui_contract': contract.model_dump() if contract else None,
             'ui_locators': sorted(contract.selectors()) if contract else [],
             'coverage_gap_test_ids': baseline_coverage_gaps(suite, proof),
@@ -1144,6 +1202,24 @@ class PipelineRuntime:
                 'using a declared/observed control and only original input data. Preserve test IDs, '
                 'UAC, purpose, inputs, every assertion type/expected value and all original steps. Each changed original '
                 'step needs an exact source witness and reason. Use declared testid locators for actions, role/label/text or testid for assertions. '
+                'Copy source_excerpt as one short contiguous substring of the supplied source file; never '
+                'concatenate fragments with ellipses, invent formatting or paraphrase code. Inserted input '
+                'must reuse an original value from this same test with the same action and selection mode, '
+                'not data from another test. Restore only the prerequisites needed for the approved journey. '
+                'Explicitly copy id/uac/purpose from unchangeable_test_fields into each replacement test; '
+                'do not omit purpose because its schema default may differ from the original test. '
+                'original_insertable_inputs lists permissible same-test values. Source excerpt hints are '
+                'literal source data, not proof of semantic relevance; choose a relevant exact witness. '
+                'For repeated controls, valid_scoped_selector_choices supplies literal DSL locators derived '
+                'from the declared parent/child and this test\'s original inputs. Copy the relevant locator exactly; '
+                'do not write Playwright code, filter(...) or has-text syntax. A selector replacement maps to '
+                'the same original index. When scoped choices are empty because the pinned contract is flat, '
+                'first_record_selector_choices offers legal nth=0 locators; use these only if the original '
+                'fixture and authoritative DOM identify the intended first record. Do not infer record identity '
+                'from generated IDs or choose an arbitrary record. Null is only for a genuinely inserted action. '
+                'Change only the repeated controls implicated in the failure. Preserve unique setup controls '
+                'and all unrelated steps exactly; adding nth to every action is unnecessary and requires extra witnesses. '
+                'coverage_witnesses must be empty when coverage_gap_test_ids is empty. '
                 'Legacy replacement locators must be observed runner candidates. An observed fill-on-select can '
                 'become select_option by value only with the same original input. Coverage gaps also need one '
                 'coverage_witness per affected test/UAC linking an actual feature action to an outcome assertion. '
@@ -1168,9 +1244,14 @@ class PipelineRuntime:
             repaired = revise_suite(suite, proof, proposal, criteria, source, contract)
         else:
             context_ids, repaired, detail = [], None, ''
+            from .contracts import bounded_revision_contract
+            selectors = {step.selector for test in suite.tests for step in test.steps if step.selector}
+            selectors.update(locator for choices in scoped_choices.values() for locator in choices['locators'])
+            selectors.update(locator for choices in positional_choices.values() for locator in choices)
+            revision_contract = bounded_revision_contract(selectors) if contract else QaSuiteRevision
             # One bounded validator feedback opportunity in the same job/budget.
             for attempt in range(2):
-                proposal, meta, _ = self._ask(ctx, identity, task, QaSuiteRevision,
+                proposal, meta, _ = self._ask(ctx, identity, task, revision_contract,
                     context_limits=replace(self.structured.builder.limits, total_tokens=32768))
                 context_ids.append(meta['context_artifact_id'])
                 if proposal.abstain:
@@ -1190,7 +1271,8 @@ class PipelineRuntime:
                         name='qa-suite-revision-rejected.json', document={'proposal': proposal.model_dump(),
                             'validator_error': detail, 'qa_pass': False},
                         meta={'producer': 'qa-suite-revision-rejected', **pins})
-                    self.workspace._post(s, identity, key + ':rejected',
+                    self.workspace._post(s, identity,
+                        key + ':rejected:' + identity['job_id'] + ':' + str(identity['generation']),
                         'QA revision withheld: ' + detail, [*context_ids, row.id], 'qa_suite_revision', **pins)
                 return Outcome('failed', {'failure_kind': 'test_contract', 'verification_id': verification_id,
                     'evidence_artifact_ids': [*attachments, *context_ids, row.id]}, retryable=False,

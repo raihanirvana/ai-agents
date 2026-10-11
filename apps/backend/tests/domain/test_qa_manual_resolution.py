@@ -11,7 +11,7 @@ from app.pipeline.contracts import QaPlan
 from .conftest import world, db, db_path, store  # noqa: F401
 
 
-def inconclusive(world, *, fault='unknown', smoke=True, gate='passed', fake=False, infra=False, skipped=False):
+def inconclusive(world, *, fault='unknown', smoke=True, gate='passed', fake=False, infra=False, skipped=False, cache_receipts=False, reference_cache=True):
     t, c = world.submitted()
     suite = QaPlan.model_validate({'kind': 'qa_plan', 'summary': 'Original approved feature', 'tests': [
         {'id': 'feature-add', 'purpose': 'feature', 'uac': ['UAC-1'],
@@ -31,13 +31,25 @@ def inconclusive(world, *, fault='unknown', smoke=True, gate='passed', fake=Fals
                  'required_checks': {'status': gate}, 'infrastructure_failure': infra,
                  'runner': {'runner_code_digest': 'a' * 64, 'runner_image_id': 'synthetic-test-image'},
                  'commands': [{'argv': ['isolated-browser-runner', report['invocation_id']], 'exit_code': 1}]}
+        support_ids = []
+        if cache_receipts:
+            baseline = {'base_sha': c.base_sha, 'execution': {}}
+            for kind in ('baseline-build', 'baseline-browser'):
+                key = ('b' if kind == 'baseline-build' else 'c') * 64
+                receipt = world.store.put_json(s, project_id=t.project_id, kind='report',
+                    name=kind + '-cache.json', document={'kind': kind, 'key': key, 'value': {}},
+                    meta={'producer': 'execution-cache', 'cache_kind': kind, 'cache_key': key})
+                support_ids.append(receipt.id)
+                if reference_cache:
+                    (baseline if kind == 'baseline-build' else baseline['execution'])['cache_artifact_id'] = receipt.id
+            proof['baseline'] = baseline
         a = world.store.put_json(s, project_id=t.project_id, kind='report', name='acceptance.json',
             document=proof, meta={'producer': 'verification'})
         v = Verification(candidate_id=c.id, target_artifact_id=target.id, target_digest=target.checksum,
             commit_artifact_id=c.commit_artifact_id, build_artifact_id=c.build_artifact_id,
             context_artifact_id=c.context_artifact_id, evidence_id=report['invocation_id'], suite_digest=suite.digest,
             expected_test_ids=['feature-add'], counts={k: report[k] for k in ('discovered', 'executed', 'passed', 'failed', 'skipped')},
-            uac_coverage={'UAC-1': ['feature-add']}, status='failed', evidence_artifact_ids=[a.id],
+            uac_coverage={'UAC-1': ['feature-add']}, status='failed', evidence_artifact_ids=[*support_ids, a.id],
             results={'fake_provider': fake, 'infrastructure_failure': infra, 'executed_test_ids': ['feature-add'],
                      'commands': proof['commands']})
         s.add(v); s.flush()
@@ -47,7 +59,7 @@ def inconclusive(world, *, fault='unknown', smoke=True, gate='passed', fake=Fals
                  'reason': 'The evidence does not establish an application fault.'}]},
             meta={'producer': 'qa-diagnosis', 'verification_id': v.id, 'target_digest': target.checksum, 'fake': fake})
         args = dict(candidate_id=c.id, verification_id=v.id, target_artifact_id=target.id, target_digest=target.checksum,
-                    diagnosis_artifact_id=diagnosis.id, evidence_ids=[a.id, diagnosis.id], manual_uac_ids=['UAC-1'],
+                    diagnosis_artifact_id=diagnosis.id, evidence_ids=[*support_ids, a.id, diagnosis.id], manual_uac_ids=['UAC-1'],
                     reason='I will check this inconclusive feature manually.')
     return world.ticket(t.id), c, v, args
 
@@ -167,4 +179,16 @@ def test_manual_decision_refuses_active_qa_and_changed_base(world):
         project = s.get(Project, t.project_id)
         project.workflow = {**project.workflow, 'accepted_tip': 'e' * 40}
     with pytest.raises(Conflict, match='base changed'):
+        decide(world, t, args)
+
+
+def test_manual_decision_accepts_exact_pinned_baseline_cache_support(world):
+    t, _, _, args = inconclusive(world, cache_receipts=True)
+    decided = decide(world, t, args)
+    assert decided.phase == 'uat'
+
+
+def test_unreferenced_cache_report_is_not_authoritative_evidence(world):
+    t, _, _, args = inconclusive(world, cache_receipts=True, reference_cache=False)
+    with pytest.raises(Invalid, match='exact pinned baseline cache'):
         decide(world, t, args)

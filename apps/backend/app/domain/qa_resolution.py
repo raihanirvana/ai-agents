@@ -75,18 +75,19 @@ def qualify(s, store, candidate, verification_id, diagnosis_id, *, historical=Fa
     suite = QaPlan.model_validate(evidence.document(s, store, target['suite_artifact_id']))
     if suite.digest != v.suite_digest or suite.digest != target['runner_manifest_digest']:
         raise Conflict('QA suite differs from the immutable target')
-    reports = []
+    reports, support = [], []
     for aid in v.evidence_artifact_ids:
         row = evidence.artifact(s, store, candidate.project_id, aid)
-        if row.meta.get('producer') != 'verification':
-            raise Invalid('Only verification service evidence can qualify for a QA decision')
-        if row.kind == 'report':
+        support.append(row)
+        # Cached baseline receipts are supporting evidence, never runner authority.
+        if row.kind == 'report' and row.meta.get('producer') == 'verification':
             doc = evidence.document(s, store, aid)
             if doc.get('invocation_id') == v.evidence_id and isinstance(doc.get('report'), dict):
                 reports.append(doc)
     if len(reports) != 1:
         raise Invalid('The authoritative acceptance report is unavailable or ambiguous')
     proof, report = reports[0], reports[0]['report']
+    evidence.verification_support(s, store, support, proof)
     commands = v.results.get('commands')
     if (not isinstance(commands, list) or len(commands) != 1 or
             commands[0].get('argv') != ['isolated-browser-runner', v.evidence_id] or

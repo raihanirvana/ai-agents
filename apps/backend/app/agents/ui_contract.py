@@ -79,6 +79,10 @@ class UiContract(BaseModel):
             root = 'testid=' + control.testid
             result.update((root, '[data-testid=' + json.dumps(control.testid) + ']'))
             prefix = ('testid=' + control.scope_testid + ' >> ') if control.scope_testid else ''
+            # Match the declared parent/child testid pair, as the runner already does.
+            # Requiring a text filter here falsely reports an existing child as missing.
+            if control.scope_testid:
+                result.add(prefix + root)
             if control.role:
                 role = 'role=' + control.role
                 if control.name is not None:
