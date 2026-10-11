@@ -22,17 +22,46 @@ from .workspace import FencedWorkspace, unpack_tree, cleanup_workspace
 from .files import allocate_directory, cleanup_directory
 
 
-def merge_inherited_contract(contract, inherited):
-    """Supervisor merge: accepted upstream controls verbatim, then TL's new controls.
+WORDING_FIELDS = ('name', 'label', 'text')
 
-    Returns (merged UiContract, testids TL tried to redefine). Never flattens scopes."""
-    from app.agents.ui_contract import UiContract
-    upstream = {c['testid']: c for c in inherited}
+
+def merge_inherited_contract(contract, inherited, criteria_texts=()):
+    """Supervisor merge of accepted controls into TL's contract for this ticket.
+
+    Only inherited controls TL references (plus their scope ancestors and ancestors
+    of TL's new controls) are kept, so contracts stay small as a project grows. Their
+    accepted structure (role, scope_testid, dynamic_text) is restored verbatim; a
+    name/label/text may change only when the new wording appears in this ticket's UAC.
+    Returns (merged UiContract, testids whose TL redefinition was not accepted)."""
+    from app.agents.ui_contract import UiContract, UiControl
+    upstream = {c['testid']: UiControl.model_validate(c).model_dump() for c in inherited}
     own = {c['testid']: c for c in (control.model_dump() for control in contract.controls)}
-    replaced = sorted(k for k, c in own.items() if k in upstream and c != upstream[k])
-    controls = [*inherited, *(c for k, c in own.items() if k not in upstream)]
+    texts = [text for text in criteria_texts if isinstance(text, str)]
+    wanted = set(k for k in own if k in upstream)
+    for control in own.values():  # ancestors of every control the ticket uses
+        parent = control.get('scope_testid')
+        if control['testid'] in upstream:
+            parent = upstream[control['testid']].get('scope_testid')
+        while parent in upstream and parent not in wanted:
+            wanted.add(parent)
+            parent = upstream[parent].get('scope_testid')
+    rejected, kept = [], []
+    for testid, accepted in upstream.items():
+        if testid not in wanted:
+            continue
+        mine = own.get(testid)
+        merged = dict(accepted)
+        if mine is not None and mine != accepted:
+            changed = [f for f in mine if mine.get(f) != accepted.get(f)]
+            if (all(f in WORDING_FIELDS for f in changed) and
+                    all(mine[f] and any(mine[f] in text for text in texts) for f in changed)):
+                merged.update({f: mine[f] for f in changed})  # wording required by this ticket's UAC
+            else:
+                rejected.append(testid)
+        kept.append(merged)
+    controls = [*kept, *(c for k, c in own.items() if k not in upstream)]
     try:
-        return UiContract.model_validate({**contract.model_dump(), 'controls': controls}), replaced
+        return UiContract.model_validate({**contract.model_dump(), 'controls': controls}), sorted(rejected)
     except ValueError as exc:
         raise InvalidOutput(['ui_contract cannot be merged with inherited accepted controls: '
                              + str(exc)[:400]]) from exc
@@ -161,8 +190,11 @@ class PipelineRuntime:
         previous_contract = self.workspace.ui_contract(identity) if amendment else None
         # Accepted upstream controls are supervisor-owned; TL can only add to them.
         inherited = [] if previous_contract is not None else self._inherited_ui_controls(identity)
+        with self.db.read() as s:
+            criteria_texts = [c.get('text', '') for c in s.query(TicketVersion).filter_by(
+                ticket_id=identity['ticket_id'], version=identity['scope_version']).one().uac]
         def merged_contract(contract):
-            return merge_inherited_contract(contract, inherited)
+            return merge_inherited_contract(contract, inherited, criteria_texts)
         if amendment and (previous_contract is None or previous_contract.revision != amendment['revision']):
             raise InvalidOutput(['Contract amendment refers to an obsolete revision; use the current plan.'])
         def plan_rules(output):
@@ -188,9 +220,11 @@ class PipelineRuntime:
                         ' No new control was added.')])
         output, meta, snapshot = self._ask(ctx, identity,
             {'name': 'technical_plan', 'contract_amendment': amendment,
-             **({'inherited_ui_controls': inherited, 'inherited_ui_controls_policy': 'Supervisor keeps these accepted upstream controls exactly '
-                 '(scope_testid, dynamic_text included) and merges your contract into them. Reuse their testids; '
-                 'add only new controls. Do not redefine or flatten them.'} if inherited else {}),
+             **({'inherited_ui_controls': inherited[:300], 'inherited_ui_controls_policy': 'These controls already '
+                 'exist in the accepted app. List the ones this ticket uses by the same testid; omit the rest. The '
+                 'supervisor restores their accepted role/scope_testid/dynamic_text and adds their scope parents. '
+                 'Change a name/label/text only when the new wording is required by this ticket\'s UAC. Add new '
+                 'controls for anything else.'} if inherited else {}),
              'previous_ui_contract': previous_contract.model_dump() if previous_contract else None, 'ticket_id': identity['ticket_id'], 'source_files': files,
              'baseline_ui_source': source, 'baseline_ui_source_unavailable': unavailable,
              'runner_manifest': manifest.to_dict(),
@@ -281,7 +315,8 @@ class PipelineRuntime:
                 'Acceptance assertions must check the outcome or restriction required by approved UAC, '
                 'not an extra assumption or incidental UI state. Every assert_* step sets uac_id and uac_quote, '
                 'an exact substring of that criterion text; every automated criterion is cited at least once. '
-                'Summarize the UAC-to-outcome mapping. '
+                'Summarize the UAC-to-outcome mapping. Inside repeated rows (dynamic_text containers) select one '
+                'row with has_text from the test\'s own input. '
                 'Use declared testid locators for actions. If a required control is missing, call request_contract_amendment with concrete UAC/control details. Otherwise submit one validated QaPlan through propose_tests; this task does not execute or pass QA.',
             'source_files': source_files, 'baseline_ui_source': baseline_ui,
             'ui_contract': ui_contract.model_dump() if ui_contract else None,
@@ -301,7 +336,7 @@ class PipelineRuntime:
             suite = authored.materialize_fixtures()
             suite.check_csv_expectations()
             if ui_contract is not None:
-                ui_contract.check_suite(suite)
+                ui_contract.check_suite(suite, strict_rows=True)
             with self.db.write() as s:
                 ctx.queue.verify_identity(s, current)
                 latest = self.workspace.latest_intent(s, current, 'technical_plan')
@@ -1044,27 +1079,29 @@ class PipelineRuntime:
                   'application repair was not requested.')
 
     def _inherited_ui_controls(self, identity):
-        """Controls pinned by accepted dependency targets, first definition wins on conflict."""
-        from app.persistence.models import Dependency
-        controls, seen = [], {}
+        """Union of UI contracts pinned by every accepted candidate of the project (the UI
+        at the accepted tip). A later acceptance redefines a testid; dangling scopes drop."""
+        controls = {}
         with self.db.read() as s:
-            rows = s.scalars(select(Dependency).where(Dependency.ticket_id == identity['ticket_id'],
-                Dependency.accepted_candidate_id.is_not(None)).order_by(Dependency.created_at, Dependency.id))
-            for dependency in rows:
-                candidate = s.get(Candidate, dependency.accepted_candidate_id)
-                if candidate is None or not candidate.target_artifact_id:
-                    continue
+            ticket = s.get(Ticket, identity['ticket_id'])
+            rows = s.scalars(select(Candidate).where(Candidate.project_id == ticket.project_id,
+                Candidate.ticket_id != ticket.id, Candidate.status == 'accepted',
+                Candidate.target_artifact_id.is_not(None)).order_by(Candidate.updated_at, Candidate.id))
+            for candidate in rows:
                 try:
                     target = json.loads(self.store.read_bytes(s, candidate.target_artifact_id))
                 except Exception:
-                    continue  # Unavailable evidence: nothing to inherit, TL plans normally.
+                    continue  # Unavailable evidence: nothing to inherit from it.
                 for control in (target.get('ui_contract') or {}).get('controls', []):
-                    if control['testid'] not in seen:
-                        seen[control['testid']] = control
-                        controls.append(control)
-        known = set(seen)
-        # Keep scopes intact: a control whose parent was not inherited would dangle.
-        return [c for c in controls if not c.get('scope_testid') or c['scope_testid'] in known]
+                    controls.pop(control['testid'], None)
+                    controls[control['testid']] = control  # Latest acceptance wins, keeps order.
+        changed = True
+        while changed:  # A control whose scope parent is gone would dangle.
+            dangling = [k for k, c in controls.items() if c.get('scope_testid') and c['scope_testid'] not in controls]
+            changed = bool(dangling)
+            for key in dangling:
+                controls.pop(key)
+        return list(controls.values())
 
     @staticmethod
     def _user_retry(ctx):

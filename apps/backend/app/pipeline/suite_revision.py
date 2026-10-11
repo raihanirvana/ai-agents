@@ -46,7 +46,13 @@ def revise_suite(original, proof, proposal, criteria, source, ui_contract=None):
     updated.check_selection_contracts()
     updated.check_csv_expectations()
     if ui_contract:
-        ui_contract.check_suite(updated)
+        # A suite planned under the repeated-row rule must keep satisfying it.
+        try:
+            ui_contract.check_suite(original, strict_rows=True)
+            strict = True
+        except ValueError:
+            strict = False  # Older suites: revision may not be forced to rewrite unrelated steps.
+        ui_contract.check_suite(updated, strict_rows=strict)
     new = {test.id: test for test in updated.tests}
     if set(new) != set(old):
         raise ValueError('revision cannot add/remove/rename mandatory tests')

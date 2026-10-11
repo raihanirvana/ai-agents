@@ -112,7 +112,21 @@ class UiContract(BaseModel):
                             result.update(scope + item for item in local)
         return result
 
-    def check_suite(self, suite):
+    def in_repeated_row(self, testid):
+        """The control is a repeated container (dynamic_text) or lives inside one."""
+        scopes = {c.testid: c.scope_testid for c in self.controls}
+        repeated = {c.testid for c in self.controls if c.dynamic_text}
+        seen = set()
+        while testid and testid not in seen:
+            if testid in repeated:
+                return True
+            seen.add(testid)
+            testid = scopes.get(testid)
+        return False
+
+    def check_suite(self, suite, *, strict_rows=False):
+        """strict_rows (new plans/revisions): every locator into a repeated row must pick one
+        row, for assertions too (except assert_count). Pinned suites keep the action rule only."""
         suite = suite.materialize_fixtures()
         # dynamic_text containers are repeated records (rows/cards) in this vocabulary.
         repeated = {c.testid for c in self.controls if c.dynamic_text}
@@ -135,6 +149,14 @@ class UiContract(BaseModel):
                     raise ValueError(f'test {test.id}, step {index}: locator is outside ui_contract: {selector}. '
                                      'Use a declared exact role/name, associated label, text or testid; '
                                      'dynamic text must come from original fill/select input within a declared container.')
+                if strict_rows and step.action != 'assert_count' and base == selector:
+                    first = base.split(' >> ', 1)[0]
+                    narrowed = ' >> has_text=' in base or ' >> text=' in base
+                    if first.startswith('testid=') and self.in_repeated_row(first[7:]) and not narrowed:
+                        raise ValueError(f'test {test.id}, step {index}: {selector} can match every repeated row. '
+                            'Pick one row with has_text from this test\'s original input (the declared container, '
+                            'then >> has_text="<original input>" >> the child testid) or a bounded nth=; '
+                            'assert_count may address all rows.')
                 if ('action_locators' in self.model_fields_set and not step.action.startswith('assert_')
                         and base == selector):
                     parent = base.split(' >> ', 1)[0] if ' >> ' in base else None

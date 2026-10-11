@@ -183,3 +183,30 @@ def test_panel_offers_one_more_revision_only_for_a_failed_test_contract_run(worl
               result={'failure_kind': 'infrastructure'})
     with world.db.read() as s:
         assert 'revision_retry' not in available(s, world.store, world.ticket(t.id))
+
+
+def test_inherited_ui_controls_are_the_union_of_accepted_tickets(world, monkeypatch):
+    """Real accept path (review/QA/UAT/integration) with synthetic receipts; no model."""
+    from app.agents.ui_contract import UiContract
+    from app.pipeline.runtime import PipelineRuntime
+    row = {'testid': 'book-item', 'role': 'listitem', 'purpose': 'row', 'dynamic_text': True}
+    borrow = {'testid': 'borrow-name-input', 'label': 'Nama peminjam', 'purpose': 'borrower', 'scope_testid': 'book-item'}
+    contracts = iter([[row, borrow], [row, {**borrow, 'label': 'Nama anggota'},
+                                       {'testid': 'late', 'role': 'button', 'name': 'Late', 'purpose': 'x'}]])
+    original = type(world).target
+    def target_with_contract(self, t, c, **override):
+        controls = next(contracts)
+        return original(self, t, c, ui_contract=UiContract.model_validate({'controls': controls}).model_dump(), **override)
+    monkeypatch.setattr(type(world), 'target', target_with_contract)
+    first, _ = world.accepted(world.approve(world.new()))
+    # The third ticket does not depend on the second; the second changed the same page later.
+    second, _ = world.accepted(world.approve(world.new({**SCOPE, 'title': 'Anggota'})))
+    third = world.approve(world.new({**SCOPE, 'title': 'Kembalikan'}))
+    rt = object.__new__(PipelineRuntime)
+    rt.db, rt.store = world.db, world.store
+    controls = {c['testid']: c for c in rt._inherited_ui_controls({'ticket_id': third.id})}
+    assert set(controls) == {'book-item', 'borrow-name-input', 'late'}
+    assert controls['borrow-name-input']['label'] == 'Nama anggota'  # latest acceptance wins
+    assert controls['borrow-name-input']['scope_testid'] == 'book-item'
+    own = {c['testid'] for c in rt._inherited_ui_controls({'ticket_id': second.id})}
+    assert own == {'book-item', 'borrow-name-input'}  # a ticket never inherits from itself

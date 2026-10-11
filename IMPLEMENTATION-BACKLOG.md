@@ -51,6 +51,13 @@ Kontrak review Astra diterapkan pada tiket berikut:
 
 ### Efisiensi planning, pilihan QA dan stabilitas sandbox — 11 Oktober 2026
 
+Perbaikan review cd47ce8 (IN_PROGRESS, belum direview): smoke uac=[] dikecualikan
+dari kutipan UAC (profil manual tidak macet); kontrak tiket hanya memuat kontrol
+warisan yang dipakai + parent scope (batas 96 aman); warisan dari gabungan semua
+kandidat accepted; wording warisan boleh berubah bila tertulis di UAC tiket;
+aturan baris berulang strict untuk plan/revisi baru termasuk assertion.
+Detail: bagian akhir audit library-live-efficiency-2026-10-11.md.
+
 Tindak lanjut review demo perpustakaan (IN_PROGRESS, belum direview): model QA
 lokal → DeepSeek V4.1 Flash; satu revisi suite otomatis lalu panel keputusan
 user (retry eksplisit membuka satu revisi lagi, maks 3); aksi baris berulang

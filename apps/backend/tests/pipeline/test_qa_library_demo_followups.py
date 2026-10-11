@@ -89,25 +89,89 @@ def test_supervisor_keeps_inherited_scoped_controls_and_adds_tl_controls():
 
 def test_merge_that_breaks_the_contract_goes_back_to_tl():
     inherited = [c.model_dump() for c in contract(ROW).controls]
-    many = contract(*({'testid': f'c{i}', 'role': 'button', 'name': f'C{i}', 'purpose': 'x'} for i in range(96)))
+    # 96 TL controls, one scoped to the inherited row: the restored scope parent makes 97.
+    tl = UiContract.model_construct(revision=1, controls=[
+        *(UiContract.model_validate({'controls': [{'testid': f'c{i}', 'role': 'button', 'name': f'C{i}',
+                                                   'purpose': 'x'}]}).controls[0] for i in range(95)),
+        *contract(ROW, {'testid': 'extra', 'role': 'button', 'name': 'Extra', 'purpose': 'x',
+                        'scope_testid': 'book-item'}).controls])
     with pytest.raises(InvalidOutput, match='merged'):
-        merge_inherited_contract(many, inherited)
+        merge_inherited_contract(tl, inherited)
 
 
-def test_inherited_controls_come_from_accepted_dependency_targets(db, store):
-    with db.write() as s:
-        p = f.project(s)
-        upstream, ticket = f.ticket(s, p), f.ticket(s, p, number=2)
-        target = store.put_json(s, project_id=p.id, kind='target_manifest', name='target.json',
-            document={'ui_contract': contract(ROW, BORROW).model_dump()})
-        cand = f.candidate(s, p, upstream, target_artifact_id=target.id, target_digest=target.checksum)
-        from app.persistence.models import Dependency
-        s.add(Dependency(ticket_id=ticket.id, depends_on_ticket_id=upstream.id, state='satisfied',
-                         accepted_scope_version=upstream.current_version, accepted_candidate_id=cand.id,
-                         integration_sha='c' * 40))
-    rt = object.__new__(PipelineRuntime)
-    rt.db, rt.store = db, store
-    controls = rt._inherited_ui_controls({'ticket_id': ticket.id})
-    assert [c['testid'] for c in controls] == ['book-item', 'borrow-name-input']
-    assert controls[1]['scope_testid'] == 'book-item'
-    assert rt._inherited_ui_controls({'ticket_id': upstream.id}) == []
+def test_only_referenced_inherited_controls_and_their_scopes_are_kept():
+    # A large accepted app no longer exceeds the 96-control contract cap per ticket.
+    inherited = [*(c.model_dump() for c in contract(ROW, BORROW).controls),
+                 *({'testid': f'old{i}', 'role': 'button', 'name': f'Old {i}', 'purpose': 'x'} for i in range(150))]
+    tl = contract({'testid': 'borrow-name-input', 'label': 'Nama peminjam', 'purpose': 'borrower'},
+                  {'testid': 'old3', 'role': 'button', 'name': 'Old 3', 'purpose': 'x'})
+    merged, rejected = merge_inherited_contract(tl, inherited)
+    assert [c.testid for c in merged.controls] == ['book-item', 'borrow-name-input', 'old3']
+    assert merged.controls[1].scope_testid == 'book-item' and rejected == ['borrow-name-input']
+
+
+def test_inherited_wording_changes_only_when_this_ticket_uac_requires_it():
+    button = {'testid': 'borrow', 'role': 'button', 'name': 'Pinjam', 'purpose': 'borrow', 'scope_testid': 'book-item'}
+    inherited = [c.model_dump() for c in contract(ROW, button).controls]
+    renamed = contract(ROW, {**button, 'name': 'Pinjamkan'})
+    texts = ['Tombol Pinjamkan mencatat peminjam pada baris buku']
+    merged, rejected = merge_inherited_contract(renamed, inherited, texts)
+    assert merged.controls[1].name == 'Pinjamkan' and rejected == []
+    merged, rejected = merge_inherited_contract(renamed, inherited, ['Status buku tersedia'])
+    assert merged.controls[1].name == 'Pinjam' and rejected == ['borrow']
+    # Structure never changes through wording: flattening is still refused.
+    merged, rejected = merge_inherited_contract(contract(ROW, {**button, 'name': 'Pinjamkan', 'scope_testid': None}),
+                                                inherited, texts)
+    assert merged.controls[1].scope_testid == 'book-item' and merged.controls[1].name == 'Pinjam'
+
+
+SMOKE = {'id': 'smoke-open', 'uac': [], 'purpose': 'smoke', 'steps': [
+    {'action': 'navigate', 'value': '/'}, {'action': 'assert_visible', 'selector': 'testid=app'}]}
+MANUAL = [{**c, 'mode': 'manual'} for c in CRITERIA]
+
+
+def test_manual_profile_smoke_only_suite_is_valid():
+    QaPlan.model_validate({'kind': 'qa_plan', 'summary': 'smoke', 'tests': [SMOKE]}).check_uac_quotes(MANUAL)
+    with_feature = QaPlan.model_validate({'kind': 'qa_plan', 'summary': 's', 'tests': [
+        SMOKE, plan(STATUS).tests[0].model_dump()]})
+    with_feature.check_uac_quotes(CRITERIA)
+
+
+@pytest.mark.parametrize('step', [
+    {'action': 'assert_enabled', 'selector': 'testid=borrow'},
+    {'action': 'assert_visible', 'selector': 'testid=app', 'uac_id': 'UAC-4', 'uac_quote': 'status buku kembali'}])
+def test_smoke_cannot_carry_requirements(step):
+    smoke = {**SMOKE, 'steps': [SMOKE['steps'][0], step]}
+    with pytest.raises(ValueError):
+        QaPlan.model_validate({'kind': 'qa_plan', 'summary': 's', 'tests': [smoke]}).check_uac_quotes(MANUAL)
+
+
+STATUS_CONTROL = {'testid': 'book-status', 'role': 'status', 'purpose': 'availability', 'scope_testid': 'book-item'}
+
+
+def rows_suite(*steps):
+    return QaPlan.model_validate({'kind': 'qa_plan', 'summary': 's', 'tests': [{'id': 'borrow', 'uac': ['UAC-4'],
+        'steps': [{'action': 'fill', 'selector': 'testid=title', 'value': 'Laskar Pelangi'}, *steps,
+                  {'action': 'assert_visible', 'selector': 'testid=title'}]}]})
+
+
+@pytest.mark.parametrize('step', [
+    {'action': 'click', 'selector': 'testid=book-item'},                     # action on the bare row
+    {'action': 'assert_text', 'selector': 'testid=book-status', 'value': 'Tersedia'},   # unscoped child
+    {'action': 'assert_text', 'selector': 'testid=book-item >> testid=book-status', 'value': 'Tersedia'}])
+def test_strict_rows_reject_every_ambiguous_row_locator(step):
+    rows = UiContract.model_validate({'action_locators': 'testid', 'controls': [
+        {'testid': 'title', 'label': 'Judul', 'purpose': 'title'}, ROW, STATUS_CONTROL]})
+    with pytest.raises(ValueError, match='repeated row'):
+        rows.check_suite(rows_suite(step), strict_rows=True)
+    rows.check_suite(rows_suite({'action': 'assert_visible', 'selector': 'testid=title'}), strict_rows=False)
+
+
+def test_strict_rows_accept_one_selected_row_and_counts():
+    rows = UiContract.model_validate({'action_locators': 'testid', 'controls': [
+        {'testid': 'title', 'label': 'Judul', 'purpose': 'title'}, ROW, STATUS_CONTROL]})
+    rows.check_suite(rows_suite(
+        {'action': 'assert_text', 'selector': 'testid=book-item >> has_text="Laskar Pelangi" >> testid=book-status',
+         'value': 'Tersedia'},
+        {'action': 'assert_count', 'selector': 'testid=book-item', 'value': 1},
+        {'action': 'assert_visible', 'selector': 'testid=book-item >> nth=0'}), strict_rows=True)

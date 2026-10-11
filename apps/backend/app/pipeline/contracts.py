@@ -257,11 +257,19 @@ class QaPlan(Contract):
         texts = {c['id']: c['text'] for c in criteria}
         automated = {c['id'] for c in criteria if c.get('mode', 'automated') == 'automated'}
         cited = set()
+        smoke_assertions = ('assert_visible', 'assert_url', 'assert_text', 'assert_contains_text')
         for test in self.tests:
+            # Smoke (uac=[]) proves the app opens; it cites nothing and cannot carry extra requirements.
+            smoke = test.purpose == 'smoke' and not test.uac
             for index, step in enumerate(test.steps):
                 if not step.action.startswith('assert_'):
                     continue
                 where = f'test {test.id}, step {index}'
+                if smoke:
+                    if step.action not in smoke_assertions or step.uac_id is not None:
+                        raise ValueError(f'{where}: smoke tests only check that the app opens '
+                            f'({", ".join(smoke_assertions)}) without uac_id; requirements belong to UAC tests.')
+                    continue
                 if step.uac_id is None:
                     raise ValueError(f'{where}: {step.action} needs uac_id and uac_quote citing the approved '
                                      'criterion it proves; an assertion no criterion requires does not belong in the suite.')

@@ -415,3 +415,16 @@ retry, keputusan user) sebelum menilai apakah profil manual sebaiknya default.
 Verifikasi: `tests/pipeline tests/domain tests/agents tests/workers tests/persistence`
 762 passed (termasuk 2 test coverage repair yang gagal di HEAD 6183c1d);
 `tsc --noEmit` web lulus. tests/http tidak dijalankan (venv tanpa httpx2).
+
+## Perbaikan review cd47ce8 — kutipan smoke, batas kontrak, baris berulang
+
+Status IN_PROGRESS / NOT_REVIEWED; belum commit/push/restart/demo ulang.
+
+| Temuan | Perubahan | Bukti |
+| --- | --- | --- |
+| 🔴 Smoke tidak lolos kutipan UAC (profil manual macet) | Test `purpose: smoke` dengan `uac: []` dikecualikan dari kutipan; hanya boleh assert_visible/assert_url/assert_text/assert_contains_text dan tanpa uac_id, sehingga tidak bisa membawa syarat tambahan. | `test_manual_profile_smoke_only_suite_is_valid`, `test_smoke_cannot_carry_requirements` (2) |
+| 🟡 Batas 96 kontrol karena warisan menumpuk | Kontrak tiket hanya memuat kontrol warisan yang disebut TL, ditambah parent scope-nya; kontrol warisan lain tetap ada di aplikasi tetapi tidak dikirim ulang. Konteks TL memuat maks 300 kontrol warisan. | `test_only_referenced_inherited_controls_and_their_scopes_are_kept` (152 kontrol warisan) |
+| Warisan hanya dependency langsung | Warisan = gabungan kontrak semua kandidat accepted proyek (kecuali tiket sendiri), urut updated_at; penerimaan terakhir menimpa testid yang sama; kontrol dengan scope menggantung dibuang. | `test_inherited_ui_controls_are_the_union_of_accepted_tickets` (jalur accept nyata) |
+| Kontrol warisan tidak bisa diubah sama sekali | name/label/text warisan boleh berubah bila kata baru muncul di teks UAC tiket ini; role/scope/dynamic_text tetap dari warisan. | `test_inherited_wording_changes_only_when_this_ticket_uac_requires_it` |
+| Celah baris berulang | `check_suite(strict_rows=True)` untuk plan baru dan revisi suite yang sudah memenuhi aturan: setiap locator yang diawali kontainer berulang atau kontrol di dalamnya wajib has_text/text dari input asli atau nth=, termasuk assertion; assert_count dikecualikan. Suite yang sudah dipin pada target aktif tidak diperketat saat submit. | `test_strict_rows_reject_every_ambiguous_row_locator` (3), `test_strict_rows_accept_one_selected_row_and_counts` |
+| Kutipan generik | Belum diperketat (tidak mendesak); tetap keterbatasan. | — |
